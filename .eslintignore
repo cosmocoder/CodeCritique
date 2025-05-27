@@ -1,0 +1,17 @@
+# Ignore markdown files
+*.md
+
+# Ignore documentation directories
+docs/
+
+# Ignore build outputs
+dist/
+build/
+*.d.ts
+
+# Ignore configuration files that don't need linting
+.prettierrc
+.editorconfig
+
+# Ignore shell scripts
+*.sh
