@@ -304,6 +304,7 @@ async function ensureTablesExist(db) {
       new Field('type', new Utf8(), false),
       new Field('name', new Utf8(), false),
       new Field('path', new Utf8(), false),
+      new Field('project_path', new Utf8(), false), // Add project path for proper isolation
       new Field('language', new Utf8(), true),
       new Field('content_hash', new Utf8(), false),
       new Field('last_modified', new Utf8(), false), // Add modification time field
@@ -316,6 +317,7 @@ async function ensureTablesExist(db) {
       new Field('id', new Utf8(), false),
       new Field('content', new Utf8(), false),
       new Field('original_document_path', new Utf8(), false),
+      new Field('project_path', new Utf8(), false), // Add project path for proper isolation
       new Field('heading_text', new Utf8(), true),
       new Field('document_title', new Utf8(), true),
       new Field('language', new Utf8(), true),
@@ -334,6 +336,24 @@ async function ensureTablesExist(db) {
       console.log(chalk.green(`Created ${FILE_EMBEDDINGS_TABLE} table.`));
     } else {
       fileTable = await db.openTable(FILE_EMBEDDINGS_TABLE);
+
+      // Check if schema needs migration (missing project_path field)
+      try {
+        const currentFileSchema = await fileTable.schema;
+        if (currentFileSchema && currentFileSchema.fields) {
+          const hasProjectPath = currentFileSchema.fields.some((field) => field.name === 'project_path');
+
+          if (!hasProjectPath) {
+            console.log(chalk.yellow(`Table ${FILE_EMBEDDINGS_TABLE} has old schema without project_path. Migration needed.`));
+            console.log(chalk.yellow(`Please clear embeddings and regenerate them to use the new schema with project isolation.`));
+            // For now, we'll work with the existing schema
+            // In the future, we could implement automatic migration
+          }
+        }
+      } catch (schemaError) {
+        debug(`Could not check schema for ${FILE_EMBEDDINGS_TABLE}: ${schemaError.message}`);
+        // Continue without schema check
+      }
     }
 
     if (!tableNames.includes(DOCUMENT_CHUNK_TABLE)) {
@@ -342,6 +362,24 @@ async function ensureTablesExist(db) {
       console.log(chalk.green(`Created ${DOCUMENT_CHUNK_TABLE} table.`));
     } else {
       documentChunkTable = await db.openTable(DOCUMENT_CHUNK_TABLE);
+
+      // Check if schema needs migration (missing project_path field)
+      try {
+        const currentDocSchema = await documentChunkTable.schema;
+        if (currentDocSchema && currentDocSchema.fields) {
+          const hasProjectPath = currentDocSchema.fields.some((field) => field.name === 'project_path');
+
+          if (!hasProjectPath) {
+            console.log(chalk.yellow(`Table ${DOCUMENT_CHUNK_TABLE} has old schema without project_path. Migration needed.`));
+            console.log(chalk.yellow(`Please clear embeddings and regenerate them to use the new schema with project isolation.`));
+            // For now, we'll work with the existing schema
+            // In the future, we could implement automatic migration
+          }
+        }
+      } catch (schemaError) {
+        debug(`Could not check schema for ${DOCUMENT_CHUNK_TABLE}: ${schemaError.message}`);
+        // Continue without schema check
+      }
     }
 
     // Create FTS indexes
@@ -453,6 +491,7 @@ export async function generateFileEmbeddings(filePath, content, baseDir = proces
       type: 'file',
       name: path.basename(absoluteFilePath),
       path: relativePath, // Store consistent relative path
+      project_path: path.resolve(baseDir), // Add project path for proper isolation
       language: detectLanguageFromExtension(path.extname(absoluteFilePath)),
       content_hash: contentHash, // Add the missing content_hash field
       last_modified: stats.mtime.toISOString(), // Add modification time
@@ -600,6 +639,7 @@ export const generateDirectoryStructureEmbedding = async (options = {}) => {
       type: 'directory-structure',
       name: `${projectName} Project Structure`,
       path: `${projectName} Project Structure`, // Project-specific path
+      project_path: path.resolve(rootDir), // Add project path for consistency with new schema
       language: 'text',
       content_hash: createHash('md5').update(directoryStructure).digest('hex').substring(0, 8),
       last_modified: new Date().toISOString(), // Use current timestamp for directory structure
@@ -914,6 +954,7 @@ export async function processBatchEmbeddings(filePaths, options = {}) {
             type: 'file',
             name: path.basename(fileData.filePath), // Use basename of absolute path
             path: fileData.relativePath, // Store consistent relative path
+            project_path: resolvedCanonicalBaseDir, // Store the project path for proper isolation
             language: detectLanguageFromExtension(path.extname(fileData.filePath)),
             content_hash: contentHash,
             last_modified: fileData.stats.mtime.toISOString(), // Store modification time
@@ -1180,6 +1221,7 @@ export async function processBatchEmbeddings(filePaths, options = {}) {
             id: chunkId,
             content: chunkData.content,
             original_document_path: chunkData.original_document_path,
+            project_path: resolvedCanonicalBaseDir, // Store the project path for proper isolation
             heading_text: chunkData.heading || '',
             document_title: chunkData.documentTitle, // This is the H1 or filename fallback. Schema field is 'document_title'
             language: chunkData.language || 'markdown',
@@ -1467,6 +1509,27 @@ export const findSimilarCode = async (queryText, options = {}) => {
       conditions.push("type != 'directory-structure'");
     }
 
+    // Resolve project path once for use in multiple places
+    const resolvedProjectPath = path.resolve(projectPath);
+
+    // Add project path filtering if the field exists in the schema
+    // Check if the table has project_path field
+    try {
+      const tableSchema = await table.schema;
+      if (tableSchema && tableSchema.fields) {
+        const hasProjectPathField = tableSchema.fields.some((field) => field.name === 'project_path');
+
+        if (hasProjectPathField) {
+          // Use exact match for project path
+          conditions.push(`project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`);
+          debug(`Filtering by project_path: ${resolvedProjectPath}`);
+        }
+      }
+    } catch (schemaError) {
+      debug(`Could not check schema for project_path field: ${schemaError.message}`);
+      // Continue without project_path filtering in query
+    }
+
     if (conditions.length > 0) {
       query = query.where(conditions.join(' AND '));
     }
@@ -1476,15 +1539,41 @@ export const findSimilarCode = async (queryText, options = {}) => {
     console.log(chalk.green(`Native hybrid search returned ${results.length} results`));
 
     // Filter results to only include files from the current project
-    const resolvedProjectPath = path.resolve(projectPath);
     const projectFilteredResults = results.filter((result) => {
+      // Use project_path field if available (new schema)
+      if (result.project_path) {
+        return result.project_path === resolvedProjectPath;
+      }
+
+      // Fallback for old embeddings without project_path field
       if (!result.path && !result.original_document_path) return false;
 
       const filePath = result.original_document_path || result.path;
       try {
         // Check if this result belongs to the current project
+        // First try as absolute path
+        if (path.isAbsolute(filePath)) {
+          return filePath.startsWith(resolvedProjectPath);
+        }
+
+        // For relative paths, check if the file actually exists in the project
         const absolutePath = path.resolve(resolvedProjectPath, filePath);
-        return absolutePath.startsWith(resolvedProjectPath);
+
+        // Verify the path is within project bounds AND the file exists
+        if (absolutePath.startsWith(resolvedProjectPath)) {
+          // For better filtering, check if file exists
+          // This helps avoid false positives from other projects with similar structure
+          try {
+            fs.accessSync(absolutePath, fs.constants.F_OK);
+            return true;
+          } catch {
+            // File doesn't exist in this project, likely from another project
+            debug(`Filtering out non-existent file: ${filePath}`);
+            return false;
+          }
+        }
+
+        return false;
       } catch (error) {
         debug(`Error filtering result for project: ${error.message}`);
         return false;
@@ -1537,7 +1626,7 @@ export const findSimilarCode = async (queryText, options = {}) => {
       const WEIGHT_H1_CHUNK_RERANK = 0.15;
       const HEAVY_BOOST_SAME_AREA = 0.4;
       const MODERATE_BOOST_TECH_MATCH = 0.2;
-      const HEAVY_PENALTY_AREA_MISMATCH = -0.5;
+      const HEAVY_PENALTY_AREA_MISMATCH = -0.1; // Reduced from -0.5 to accommodate automatic classifier differences
       const PENALTY_GENERIC_DOC_LOW_CONTEXT_MATCH = -0.1;
 
       // Calculate query embedding once and cache it
@@ -1559,7 +1648,7 @@ export const findSimilarCode = async (queryText, options = {}) => {
           // Get or calculate document context
           let chunkParentDocContext = documentContextCache.get(docPath);
           if (!chunkParentDocContext) {
-            chunkParentDocContext = inferContextFromDocumentContent(
+            chunkParentDocContext = await inferContextFromDocumentContent(
               docPath,
               docH1,
               [result],

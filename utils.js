@@ -8,6 +8,7 @@
 
 import { execSync } from 'child_process';
 import { minimatch } from 'minimatch';
+import { openClassifier } from './zero-shot-classifier-open.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -873,7 +874,7 @@ function inferContextFromCodeContent(codeContent, language) {
 }
 
 // Full, corrected, and enhanced inferContextFromDocumentContent:
-function inferContextFromDocumentContent(docPath, h1Content, chunksSample = [], languageOfCodeSnippet = 'typescript') {
+async function inferContextFromDocumentContent(docPath, h1Content, chunksSample = [], languageOfCodeSnippet = 'typescript') {
   const context = {
     area: 'Unknown',
     keywords: [],
@@ -920,406 +921,232 @@ function inferContextFromDocumentContent(docPath, h1Content, chunksSample = [], 
     }
   }
 
-  // --- 2. Dominant Technology Detection (Score-based) ---
-  const techScores = {
-    React: 0,
-    Angular: 0,
-    Vue: 0,
-    'Node.js': 0,
-    Express: 0,
-    NestJS: 0,
-    Python: 0,
-    Django: 0,
-    Flask: 0,
-    FastAPI: 0,
-    Java: 0,
-    Spring: 0,
-    CSharp: 0,
-    '.NET': 0,
-    Ruby: 0,
-    Rails: 0,
-    PHP: 0,
-    Laravel: 0,
-    Go: 0,
-    GraphQL: 0,
-    Apollo: 0,
-    Docker: 0,
-    Kubernetes: 0,
-  };
+  try {
+    // Initialize classifier if needed
+    await openClassifier.initialize();
 
-  // Tech keywords and regexes - Stronger signals get higher scores
-  if (
-    fullTextForAnalysis.match(
-      /react(\s|-)?dom|usestate\(|useeffect\(|styled-components|@emotion|next\.js|gatsby|\.jsx|\.tsx|react component|functional component/i
-    )
-  )
-    techScores['React'] += 2.5;
-  if (fullTextForAnalysis.match(/@angular\/core|ngmodule|ngoninit|rxjs|ngrx|angular component/i)) techScores['Angular'] += 2.5;
-  if (fullTextForAnalysis.match(/vue\.js|vuex|nuxt\.js|vuetify|vue component|v-if|v-for/i)) techScores['Vue'] += 2.5;
-  if (
-    fullTextForAnalysis.match(
-      /require\(['"]express['"]\)|app\.listen\(|express\.router|nestjs|@nestjs\/common|fastify|node server|http\.createserver/i
-    )
-  ) {
-    techScores['Node.js'] += 2;
-    techScores['Express'] += fullTextForAnalysis.includes('express') ? 1.5 : 0;
-    techScores['NestJS'] += fullTextForAnalysis.includes('nestjs') ? 1 : 0;
-  }
-  if (fullTextForAnalysis.match(/python manage\.py|django-admin|from django\.|@csrf_exempt|flask app|@app\.route|python api|fastapi/i)) {
-    techScores['Python'] += 2;
-    techScores['Django'] += fullTextForAnalysis.includes('django') ? 1.5 : 0;
-    techScores['Flask'] += fullTextForAnalysis.includes('flask') ? 1.5 : 0;
-    techScores['FastAPI'] += fullTextForAnalysis.includes('fastapi') ? 1 : 0;
-  }
-  if (fullTextForAnalysis.match(/java\.lang|spring boot|@springapplication|org\.springframework|maven|gradle build|java api|jakarta ee/i)) {
-    techScores['Java'] += 2;
-    techScores['Spring'] += fullTextForAnalysis.includes('spring') ? 1.5 : 0;
-  }
-  if (
-    fullTextForAnalysis.match(/csharp|system\.linq|asp\.net core|\.net framework|namespace\s+\w+/i) &&
-    !fullTextForAnalysis.includes('java')
-  ) {
-    techScores['CSharp'] += 2;
-    techScores['.NET'] += 1;
-  }
-  if (
-    fullTextForAnalysis.match(
-      /graphql\b|apollo-server|apollo-client|resolver function|mutation type|query type|sdl|schema definition language|dataloader/i
-    )
-  ) {
-    techScores['GraphQL'] += 2;
-    techScores['Apollo'] += fullTextForAnalysis.match(/apollo-server|apollo-client/i) ? 1.5 : 0;
-  }
-  if (fullTextForAnalysis.match(/dockerfile|docker-compose|kubernetes manifest|helm chart|kubectl apply|containerization/i)) {
-    techScores['Docker'] += 1.5;
-    techScores['Kubernetes'] += 1.5;
-  }
-  // Weaker tech terms (lower score or boost if primary signals already present)
-  if (fullTextForAnalysis.includes('react') && techScores['React'] < 2) techScores['React'] += 0.5;
-  if (fullTextForAnalysis.includes('angular') && techScores['Angular'] < 2) techScores['Angular'] += 0.5;
-  if (fullTextForAnalysis.includes('vue') && techScores['Vue'] < 2) techScores['Vue'] += 0.5;
-  if (fullTextForAnalysis.includes('node.js')) techScores['Node.js'] += 0.5; // "node" alone is too generic
-  if (fullTextForAnalysis.includes('python')) techScores['Python'] += 0.5;
-  if (fullTextForAnalysis.includes('java') && !fullTextForAnalysis.includes('javascript')) techScores['Java'] += 0.5;
-  if (fullTextForAnalysis.includes('c#')) techScores['CSharp'] += 0.5;
-  if (fullTextForAnalysis.includes('graphql') && techScores['GraphQL'] < 2) techScores['GraphQL'] += 0.5;
+    // --- 2. Use Open-Ended Classification ---
+    const classification = await openClassifier.classifyDocument(fullTextForAnalysis);
 
-  const DOMINANT_TECH_THRESHOLD = 1.8; // Might need tuning
-  for (const tech in techScores) {
-    if (techScores[tech] >= DOMINANT_TECH_THRESHOLD) {
-      context.dominantTech.push(tech);
+    // Extract technologies directly from the classification
+    context.dominantTech = classification.technologies.filter((t) => t.confidence >= 0.35).map((t) => t.technology);
+
+    // --- 3. Area Inference based on domains and technologies ---
+    let areaScore = {
+      Frontend: 0,
+      Backend: 0,
+      FullStack: 0,
+      Database: 0,
+      DevOps: 0,
+      Testing: 0,
+      Security: 0,
+      Architecture: 0,
+      ToolingInternal: 0,
+      GeneralProjectDoc: 0,
+      Unknown: 0,
+    };
+
+    // Score based on domains
+    classification.domains.forEach((domain) => {
+      const domainLower = domain.domain.toLowerCase();
+      const confidence = domain.confidence;
+
+      if (domainLower.includes('frontend') || domainLower.includes('ui/ux')) {
+        areaScore['Frontend'] += confidence;
+      }
+      if (domainLower.includes('backend') || domainLower.includes('api')) {
+        areaScore['Backend'] += confidence;
+      }
+      if (domainLower.includes('database') || domainLower.includes('data')) {
+        areaScore['Database'] += confidence;
+      }
+      if (domainLower.includes('devops') || domainLower.includes('infrastructure')) {
+        areaScore['DevOps'] += confidence;
+      }
+      if (domainLower.includes('testing') || domainLower.includes('qa')) {
+        areaScore['Testing'] += confidence;
+      }
+      if (domainLower.includes('security')) {
+        areaScore['Security'] += confidence;
+      }
+      if (domainLower.includes('architecture')) {
+        areaScore['Architecture'] += confidence;
+      }
+      if (domainLower.includes('tooling') || domainLower.includes('developer tools')) {
+        areaScore['ToolingInternal'] += confidence;
+      }
+      if (domainLower.includes('general')) {
+        areaScore['GeneralProjectDoc'] += confidence * 0.5;
+      }
+    });
+
+    // Score based on detected technologies
+    context.dominantTech.forEach((tech) => {
+      const techLower = tech.toLowerCase();
+      if (techLower.includes('react') || techLower.includes('vue') || techLower.includes('angular')) {
+        areaScore['Frontend'] += 0.3;
+      }
+      if (techLower.includes('node') || techLower.includes('express') || techLower.includes('django')) {
+        areaScore['Backend'] += 0.3;
+      }
+      if (techLower.includes('postgres') || techLower.includes('mysql') || techLower.includes('mongodb')) {
+        areaScore['Database'] += 0.3;
+      }
+      if (techLower.includes('docker') || techLower.includes('kubernetes') || techLower.includes('terraform')) {
+        areaScore['DevOps'] += 0.3;
+      }
+      if (techLower.includes('jest') || techLower.includes('pytest') || techLower.includes('testing')) {
+        areaScore['Testing'] += 0.3;
+      }
+    });
+
+    // Apply path-based hints as additional scoring
+    if (
+      lowerDocPath.includes('/tools/') ||
+      lowerDocPath.includes('/scripts/') ||
+      lowerDocPath.includes('/cli/') ||
+      lowerH1.includes(' cli') ||
+      lowerH1.includes(' tool')
+    ) {
+      areaScore['ToolingInternal'] += 0.5;
     }
-  }
-  context.dominantTech = [...new Set(context.dominantTech)];
+    if (
+      lowerDocPath.includes('/api/') ||
+      lowerDocPath.includes('/server/') ||
+      lowerDocPath.includes('/db/') ||
+      lowerDocPath.includes('/backend/') ||
+      lowerH1.includes(' api') ||
+      lowerH1.includes(' server') ||
+      lowerH1.includes(' backend')
+    ) {
+      areaScore['Backend'] += 0.5;
+    }
+    if (
+      lowerDocPath.includes('/frontend/') ||
+      lowerDocPath.includes('/ui/') ||
+      lowerDocPath.includes('/components/') ||
+      lowerDocPath.includes('/views/') ||
+      lowerDocPath.includes('/pages/') ||
+      lowerH1.includes(' frontend') ||
+      lowerH1.includes(' user interface')
+    ) {
+      areaScore['Frontend'] += 0.5;
+    }
+    if (
+      lowerDocPath.endsWith('readme.md') ||
+      lowerDocPath.endsWith('runbook.md') ||
+      lowerDocPath.endsWith('contributing.md') ||
+      lowerDocPath.endsWith('changelog.md')
+    ) {
+      areaScore['GeneralProjectDoc'] += 0.5;
+    }
 
-  // --- 3. Area Inference (Content-First, Score-Based, with Path/H1 hints) ---
-  const areaScores = {
-    Frontend: 0,
-    Backend: 0,
-    DevOps: 0,
-    Mobile: 0,
-    DataScience: 0,
-    ToolingInternal: 0,
-    GeneralTechnical: 0,
-    GeneralProjectDoc: 0,
-  };
-  const areaKeywords = {
-    Frontend: {
-      'user interface': 2,
-      'ui/ux': 2,
-      'client-side': 1.5,
-      'browser api': 1,
-      css: 0.5,
-      html: 0.5,
-      'dom manipulation': 1,
-      accessibility: 1.5,
-      'responsive design': 1.5,
-      'frontend performance': 1.5,
-      'component library': 2,
-      'single page application': 1.5,
-      'frontend routing': 1.5,
-      'rendering patterns': 1.5,
-      'web components': 1,
-    },
-    Backend: {
-      'server-side': 2,
-      'api endpoint': 2,
-      'database schema': 1.5,
-      microservice: 1.5,
-      'restful api': 1.5,
-      grpc: 1,
-      'authentication server': 2,
-      'authorization logic': 2,
-      'data persistence': 1.5,
-      'message queue': 1,
-      'system architecture': 1.5,
-      'api gateway': 1.5,
-      'background job': 1,
-      'data processing pipeline': 1.5,
-      'api security': 1.5,
-      resolver: 1,
-      dataloader: 1,
-    },
-    DevOps: {
-      'ci/cd': 2,
-      'continuous integration': 2,
-      'continuous deployment': 2,
-      'infrastructure as code': 1.5,
-      terraform: 1,
-      ansible: 1,
-      jenkins: 0.5,
-      monitoring: 1.5,
-      'logging infrastructure': 1.5,
-      'alerting system': 1.5,
-      'cloud provider': 0.5,
-      aws: 0.5,
-      azure: 0.5,
-      gcp: 0.5,
-      kubernetes: 1.5,
-      docker: 1,
-      'container orchestration': 1.5,
-    },
-    Mobile: {
-      'ios development': 2,
-      'android development': 2,
-      swiftui: 1.5,
-      'kotlin multiplatform': 1.5,
-      'react native': 1.5,
-      'flutter ui': 1.5,
-      'mobile application': 2,
-      'push notification service': 1,
-    },
-    DataScience: {
-      'machine learning model': 2,
-      'data analysis report': 2,
-      'statistical modeling': 1.5,
-      'pandas dataframe': 1,
-      'numpy array': 1,
-      'scikit-learn pipeline': 1,
-      'tensorflow graph': 1,
-      'pytorch tensor': 1,
-      'jupyter notebook analysis': 0.5,
-    },
-    ToolingInternal: {
-      'cli tool': 2,
-      'developer utility': 2,
-      'build script': 1.5,
-      'automation script': 1.5,
-      'linter configuration': 1,
-      'code generator': 1.5,
-      'internal sdk': 2,
-      'testing framework utilities': 1.5,
-      'debug tool': 1,
-      'profiling tool': 1,
-    },
-    GeneralTechnical: {
-      'coding standard': 1.5,
-      'software best practice': 1.5,
-      'style guide document': 1.5,
-      'contribution guidelines': 1,
-      'design pattern explanation': 2,
-      'algorithm design': 1,
-      'data structure theory': 1,
-      'version control strategy': 1,
-      'git workflow guide': 1,
-      'architectural overview': 2,
-      'code quality': 1.5,
-      maintainability: 1.5,
-    },
-    GeneralProjectDoc: {
-      'project overview': 1.5,
-      'readme main': 1,
-      'runbook operations': 1,
-      'setup instructions': 1,
-      'getting started guide': 1,
-      'table of contents': 0.5,
-      'license information': 0.5,
-      'changelog history': 0.5,
-      'team structure': 0.5,
-      'meeting notes': 0.5,
-    },
-  };
+    // Find the area with the highest score
+    let maxScore = 0;
+    let selectedArea = 'Unknown';
+    Object.entries(areaScore).forEach(([area, score]) => {
+      if (score > maxScore) {
+        maxScore = score;
+        selectedArea = area;
+      }
+    });
 
-  for (const area in areaKeywords) {
-    for (const keyword in areaKeywords[area]) {
+    // Set threshold for area selection
+    if (maxScore >= 0.4) {
+      context.area = selectedArea;
+    } else {
+      context.area = 'Unknown';
+    }
+
+    // --- isGeneralPurposeReadmeStyle ---
+    let readmeStylePoints = 0;
+    const readmeKeywords = {
+      'getting started': 2,
+      installation: 2,
+      setup: 2,
+      'how to run': 2,
+      usage: 1,
+      configuration: 1,
+      deployment: 1,
+      troubleshooting: 1,
+      prerequisites: 1,
+      'table of contents': 1,
+      contributing: 0.5,
+      license: 0.5,
+      overview: 1,
+      introduction: 1,
+      purpose: 1,
+      'project structure': 0.5,
+    };
+    for (const keyword in readmeKeywords) {
       if (fullTextForAnalysis.includes(keyword)) {
-        areaScores[area] += areaKeywords[area][keyword];
+        readmeStylePoints += readmeKeywords[keyword];
       }
     }
-  }
-
-  // Boost area scores based on dominantTech
-  if (context.dominantTech.some((tech) => ['React', 'Angular', 'Vue'].includes(tech))) areaScores.Frontend += 3;
-  if (
-    context.dominantTech.some((tech) =>
-      [
-        'Node.js',
-        'Express',
-        'NestJS',
-        'Django',
-        'Flask',
-        'FastAPI',
-        'Spring',
-        '.NET',
-        'Rails',
-        'Laravel',
-        'Go',
-        'GraphQL',
-        'Apollo',
-      ].includes(tech)
-    )
-  )
-    areaScores.Backend += 3;
-  if (context.dominantTech.some((tech) => ['Docker', 'Kubernetes'].includes(tech))) areaScores.DevOps += 2.5;
-  if (context.dominantTech.length > 0 && areaScores.ToolingInternal > 0.5) areaScores.ToolingInternal += 1.5;
-
-  // Path-based hints (additive, can help sway scores)
-  if (
-    lowerDocPath.includes('/tools/') ||
-    lowerDocPath.includes('/scripts/') ||
-    lowerDocPath.includes('/cli/') ||
-    lowerH1.includes(' cli') ||
-    lowerH1.includes(' tool')
-  )
-    areaScores.ToolingInternal += 3;
-  if (
-    lowerDocPath.includes('/api/') ||
-    lowerDocPath.includes('/server/') ||
-    lowerDocPath.includes('/db/') ||
-    lowerDocPath.includes('/backend/') ||
-    lowerH1.includes(' api') ||
-    lowerH1.includes(' server') ||
-    lowerH1.includes(' backend')
-  )
-    areaScores.Backend += 3;
-  if (
-    lowerDocPath.includes('/frontend/') ||
-    lowerDocPath.includes('/ui/') ||
-    lowerDocPath.includes('/components/') ||
-    lowerDocPath.includes('/views/') ||
-    lowerDocPath.includes('/pages/') ||
-    lowerH1.includes(' frontend') ||
-    lowerH1.includes(' user interface')
-  )
-    areaScores.Frontend += 3;
-  if (
-    lowerDocPath.endsWith('readme.md') ||
-    lowerDocPath.endsWith('runbook.md') ||
-    lowerDocPath.endsWith('contributing.md') ||
-    lowerDocPath.endsWith('changelog.md')
-  )
-    areaScores.GeneralProjectDoc += 2;
-  if (lowerH1.includes('error handling') && (areaScores.Backend > 0 || areaScores.Frontend > 0)) {
-    // If error handling and some FE/BE signal, boost that area.
-    if (areaScores.Backend > areaScores.Frontend) areaScores.Backend += 1;
-    else if (areaScores.Frontend > areaScores.Backend) areaScores.Frontend += 1;
-    else {
-      areaScores.GeneralTechnical += 0.5;
-    } // If ambiguous, lean general technical
-  }
-
-  let maxScore = 0;
-  let determinedArea = 'Unknown';
-  const MIN_AREA_CONFIDENCE_SCORE = 3.5; // Increased threshold slightly
-
-  for (const area in areaScores) {
-    if (areaScores[area] > maxScore) {
-      maxScore = areaScores[area];
-      determinedArea = area;
+    const isRootFile = !lowerDocPath.substring(0, lowerDocPath.lastIndexOf('/')).includes('/');
+    if ((isRootFile && lowerDocPath.startsWith('readme') && readmeStylePoints >= 3) || readmeStylePoints >= 5) {
+      context.isGeneralPurposeReadmeStyle = true;
     }
-  }
+    // If classified as a general project doc, it usually has readme style.
+    if (context.area === 'GeneralProjectDoc') {
+      context.isGeneralPurposeReadmeStyle = true;
+    }
+    // Tooling READMEs are often general purpose style.
+    if (context.area === 'ToolingInternal' && lowerDocPath.includes('readme') && readmeStylePoints >= 2) {
+      context.isGeneralPurposeReadmeStyle = true;
+    }
 
-  if (maxScore >= MIN_AREA_CONFIDENCE_SCORE) {
-    context.area = determinedArea;
-  } else if (areaScores.GeneralTechnical >= 2.0) {
-    context.area = 'GeneralTechnical';
-  } else if (areaScores.GeneralProjectDoc >= 1.5) {
-    context.area = 'GeneralProjectDoc';
-  } else {
+    // The open classifier doesn't provide complexity level, so we skip this check
+
+    // --- Extract Keywords ---
+    // Add technologies as keywords
+    context.keywords.push(...context.dominantTech.map((t) => t.toLowerCase()));
+
+    // Extract keywords from H1
+    if (lowerH1) {
+      lowerH1
+        .split(/[^a-z0-9-]+/g)
+        .filter(
+          (word) => word.length > 3 && !['the', 'for', 'and', 'with', 'into', 'about', 'using', 'docs', 'this', 'that'].includes(word)
+        )
+        .slice(0, 5)
+        .forEach((kw) => context.keywords.push(kw));
+    }
+
+    // Add domain-based keywords
+    classification.domains.slice(0, 3).forEach((domain) => {
+      const words = domain.domain.toLowerCase().split(/[\s\-/]+/);
+      words.forEach((word) => {
+        if (word.length > 3 && !context.keywords.includes(word)) {
+          context.keywords.push(word);
+        }
+      });
+    });
+
+    // Remove duplicates and limit
+    context.keywords = [...new Set(context.keywords)].slice(0, 15);
+  } catch (error) {
+    console.error('Error in automatic zero-shot classification:', error);
+
+    // Fallback to basic keyword extraction
     context.area = 'Unknown';
-  }
+    context.dominantTech = [];
 
-  // --- isGeneralPurposeReadmeStyle ---
-  let readmeStylePoints = 0;
-  const readmeKeywords = {
-    'getting started': 2,
-    installation: 2,
-    setup: 2,
-    'how to run': 2,
-    usage: 1,
-    configuration: 1,
-    deployment: 1,
-    troubleshooting: 1,
-    prerequisites: 1,
-    'table of contents': 1,
-    contributing: 0.5,
-    license: 0.5,
-    overview: 1,
-    introduction: 1, // Removed ## from here
-    purpose: 1,
-    'project structure': 0.5,
-  };
-  for (const keyword in readmeKeywords) {
-    if (fullTextForAnalysis.includes(keyword)) {
-      readmeStylePoints += readmeKeywords[keyword];
-    }
-  }
-  const isRootFile = !lowerDocPath.substring(0, lowerDocPath.lastIndexOf('/')).includes('/');
-  if ((isRootFile && lowerDocPath.startsWith('readme') && readmeStylePoints >= 3) || readmeStylePoints >= 5) {
-    context.isGeneralPurposeReadmeStyle = true;
-  }
-  // If classified as a general project doc, it usually has readme style.
-  if (context.area === 'GeneralProjectDoc') {
-    context.isGeneralPurposeReadmeStyle = true;
-  }
-  // Tooling READMEs are often general purpose style.
-  if (context.area === 'Tooling' && lowerDocPath.includes('readme') && readmeStylePoints >= 2) {
-    context.isGeneralPurposeReadmeStyle = true;
-  }
+    // Extract basic keywords from text
+    const words = fullTextForAnalysis.toLowerCase().split(/\s+/);
+    const wordFreq = {};
+    words.forEach((word) => {
+      if (word.length > 4 && !['the', 'and', 'for', 'with', 'this', 'that', 'from', 'into'].includes(word)) {
+        wordFreq[word] = (wordFreq[word] || 0) + 1;
+      }
+    });
 
-  // --- Extract Keywords ---
-  context.keywords.push(...context.dominantTech.map((t) => t.toLowerCase()));
-  if (lowerH1) {
-    lowerH1
-      .split(/[^a-z0-9-]+/g)
-      .filter((word) => word.length > 3 && !['the', 'for', 'and', 'with', 'into', 'about', 'using', 'docs', 'this', 'that'].includes(word))
-      .slice(0, 5)
-      .forEach((kw) => context.keywords.push(kw));
+    // Sort by frequency and take top keywords
+    context.keywords = Object.entries(wordFreq)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 15)
+      .map(([word]) => word);
   }
-  const generalTechKeywordsForExtraction = [
-    'architecture',
-    'pattern',
-    'guideline',
-    'component',
-    'service',
-    'api',
-    'database',
-    'test',
-    'error',
-    'state',
-    'auth',
-    'performance',
-    'security',
-    'style',
-    'translation',
-    'module',
-    'structure',
-    'design',
-    'principle',
-    'best practice',
-    'convention',
-    'log',
-    'deploy',
-    'build',
-    'config',
-    'resolver',
-    'dataloader',
-    'schema',
-  ];
-  generalTechKeywordsForExtraction.forEach((kw) => {
-    if (fullTextForAnalysis.includes(kw)) context.keywords.push(kw);
-  });
-  context.keywords = [...new Set(context.keywords)].slice(0, 15);
 
   return context;
 }

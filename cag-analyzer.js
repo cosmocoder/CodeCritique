@@ -7,7 +7,13 @@
  */
 
 import { calculateCosineSimilarity, calculateEmbedding, findSimilarCode } from './embeddings.js';
-import { detectLanguageFromExtension, inferContextFromCodeContent, inferContextFromDocumentContent, shouldProcessFile } from './utils.js';
+import {
+  detectFileType,
+  detectLanguageFromExtension,
+  inferContextFromCodeContent,
+  inferContextFromDocumentContent,
+  shouldProcessFile,
+} from './utils.js';
 import chalk from 'chalk';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -111,6 +117,49 @@ function createGuidelineQueryForLLMRetrieval(codeSnippet, reviewedSnippetContext
   return query;
 }
 
+// --- Helper: createTestGuidelineQueryForLLMRetrieval ---
+function createTestGuidelineQueryForLLMRetrieval(codeSnippet, reviewedSnippetContext, language) {
+  const codeContext = codeSnippet.substring(0, 1500); // Limit snippet length in query
+  let query = 'Retrieve testing documentation, test patterns, and testing best practices. ';
+
+  query += 'Focus on test coverage, test naming conventions, assertion patterns, mocking strategies, and test organization. ';
+
+  if (
+    reviewedSnippetContext.area !== 'Unknown' &&
+    reviewedSnippetContext.area !== 'GeneralJS_TS' &&
+    reviewedSnippetContext.area !== 'General'
+  ) {
+    query += `Specifically looking for ${reviewedSnippetContext.area} testing patterns and practices. `;
+  }
+
+  if (reviewedSnippetContext.dominantTech.length > 0) {
+    query += `Focus on testing frameworks and patterns for: ${reviewedSnippetContext.dominantTech.join(', ')}. `;
+  }
+
+  const testingKeywords = [
+    'test',
+    'spec',
+    'mock',
+    'stub',
+    'assertion',
+    'coverage',
+    'fixture',
+    'beforeEach',
+    'afterEach',
+    'describe',
+    'it',
+    'expect',
+  ];
+  const relevantKeywords = reviewedSnippetContext.keywords.filter((kw) => testingKeywords.some((tk) => kw.toLowerCase().includes(tk)));
+
+  if (relevantKeywords.length > 0) {
+    query += `Consider testing concepts such as: ${relevantKeywords.slice(0, 3).join(', ')}. `;
+  }
+
+  query += `Relevant to the following ${language} test file context: \\n\`\`\`${language}\\n${codeContext}...\\n\`\`\``;
+  return query;
+}
+
 /**
  * Analyze a file using the CAG approach
  *
@@ -134,9 +183,23 @@ async function analyzeFile(filePath, options = {}) {
 
     console.log(chalk.gray(`Using project path for embeddings: ${projectPath}`));
 
+    // Warn if no directory was specified and we're using file's directory as fallback
+    if (!options.projectPath && !options.directory) {
+      console.log(chalk.yellow(`Warning: No --directory specified. Using file's directory as project path.`));
+      console.log(chalk.yellow(`If embeddings were generated for a parent directory, specify it with: --directory <path>`));
+    }
+
     // Read file content
     const content = fs.readFileSync(filePath, 'utf8');
     const language = detectLanguageFromExtension(path.extname(filePath).toLowerCase()); // Get language early for context inference
+
+    // Detect file type to check if it's a test file
+    const fileTypeInfo = detectFileType(filePath, content);
+    const isTestFile = fileTypeInfo.isTest;
+
+    if (isTestFile) {
+      console.log(chalk.blue(`Detected test file: ${filePath}`));
+    }
 
     // --- PHASE 1: UNDERSTAND THE CODE SNIPPET BEING REVIEWED ---
     const reviewedSnippetContext = inferContextFromCodeContent(content, language);
@@ -167,15 +230,17 @@ async function analyzeFile(filePath, options = {}) {
 
     // --- Stage 1 (was PHASE 2): GENERATE CONTEXTUAL QUERY FOR DOCUMENTATION ---
     console.log(chalk.blue('--- Stage 1: Generating Contextual Guideline Query ---'));
-    const guidelineQuery = createGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language);
+    const guidelineQuery = isTestFile
+      ? createTestGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language)
+      : createGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language);
     console.log(
-      chalk.blue('[analyzeFile DEBUG] Using new dynamic guidelineQuery (first 300 chars): '),
+      chalk.blue(`[analyzeFile DEBUG] Using ${isTestFile ? 'test-specific' : 'standard'} guidelineQuery (first 300 chars): `),
       guidelineQuery.substring(0, 300) + '...'
     );
 
     const GUIDELINE_CANDIDATE_LIMIT = 100; // <<< INCREASED from 30, as findSimilarCode will do more contextual ranking
     const MAX_FINAL_GUIDELINES = 5; // This is for LLM context, might be MAX_FINAL_DOCUMENTS later
-    const RELEVANT_CHUNK_THRESHOLD = 0.3; // <<< LOWERED, findSimilarCode's reranking is primary now
+    const RELEVANT_CHUNK_THRESHOLD = 0.1; // <<< LOWERED FURTHER to accommodate automatic classifier differences
 
     // These weights are for document-level scoring AFTER findSimilarCode returns its contextually ranked chunks
     const W_AVG_CHUNK_SIM = 0.2; // Weight for average chunk similarity (less emphasis now)
@@ -189,7 +254,7 @@ async function analyzeFile(filePath, options = {}) {
     // --- Stage 2 (was PHASE 3): RETRIEVE AND CONTEXTUALLY RE-RANK CHUNKS ---
     console.log(chalk.blue('--- Stage 2: Retrieving and Contextually Re-ranking Chunks ---'));
     const guidelineCandidates = await findSimilarCode(guidelineQuery, {
-      similarityThreshold: 0.1, // Keep low, let findSimilarCode's reranking and our doc scoring handle it
+      similarityThreshold: 0.05, // Lowered to ensure we get enough candidates with automatic classifier
       limit: GUIDELINE_CANDIDATE_LIMIT, // Pass the increased limit
       queryFilePath: filePath, // For logging or non-path heuristics if any
       searchStrategy: 'hybrid',
@@ -224,7 +289,7 @@ async function analyzeFile(filePath, options = {}) {
       const docH1 = docChunks[0]?.document_title || path.basename(docPath, path.extname(docPath)); // All chunks from same doc share same document_title
       // Infer context of the *candidate document* using H1 and its chunks
       // Pass language of the code snippet for context, could be refined if doc lang is known
-      const candidateDocFullContext = inferContextFromDocumentContent(docPath, docH1, docChunks, language);
+      const candidateDocFullContext = await inferContextFromDocumentContent(docPath, docH1, docChunks, language);
       debug(`[analyzeFile] Context for Doc ${docPath}:`, candidateDocFullContext);
 
       // Chunks in docChunks already have their contextually re-ranked `finalScore` from findSimilarCode
@@ -264,7 +329,7 @@ async function analyzeFile(filePath, options = {}) {
           );
         } else if (reviewedSnippetContext.area !== 'GeneralJS_TS') {
           // Don't penalize if snippet is general JS/TS
-          docLevelContextMatchScore -= 0.8; // VERY_HEAVY_PENALTY_DOC_AREA_MISMATCH
+          docLevelContextMatchScore -= 0.2; // REDUCED PENALTY - automatic classifier uses different categorization
           debug(
             `[analyzeFile] Doc ${docPath} Area MISMATCH! Snippet: ${reviewedSnippetContext.area}, Doc: ${candidateDocFullContext.area}. Score penalty: -0.8`
           );
@@ -292,9 +357,17 @@ async function analyzeFile(filePath, options = {}) {
       );
 
       let genericDocPenaltyFactor = 1.0; // No penalty by default
-      if (candidateDocFullContext.isGeneralPurposeReadmeStyle && docLevelContextMatchScore < 0.4) {
-        genericDocPenaltyFactor = GENERIC_DOC_PENALTY_FACTOR; // Use the 0.7 factor
-        debug(`[analyzeFile] Doc ${docPath} is generic and low context match, applying penalty factor: ${genericDocPenaltyFactor}`);
+
+      // Check if document matches generic document pattern
+      const isGenericByName = GENERIC_DOC_REGEX.test(docPath);
+
+      // Apply penalty to generic documents
+      if (candidateDocFullContext.isGeneralPurposeReadmeStyle || isGenericByName) {
+        // Always penalize generic docs unless reviewing DevOps code or has very high context match
+        if (reviewedSnippetContext.area !== 'DevOps' && (docLevelContextMatchScore < 0.8 || isGenericByName)) {
+          genericDocPenaltyFactor = GENERIC_DOC_PENALTY_FACTOR; // Use the 0.7 factor
+          debug(`[analyzeFile] Doc ${docPath} is generic document, applying penalty factor: ${genericDocPenaltyFactor}`);
+        }
       }
 
       // Final Document Score
@@ -312,7 +385,7 @@ async function analyzeFile(filePath, options = {}) {
         debug: {
           area: candidateDocFullContext.area,
           tech: candidateDocFullContext.dominantTech.join(', '),
-          isGenericStyle: candidateDocFullContext.isGeneralPurposeReadmeStyle,
+          isGenericStyle: candidateDocFullContext.isGeneralPurposeReadmeStyle || isGenericByName,
           semanticQualityScore: semanticQualityScore.toFixed(4),
           docLevelContextMatchScore: docLevelContextMatchScore.toFixed(4),
           docH1RelevanceToReviewedFile: docH1RelevanceToReviewedFile.toFixed(4),
@@ -343,9 +416,38 @@ async function analyzeFile(filePath, options = {}) {
     console.log(chalk.blue('--- Stage 4: Selecting Final Snippets for LLM ---'));
     const MAX_FINAL_DOCUMENTS = 4;
     const MAX_CHUNKS_PER_DOCUMENT = 1; // <<< Changed to 1 as per discussion to get best chunk from best docs
+    const MIN_DOC_SCORE_FOR_INCLUSION = 0.3; // Minimum score to include a document
     let finalGuidelineSnippets = [];
 
-    for (const doc of scoredDocuments.slice(0, MAX_FINAL_DOCUMENTS)) {
+    // Filter out low-scoring documents and those with area mismatches
+    const relevantDocs = scoredDocuments.filter((doc) => {
+      // Exclude if score is too low
+      if (doc.score < MIN_DOC_SCORE_FOR_INCLUSION) {
+        debug(`[analyzeFile] Excluding doc ${doc.path} - score too low: ${doc.score.toFixed(4)}`);
+        return false;
+      }
+
+      // Exclude if there's a strong area mismatch (unless areas are unknown/general)
+      if (
+        reviewedSnippetContext.area !== 'Unknown' &&
+        doc.debug.area !== 'Unknown' &&
+        doc.debug.area !== 'General' &&
+        reviewedSnippetContext.area !== doc.debug.area
+      ) {
+        // Check if it at least has matching technology
+        const hasTechMatch = reviewedSnippetContext.dominantTech.some((tech) => doc.debug.tech.toLowerCase().includes(tech.toLowerCase()));
+        if (!hasTechMatch) {
+          debug(
+            `[analyzeFile] Excluding doc ${doc.path} - area mismatch without tech match: ${doc.debug.area} vs ${reviewedSnippetContext.area}`
+          );
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    for (const doc of relevantDocs.slice(0, MAX_FINAL_DOCUMENTS)) {
       if (doc.chunks && doc.chunks.length > 0) {
         // Chunks are already sorted by their `similarity` (which is findSimilarCode's finalScore)
         finalGuidelineSnippets.push(doc.chunks[0]);
@@ -355,7 +457,7 @@ async function analyzeFile(filePath, options = {}) {
 
     console.log(
       chalk.green(
-        `Selected ${finalGuidelineSnippets.length} final guideline snippets from ${scoredDocuments.length} scored documents (derived from ${documentChunks.length} initial relevant chunks).`
+        `Selected ${finalGuidelineSnippets.length} final guideline snippets from ${relevantDocs.length} relevant documents (filtered from ${scoredDocuments.length} scored documents, derived from ${documentChunks.length} initial relevant chunks).`
       )
     );
 
@@ -366,7 +468,8 @@ async function analyzeFile(filePath, options = {}) {
     const highSimilarityThreshold = 0.9; // Reverted threshold
 
     // Use file content for finding similar code
-    const codeExampleCandidates = await findSimilarCode(content, {
+    // For test files, we want to find other test files to compare patterns
+    const searchOptions = {
       similarityThreshold: 0.3, // <<< LOWERED: Ensure we don't filter out the expected file
       limit: CODE_EXAMPLE_LIMIT,
       useReranking: false, // <<< DISABLED: Test with no reranking at all
@@ -377,7 +480,12 @@ async function analyzeFile(filePath, options = {}) {
       excludeNonDocs: false,
       searchType: 'code', // Specify that we're searching for code examples
       projectPath: projectPath, // Use the determined project path
-    });
+    };
+
+    // If it's a test file, add a note in the query to prioritize other test files
+    const codeQuery = isTestFile ? `${content}\n// Looking for similar test files and testing patterns` : content;
+
+    const codeExampleCandidates = await findSimilarCode(codeQuery, searchOptions);
 
     // Filter out any documentation files that might have slipped in
     let finalCodeExamples = codeExampleCandidates.filter((result) => !result.isDocumentation);
@@ -481,7 +589,7 @@ async function analyzeFile(filePath, options = {}) {
       // Pass the formatted lists
       formattedCodeExamples,
       formattedGuidelines, // Always pass the formatted guidelines
-      options
+      { ...options, isTestFile } // Pass isTestFile flag in options
     );
 
     // Call LLM for analysis
@@ -598,7 +706,7 @@ async function callLLMForAnalysis(context, options = {}) {
     const { file, codeExamples, guidelineSnippets } = context;
 
     // Prepare the prompt using the dedicated function
-    const prompt = generateAnalysisPrompt(context);
+    const prompt = context.options?.isTestFile ? generateTestFileAnalysisPrompt(context) : generateAnalysisPrompt(context);
 
     // Call LLM with the prompt
     const llmResponse = await sendPromptToLLM(prompt, {
@@ -752,6 +860,125 @@ JSON Output Structure:
     }
   ]
 }
+`;
+}
+
+/**
+ * Generate test file analysis prompt for LLM
+ *
+ * @param {Object} context - Context for LLM
+ * @returns {string} Test file analysis prompt
+ */
+function generateTestFileAnalysisPrompt(context) {
+  const { file, codeExamples, guidelineSnippets } = context;
+
+  // Format code examples
+  const formattedCodeExamples =
+    codeExamples
+      .map((ex) => {
+        const langIdentifier = ex.language || '';
+        return `
+TEST EXAMPLE ${ex.index} (Similarity: ${ex.similarity})
+Path: ${ex.path}
+Language: ${ex.language}
+
+\`\`\`${langIdentifier}
+${ex.content}
+\`\`\`
+`;
+      })
+      .join('\n') || 'No relevant test examples found.';
+
+  // Format guideline snippets
+  const formattedGuidelines =
+    guidelineSnippets
+      .map((ex) => {
+        const langIdentifier = ex.language || 'text';
+        let title = `TESTING GUIDELINE ${ex.index} (Source: ${ex.path}, Similarity: ${ex.similarity})`;
+        if (ex.headingText) {
+          title += `, Heading: "${ex.headingText}"`;
+        }
+
+        return `
+${title}
+
+\`\`\`${langIdentifier}
+${ex.content}
+\`\`\`
+`;
+      })
+      .join('\n') || 'No specific testing guideline snippets found.';
+
+  // Test-specific prompt
+  return `
+You are an expert test code reviewer acting as a senior developer on this specific project.
+Your task is to review the following test file by performing a comprehensive analysis focused on testing best practices and patterns.
+
+TEST FILE TO REVIEW:
+Path: ${file.path}
+Language: ${file.language}
+
+\`\`\`${file.language}
+${file.content}
+\`\`\`
+
+CONTEXT FROM PROJECT:
+
+CONTEXT A: TESTING GUIDELINES AND BEST PRACTICES
+${formattedGuidelines}
+
+CONTEXT B: SIMILAR TEST EXAMPLES FROM PROJECT
+${formattedCodeExamples}
+
+INSTRUCTIONS:
+
+**Perform the following test-specific analysis:**
+
+**STAGE 1: Test Coverage and Completeness**
+1. Analyze if the test file provides adequate coverage for the functionality it's testing.
+2. Identify any missing test cases or edge cases that should be covered.
+3. Check if both positive and negative test scenarios are included.
+
+**STAGE 2: Test Quality and Best Practices**
+1. Evaluate test naming conventions - are test names descriptive and follow project patterns?
+2. Check test organization - are tests properly grouped and structured?
+3. Assess assertion quality - are assertions specific and meaningful?
+4. Review test isolation - does each test run independently without side effects?
+5. Examine setup/teardown patterns - are they used appropriately?
+
+**STAGE 3: Testing Patterns and Conventions (CRITICAL)**
+1. **IMPORTANT**: Compare the test implementation with similar test examples from Context B. Are the same helper functions, utilities, and patterns being used?
+2. **For React/Component tests**: Check if the test uses the project's custom render functions or test utilities shown in other test files. Flag any direct usage of testing library methods that should use project-specific wrappers.
+3. Check for proper use of mocking, stubbing, and test doubles following project patterns.
+4. Verify that test data and fixtures follow project conventions.
+5. Ensure async tests are handled correctly using project patterns.
+6. Look for any test anti-patterns or deviations from established project testing practices.
+
+**STAGE 4: Performance and Maintainability**
+1. Identify any tests that might be slow or resource-intensive.
+2. Check for code duplication that could be refactored using helper functions.
+3. Ensure tests are maintainable and will not break easily with minor code changes.
+
+**STAGE 5: Consolidate and Generate Output**
+1. **CRITICAL**: Prioritize issues where the test deviates from implicit project patterns shown in Context B (similar test examples), especially regarding test utilities and helper functions.
+2. Provide concrete suggestions that align with the project's testing patterns, referencing specific examples from Context B when applicable.
+3. Format the output according to the JSON structure below.
+
+JSON Output Structure:
+{
+  "summary": "Brief summary of the test file review, highlighting coverage completeness, adherence to testing best practices, and any critical issues found.",
+  "issues": [
+    {
+      "type": "bug | improvement | convention | performance | coverage",
+      "severity": "critical | high | medium | low",
+      "description": "Description of the issue, clearly stating the problem with the test implementation or coverage gap.",
+      "lineNumbers": [array of relevant line numbers in the test file],
+      "suggestion": "Concrete suggestion for improving the test, adding missing coverage, or following testing best practices."
+    }
+  ]
+}
+
+Respond **only** with the valid JSON object. Do not include any other text before or after the JSON.
 `;
 }
 
