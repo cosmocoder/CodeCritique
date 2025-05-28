@@ -648,6 +648,9 @@ async function findSupportedFiles(directory, options = {}) {
     '**/*.md',
     '**/*.yml',
     '**/*.yaml',
+    '**/*.kt',
+    '**/*.sh',
+    '**/*.gradle',
     // Add or remove patterns as appropriate for general projects
   ];
 
