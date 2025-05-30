@@ -462,24 +462,23 @@ async function analyzeFile(filePath, options = {}) {
     );
 
     // --- Stage 2 of original plan (Code Example Retrieval) becomes Stage 5 here ---
-    console.log(chalk.blue('--- Stage 5: Retrieving Code Examples ---'));
-    const CODE_EXAMPLE_LIMIT = 60; // Compromise: Capture target file at ~position 52
-    const MAX_FINAL_EXAMPLES = 5; // How many to pass to LLM
+    console.log(chalk.blue('--- Stage 5: Retrieving Code Examples and Implicit Patterns ---'));
+    const CODE_EXAMPLE_LIMIT = 40; // Reduced to make room for utility search
+    const UTILITY_SEARCH_LIMIT = 20; // Additional search for utilities
+    const MAX_FINAL_EXAMPLES = 8; // Increased to include utilities
     const highSimilarityThreshold = 0.9; // Reverted threshold
 
-    // Use file content for finding similar code
-    // For test files, we want to find other test files to compare patterns
+    // First search: Find similar code
     const searchOptions = {
-      similarityThreshold: 0.3, // <<< LOWERED: Ensure we don't filter out the expected file
+      similarityThreshold: 0.3,
       limit: CODE_EXAMPLE_LIMIT,
-      useReranking: false, // <<< DISABLED: Test with no reranking at all
+      useReranking: false,
       queryFilePath: filePath,
-      // Ensure includeProjectStructure is false for this call if not needed
       includeProjectStructure: false,
-      searchStrategy: 'vector_only', // Use pure vector similarity for code
+      searchStrategy: 'vector_only',
       excludeNonDocs: false,
-      searchType: 'code', // Specify that we're searching for code examples
-      projectPath: projectPath, // Use the determined project path
+      searchType: 'code',
+      projectPath: projectPath,
     };
 
     // If it's a test file, add a note in the query to prioritize other test files
@@ -487,15 +486,101 @@ async function analyzeFile(filePath, options = {}) {
 
     const codeExampleCandidates = await findSimilarCode(codeQuery, searchOptions);
 
-    // Filter out any documentation files that might have slipped in
-    let finalCodeExamples = codeExampleCandidates.filter((result) => !result.isDocumentation);
+    // Second search: Find helper utilities and common patterns
+    // Extract function/method calls from the content to find utilities
+    const functionCallPattern = /\b(\w+)\s*\(/g;
+    const functionCalls = [...new Set(content.match(functionCallPattern) || [])];
+    const importPattern = /(?:import|require)\s*(?:\{[^}]*\}|\w+)\s*from\s*['"]([^'"]+)['"]/g;
+    const imports = [...new Set([...content.matchAll(importPattern)].map((m) => m[1]))];
 
-    // Always limit to MAX_FINAL_EXAMPLES to provide more context
-    finalCodeExamples = finalCodeExamples.slice(0, MAX_FINAL_EXAMPLES);
+    // Create a query focused on finding utilities and helpers
+    let utilityQuery = 'Helper functions, utility methods, shared code patterns, and common abstractions used across the project. ';
+    if (functionCalls.length > 0) {
+      utilityQuery += `Functions that might be related to: ${functionCalls.slice(0, 10).join(', ')}. `;
+    }
+    if (imports.length > 0) {
+      utilityQuery += `Modules or utilities from: ${imports.slice(0, 5).join(', ')}. `;
+    }
+    if (isTestFile) {
+      utilityQuery += 'Test utilities, test helpers, custom render functions, test setup utilities. ';
+    }
+
+    console.log(chalk.blue('Searching for project utilities and patterns...'));
+    const utilitySearchOptions = {
+      ...searchOptions,
+      limit: UTILITY_SEARCH_LIMIT,
+      similarityThreshold: 0.25, // Lower threshold for utilities
+    };
+
+    const utilityCandidates = await findSimilarCode(utilityQuery, utilitySearchOptions);
+
+    // Third search: Look for commonly imported helper files based on patterns in similar files
+    console.log(chalk.blue('Analyzing imports from similar files to find common utilities...'));
+    const helperImports = new Set();
+
+    // Analyze imports from the code examples we found
+    for (const example of codeExampleCandidates.slice(0, 10)) {
+      if (example.content) {
+        const exampleImports = [...example.content.matchAll(importPattern)].map((m) => m[1]);
+        exampleImports.forEach((imp) => {
+          // Look for imports that seem like helpers/utilities
+          if (
+            imp.includes('helper') ||
+            imp.includes('util') ||
+            imp.includes('test') ||
+            imp.includes('shared') ||
+            imp.includes('common') ||
+            imp.includes('lib')
+          ) {
+            helperImports.add(imp);
+          }
+        });
+      }
+    }
+
+    // If we found common helper imports, search for those specific files
+    let helperFileCandidates = [];
+    if (helperImports.size > 0) {
+      const helperQuery = `Helper utility files commonly used in the project: ${[...helperImports].join(', ')}`;
+      console.log(chalk.blue(`Searching for specific helper files: ${[...helperImports].slice(0, 3).join(', ')}...`));
+
+      helperFileCandidates = await findSimilarCode(helperQuery, {
+        ...searchOptions,
+        limit: 10,
+        similarityThreshold: 0.2, // Very low threshold to find these files
+      });
+    }
+
+    // Combine and deduplicate results
+    const allCandidates = [...codeExampleCandidates, ...utilityCandidates, ...helperFileCandidates];
+    const uniqueCandidates = [];
+    const seenPaths = new Set();
+
+    // Normalize the file path being reviewed for comparison
+    const normalizedReviewPath = path.resolve(filePath);
+
+    for (const candidate of allCandidates) {
+      // Exclude the file being reviewed and documentation files
+      const normalizedCandidatePath = path.resolve(candidate.path);
+      if (!seenPaths.has(candidate.path) && !candidate.isDocumentation && normalizedCandidatePath !== normalizedReviewPath) {
+        uniqueCandidates.push(candidate);
+        seenPaths.add(candidate.path);
+      }
+    }
+
+    // Sort by relevance and limit
+    uniqueCandidates.sort((a, b) => b.similarity - a.similarity);
+    let finalCodeExamples = uniqueCandidates.slice(0, MAX_FINAL_EXAMPLES);
+
+    // Log if we filtered out the file being reviewed
+    const filteredSelf = allCandidates.some((c) => path.resolve(c.path) === normalizedReviewPath);
+    if (filteredSelf) {
+      console.log(chalk.yellow(`Filtered out the file being reviewed (${filePath}) from code examples.`));
+    }
 
     console.log(
       chalk.green(
-        `Found ${finalCodeExamples.length} final code examples after filtering/limiting ${codeExampleCandidates.length} candidates.`
+        `Found ${finalCodeExamples.length} final code examples (including utilities) from ${codeExampleCandidates.length} similar code + ${utilityCandidates.length} utility candidates.`
       )
     );
 
@@ -514,16 +599,19 @@ async function analyzeFile(filePath, options = {}) {
     let finalCodeExamplesForContext = [];
 
     // First, prepare the potential list of final code examples (filtered and limited)
-    let potentialFinalCodeExamples = codeExampleCandidates.filter((result) => !result.isDocumentation);
+    let potentialFinalCodeExamples = finalCodeExamples; // Use the already processed list that includes utilities
     const topCodeExample = potentialFinalCodeExamples.length > 0 ? potentialFinalCodeExamples[0] : null;
 
+    // REMOVED: High similarity logic that was limiting to only one example
+    // Always use multiple examples to ensure we capture implicit patterns and utilities
+    finalCodeExamplesForContext = potentialFinalCodeExamples;
+
     if (topCodeExample && topCodeExample.similarity >= highSimilarityThreshold) {
-      // High similarity: Use ONLY the top code example, NO guidelines
-      console.log(chalk.blue(`Using ONLY the top code example and NO guidelines due to high similarity.`));
-      finalCodeExamplesForContext = [topCodeExample];
-    } else {
-      // Lower similarity: Use filtered code examples (limited) and filtered guidelines
-      finalCodeExamplesForContext = potentialFinalCodeExamples.slice(0, MAX_FINAL_EXAMPLES);
+      console.log(
+        chalk.blue(
+          `Found high similarity match (${topCodeExample.similarity.toFixed(3)}), but still including other examples for pattern detection.`
+        )
+      );
     }
 
     // Format the lists that will be passed
@@ -829,20 +917,36 @@ INSTRUCTIONS:
 2.  Identify any specific deviations where the reviewed code violates an explicit guideline. Note the guideline source (path or index) for each deviation found.
 3.  Temporarily ignore 'CONTEXT B: SIMILAR CODE EXAMPLES' during this stage.
 
-**STAGE 2: Code Example-Based Review**
-1.  Analyze the 'FILE TO REVIEW' against the patterns and implicit conventions demonstrated in 'CONTEXT B: SIMILAR CODE EXAMPLES'. Focus on aspects like coding style, naming, structure, error handling, styling, etc., *especially if they were NOT covered by explicit guidelines in Stage 1*.
-2.  Identify any specific deviations where the reviewed code is inconsistent with the patterns shown in the similar code examples. Note the code example source (path or index) for each deviation found.
-3.  Pay close attention to high-similarity examples in Context B, as they represent strong evidence of common practices.
+**STAGE 2: Code Example-Based Review (CRITICAL FOR IMPLICIT PATTERNS)**
+1.  **CRITICAL FIRST STEP**: Scan ALL code examples in Context B and create a mental list of:
+    - Common import statements (especially those containing 'helper', 'util', 'shared', 'common', 'test')
+    - Frequently used function calls that appear across multiple examples
+    - Project-specific wrappers or utilities (e.g., \`renderWithTestHelpers\` instead of direct \`render\`)
+    - Consistent patterns in how operations are performed
+2.  **IMPORTANT**: For each common utility or pattern you identify, note:
+    - Which files use it (cite specific examples)
+    - What the pattern appears to do
+    - Whether the reviewed file is using this pattern or not
+3.  Analyze the 'FILE TO REVIEW' against these discovered patterns. Focus on:
+    - Missing imports of commonly used utilities
+    - Direct library usage where others use project wrappers
+    - Deviations from established patterns
+4.  **HIGH PRIORITY**: Flag any instances where:
+    - The reviewed code uses a direct library call (e.g., \`render\`) when multiple examples use a project wrapper (e.g., \`renderWithTestHelpers\`)
+    - Common utility functions available in the project are not being imported or used
+    - The code deviates from patterns that appear in 3+ examples
+5.  Pay special attention to imports - if most similar files import certain utilities, the reviewed file should too.
 
 **STAGE 3: Consolidate, Prioritize, and Generate Output**
 1.  Combine the potential issues identified in Stage 1 (Guideline-Based) and Stage 2 (Example-Based).
 2.  **Apply Conflict Resolution AND Citation Rules:**
     *   **Guideline Precedence:** If an issue identified in Stage 2 (from code examples) **contradicts** an explicit guideline from Stage 1, **discard the Stage 2 issue**. Guidelines always take precedence.
     *   **Citation Priority:** When reporting an issue:
-        *   If the relevant convention or standard (like translation handling, styling, component structure, etc.) is defined or explained in 'CONTEXT A: EXPLICIT GUIDELINES', you **MUST** cite the specific guideline document (from Context A) as the source in your description. **Under NO circumstances should you cite code examples (Context B) as the source for conventions explicitly covered by the guidelines.**
-        *   Only cite code examples (from Context B) as the source for conventions or patterns *not explicitly covered* in the guidelines (Context A).
-        *   **Reporting:** If an issue violates both a guideline (Stage 1) and is inconsistent with examples (Stage 2), report it as a violation of the guideline, citing **only** the guideline document from Context A.
-3.  Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
+        *   If the relevant convention or standard is defined in 'CONTEXT A: EXPLICIT GUIDELINES', cite the guideline document.
+        *   For implicit patterns discovered from code examples (like helper utilities, common practices), cite the specific code examples that demonstrate the pattern.
+        *   **IMPORTANT**: When citing implicit patterns from Context B, be specific about which files demonstrate the pattern and what the pattern is.
+3.  **Special attention to implicit patterns**: Issues related to not using project-specific utilities or helpers should be marked as high priority if the pattern appears consistently across multiple examples in Context B.
+4.  Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
 4.  Ensure all reported issue descriptions clearly state the deviation/problem and suggestions align with the prioritized context (guidelines first, then examples). Avoid general advice conflicting with context.
 5.  Format the final, consolidated, and prioritized list of issues, along with a brief overall summary, **strictly** according to the JSON structure below.
 6.  Respond **only** with the valid JSON object. Do not include any other text before or after the JSON.
@@ -947,8 +1051,14 @@ INSTRUCTIONS:
 5. Examine setup/teardown patterns - are they used appropriately?
 
 **STAGE 3: Testing Patterns and Conventions (CRITICAL)**
-1. **IMPORTANT**: Compare the test implementation with similar test examples from Context B. Are the same helper functions, utilities, and patterns being used?
-2. **For React/Component tests**: Check if the test uses the project's custom render functions or test utilities shown in other test files. Flag any direct usage of testing library methods that should use project-specific wrappers.
+1. **IMPORTANT**: Carefully analyze ALL code examples in Context B to identify:
+   - Common helper functions or utilities that appear across multiple test files
+   - Consistent patterns in how certain operations are performed (e.g., rendering, mocking, assertions)
+   - Any project-specific abstractions or wrappers around standard testing libraries
+2. **CRITICAL**: Compare the reviewed test file against these discovered patterns. Flag any instances where:
+   - The test directly uses a library function when other tests use a project-specific wrapper
+   - Common helper utilities available in the project are not being used
+   - The test deviates from established patterns shown in Context B examples
 3. Check for proper use of mocking, stubbing, and test doubles following project patterns.
 4. Verify that test data and fixtures follow project conventions.
 5. Ensure async tests are handled correctly using project patterns.
