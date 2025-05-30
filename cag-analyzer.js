@@ -18,6 +18,16 @@ import chalk from 'chalk';
 import fs from 'node:fs';
 import path from 'node:path';
 
+// Constants for content processing
+const MAX_QUERY_CONTEXT_LENGTH = 1500;
+const MAX_EMBEDDING_CONTENT_LENGTH = 10000;
+const DEFAULT_TRUNCATE_LINES = 300;
+const GUIDELINE_TRUNCATE_LINES = 400;
+const CONTENT_LENGTH_BONUS_THRESHOLD = 300;
+const CONTENT_LENGTH_PENALTY_THRESHOLD = 150;
+const DEBUG_PREVIEW_LENGTH = 300;
+const RESPONSE_TRUNCATE_LENGTH = 1000;
+
 // Debug function for logging
 function debug(message) {
   const DEBUG = process.env.DEBUG || false;
@@ -26,8 +36,53 @@ function debug(message) {
   }
 }
 
+// Helper function for truncating content with line count
+function truncateContent(content, maxLines = DEFAULT_TRUNCATE_LINES) {
+  const lines = content.split('\n');
+  if (lines.length > maxLines) {
+    return {
+      content: lines.slice(0, maxLines).join('\n') + `\n... (truncated, ${lines.length - maxLines} more lines)`,
+      wasTruncated: true,
+      originalLineCount: lines.length,
+    };
+  }
+  return {
+    content: content,
+    wasTruncated: false,
+    originalLineCount: lines.length,
+  };
+}
+
+// Helper function for formatting context items (code examples or guidelines)
+function formatContextItems(items, type = 'code') {
+  return items.map((item, idx) => {
+    // Format similarity score
+    const similarityFormatted = typeof item.similarity === 'number' ? item.similarity.toFixed(2) : 'N/A';
+
+    // Truncate content based on type
+    const maxLines = type === 'guideline' ? GUIDELINE_TRUNCATE_LINES : DEFAULT_TRUNCATE_LINES;
+    const truncated = truncateContent(item.content, maxLines);
+
+    const baseFormatted = {
+      index: idx + 1,
+      path: item.path,
+      similarity: similarityFormatted,
+      language: item.language || (type === 'guideline' ? 'text' : 'unknown'),
+      content: truncated.content,
+    };
+
+    // Add type-specific fields
+    if (type === 'guideline') {
+      baseFormatted.headingText = item.headingText || null;
+      baseFormatted.type = item.type || 'documentation';
+    }
+
+    return baseFormatted;
+  });
+}
+
 // Helper function for content scoring (project-agnostic)
-function calculateContentScore(content, language) {
+function calculateContentScore(content) {
   let score = 0;
   if (!content) return 0;
 
@@ -36,8 +91,8 @@ function calculateContentScore(content, language) {
   const contentLength = content.length;
 
   // Basic length heuristic
-  if (contentLength > 300) score += 0.05; // Bonus for non-trivial content
-  if (contentLength < 150) score -= 0.1; // Penalty for very short
+  if (contentLength > CONTENT_LENGTH_BONUS_THRESHOLD) score += 0.05; // Bonus for non-trivial content
+  if (contentLength < CONTENT_LENGTH_PENALTY_THRESHOLD) score -= 0.1; // Penalty for very short
 
   // Code block presence (simple check)
   if (content.includes('```')) score += 0.15;
@@ -94,7 +149,7 @@ function calculateContentScore(content, language) {
 
 // --- Helper: createGuidelineQueryForLLMRetrieval ---
 function createGuidelineQueryForLLMRetrieval(codeSnippet, reviewedSnippetContext, language) {
-  const codeContext = codeSnippet.substring(0, 1500); // Limit snippet length in query
+  const codeContext = codeSnippet.substring(0, MAX_QUERY_CONTEXT_LENGTH); // Limit snippet length in query
   let query = 'Retrieve technical documentation, architectural guidelines, and best practices. ';
 
   if (
@@ -119,7 +174,7 @@ function createGuidelineQueryForLLMRetrieval(codeSnippet, reviewedSnippetContext
 
 // --- Helper: createTestGuidelineQueryForLLMRetrieval ---
 function createTestGuidelineQueryForLLMRetrieval(codeSnippet, reviewedSnippetContext, language) {
-  const codeContext = codeSnippet.substring(0, 1500); // Limit snippet length in query
+  const codeContext = codeSnippet.substring(0, MAX_QUERY_CONTEXT_LENGTH); // Limit snippet length in query
   let query = 'Retrieve testing documentation, test patterns, and testing best practices. ';
 
   query += 'Focus on test coverage, test naming conventions, assertion patterns, mocking strategies, and test organization. ';
@@ -209,7 +264,7 @@ async function analyzeFile(filePath, options = {}) {
     // +++ Get embedding for the file under review (for H1 proxy similarity - can be removed if H1 sim logic changes) +++
     let analyzedFileEmbedding = null;
     if (content.trim().length > 0) {
-      analyzedFileEmbedding = await calculateEmbedding(content.substring(0, 10000));
+      analyzedFileEmbedding = await calculateEmbedding(content.substring(0, MAX_EMBEDDING_CONTENT_LENGTH));
       if (!analyzedFileEmbedding) {
         debug(`[analyzeFile] Could not generate embedding for the content of ${filePath}. H1 proxy similarity will be skipped.`);
       }
@@ -234,16 +289,16 @@ async function analyzeFile(filePath, options = {}) {
       ? createTestGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language)
       : createGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language);
     console.log(
-      chalk.blue(`[analyzeFile DEBUG] Using ${isTestFile ? 'test-specific' : 'standard'} guidelineQuery (first 300 chars): `),
-      guidelineQuery.substring(0, 300) + '...'
+      chalk.blue(
+        `[analyzeFile DEBUG] Using ${isTestFile ? 'test-specific' : 'standard'} guidelineQuery (first ${DEBUG_PREVIEW_LENGTH} chars): `
+      ),
+      guidelineQuery.substring(0, DEBUG_PREVIEW_LENGTH) + '...'
     );
 
     const GUIDELINE_CANDIDATE_LIMIT = 100; // <<< INCREASED from 30, as findSimilarCode will do more contextual ranking
-    const MAX_FINAL_GUIDELINES = 5; // This is for LLM context, might be MAX_FINAL_DOCUMENTS later
     const RELEVANT_CHUNK_THRESHOLD = 0.1; // <<< LOWERED FURTHER to accommodate automatic classifier differences
 
     // These weights are for document-level scoring AFTER findSimilarCode returns its contextually ranked chunks
-    const W_AVG_CHUNK_SIM = 0.2; // Weight for average chunk similarity (less emphasis now)
     const W_H1_SIM = 0.2; // Weight for H1 proxy similarity (less emphasis now)
     const W_DOC_CONTEXT_MATCH = 0.6; // <<< NEW: Heavy weight for explicit document context match
 
@@ -372,7 +427,7 @@ async function analyzeFile(filePath, options = {}) {
 
       // Final Document Score
       let finalDocScore =
-        semanticQualityScore * W_AVG_CHUNK_SIM + // Quality of its best chunks (already context-ranked by findSimilarCode)
+        semanticQualityScore * 0.2 + // Quality of its best chunks (already context-ranked by findSimilarCode)
         docLevelContextMatchScore * W_DOC_CONTEXT_MATCH + // Explicit F/E, B/E match based on full doc
         docH1RelevanceToReviewedFile * W_H1_SIM; // H1 of doc vs. content of file being reviewed
 
@@ -615,36 +670,8 @@ async function analyzeFile(filePath, options = {}) {
     }
 
     // Format the lists that will be passed
-    const formattedCodeExamples = finalCodeExamplesForContext.map((example, idx) => ({
-      index: idx + 1,
-      path: example.path,
-      similarity: example.similarity.toFixed(2),
-      language: example.language || 'unknown',
-      content: example.content, // Assuming truncation happens later or is not needed here
-    }));
-    const formattedGuidelines = finalGuidelineSnippets.map((guideline, idx) => {
-      // Correctly format similarity, handling non-numbers
-      const similarityFormatted = typeof guideline.similarity === 'number' ? guideline.similarity.toFixed(2) : 'N/A'; // Default if not a number
-
-      // <<< ADD TRUNCATION FOR GUIDELINES >>>
-      const maxLines = 400; // Or choose another limit
-      const lines = guideline.content.split('\n');
-      const truncatedContent =
-        lines.length > maxLines
-          ? lines.slice(0, maxLines).join('\n') + `\n... (truncated, ${lines.length - maxLines} more lines)`
-          : guideline.content;
-      // <<< END TRUNCATION >>>
-
-      return {
-        index: idx + 1,
-        path: guideline.path,
-        headingText: guideline.headingText || null,
-        similarity: similarityFormatted,
-        language: guideline.language || 'text',
-        content: truncatedContent,
-        type: guideline.type || 'documentation',
-      };
-    });
+    const formattedCodeExamples = formatContextItems(finalCodeExamplesForContext, 'code');
+    const formattedGuidelines = formatContextItems(finalGuidelineSnippets, 'guideline');
 
     // --- Log the context being sent to the LLM --- >
     console.log(chalk.magenta('--- Guidelines Sent to LLM ---'));
@@ -681,7 +708,7 @@ async function analyzeFile(filePath, options = {}) {
     );
 
     // Call LLM for analysis
-    const analysisResults = await callLLMForAnalysis(context, options);
+    const analysisResults = await callLLMForAnalysis(context.file, formattedCodeExamples, formattedGuidelines, options);
 
     return {
       success: true,
@@ -720,51 +747,9 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
   const dirPath = path.dirname(filePath);
   const dirName = path.basename(dirPath);
 
-  // Format similar code examples
-  // console.log(chalk.yellow('[DEBUG] Content of finalCodeExamples BEFORE formatting map:'), finalCodeExamples.map(ex => ({ path: ex.path, similarity: ex.similarity, type: typeof ex.similarity })));
-
-  const codeExamples = finalCodeExamples.map((example, idx) => {
-    // Correctly format similarity, handling non-numbers
-    const similarityFormatted = typeof example.similarity === 'number' ? example.similarity.toFixed(2) : 'N/A'; // Default if not a number
-
-    const maxLines = 300;
-    const lines = example.content.split('\n');
-    const truncatedContent =
-      lines.length > maxLines
-        ? lines.slice(0, maxLines).join('\n') + `\n... (truncated, ${lines.length - maxLines} more lines)`
-        : example.content;
-    return {
-      index: idx + 1,
-      path: example.path,
-      similarity: similarityFormatted, // Assign the already formatted string
-      language: example.language || 'unknown',
-      content: truncatedContent,
-    };
-  });
-  // Format guideline snippets
-  const guidelineSnippets = finalGuidelineSnippets.map((guideline, idx) => {
-    // Correctly format similarity, handling non-numbers
-    const similarityFormatted = typeof guideline.similarity === 'number' ? guideline.similarity.toFixed(2) : 'N/A'; // Default if not a number
-
-    // <<< ADD TRUNCATION FOR GUIDELINES >>>
-    const maxLines = 400; // Or choose another limit
-    const lines = guideline.content.split('\n');
-    const truncatedContent =
-      lines.length > maxLines
-        ? lines.slice(0, maxLines).join('\n') + `\n... (truncated, ${lines.length - maxLines} more lines)`
-        : guideline.content;
-    // <<< END TRUNCATION >>>
-
-    return {
-      index: idx + 1,
-      path: guideline.path,
-      headingText: guideline.headingText || null,
-      similarity: similarityFormatted,
-      language: guideline.language || 'text',
-      content: truncatedContent,
-      type: guideline.type || 'documentation',
-    };
-  });
+  // Format similar code examples and guideline snippets
+  const codeExamples = formatContextItems(finalCodeExamples, 'code');
+  const guidelineSnippets = formatContextItems(finalGuidelineSnippets, 'guideline');
 
   return {
     file: {
@@ -788,13 +773,18 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
  * @param {Object} options - Options
  * @returns {Promise<Object>} Analysis results
  */
-async function callLLMForAnalysis(context, options = {}) {
+async function callLLMForAnalysis(file, codeExamples, guidelineSnippets, options = {}) {
   try {
-    // Extract file information from context
-    const { file, codeExamples, guidelineSnippets } = context;
+    // Create context object for prompt generation
+    const context = {
+      file,
+      codeExamples,
+      guidelineSnippets,
+      options,
+    };
 
     // Prepare the prompt using the dedicated function
-    const prompt = context.options?.isTestFile ? generateTestFileAnalysisPrompt(context) : generateAnalysisPrompt(context);
+    const prompt = options?.isTestFile ? generateTestFileAnalysisPrompt(context) : generateAnalysisPrompt(context);
 
     // Call LLM with the prompt
     const llmResponse = await sendPromptToLLM(prompt, {
@@ -1106,7 +1096,6 @@ function parseAnalysisResponse(response) {
       return parsed;
     } catch (directJsonError) {
       console.log(chalk.yellow('Response is not directly parseable as JSON, trying to extract JSON...'));
-      // console.log(chalk.yellow(`JSON parse error: ${directJsonError.message}`)); // Too verbose for normal runs
     }
 
     // Try to extract JSON from response with different patterns
@@ -1115,7 +1104,7 @@ function parseAnalysisResponse(response) {
     if (jsonMatch) {
       const jsonStr = jsonMatch[1] || jsonMatch[0];
       console.log(chalk.blue('Found potential JSON match:'));
-      console.log(chalk.gray(jsonStr.substring(0, 300) + '... (truncated)'));
+      console.log(chalk.gray(jsonStr.substring(0, DEBUG_PREVIEW_LENGTH) + '... (truncated)'));
 
       try {
         const parsed = JSON.parse(jsonStr);
@@ -1131,7 +1120,8 @@ function parseAnalysisResponse(response) {
     console.warn(chalk.yellow('Failed to extract valid JSON from response, constructing fallback response'));
 
     // If JSON extraction fails, construct a basic response with the raw text
-    const truncatedResponse = response.length > 1000 ? response.substring(0, 1000) + '... (truncated)' : response;
+    const truncatedResponse =
+      response.length > RESPONSE_TRUNCATE_LENGTH ? response.substring(0, RESPONSE_TRUNCATE_LENGTH) + '... (truncated)' : response;
     return {
       summary: 'Analysis was performed but results could not be parsed into the expected format.',
       issues: [
@@ -1154,109 +1144,6 @@ function parseAnalysisResponse(response) {
       issues: [],
       error: error.message,
     };
-  }
-}
-
-/**
- * Load project-specific guidelines using embeddings search
- *
- * @param {string} fileContent - Content of the file being analyzed (for similarity search)
- * @param {string} queryFilePath - Path to the file being analyzed (for reranking)
- * @returns {Promise<Array>} Guidelines found through embeddings
- */
-async function loadProjectGuidelines(fileContent, queryFilePath, projectPath = null) {
-  // Create a query that will find relevant documentation AND conventions
-  const baseFileName = queryFilePath ? path.basename(queryFilePath, path.extname(queryFilePath)) : '';
-  const guidelineQuery = `
-    Project documentation, coding standards, guidelines, and conventions relevant to ${baseFileName}.
-    How to implement features like those in ${baseFileName} and follow best practices in this codebase.
-    Standard patterns for error handling, testing, component structure, code style, translations used in files like ${baseFileName}.
-    ${fileContent.substring(0, 1000)} // Keep increased context from file
-  `;
-
-  // *** ADJUST THESE PARAMETERS ***
-  const GUIDELINE_RETRIEVAL_LIMIT = 12; // Increased limit further
-  const CODE_GUIDELINE_THRESHOLD = 0.6; // Be stricter about code examples
-  const MAX_SNIPPET_LENGTH = 5000; // Max characters per snippet (adjust as needed)
-
-  try {
-    console.log(chalk.blue('Fetching project guidelines from embeddings...'));
-
-    const guidelineResults = await findSimilarCode(guidelineQuery, {
-      similarityThreshold: 0.3, // Reverted threshold back to 0.3
-      limit: GUIDELINE_RETRIEVAL_LIMIT, // Get top candidates (limit is 12)
-      includeProjectStructure: true,
-      useReranking: true, // Keep reranking enabled
-      queryFilePath: queryFilePath, // Pass file path for reranking
-      projectPath: projectPath || path.dirname(path.resolve(queryFilePath)), // Use passed projectPath or fall back to file directory
-    });
-
-    // Log received results (keep this for debugging)
-    console.log(chalk.yellow('--- Results received by loadProjectGuidelines ---'));
-    console.log(`Received ${guidelineResults?.length || 0} results.`);
-    console.log(chalk.yellow('-----------------------------------------------'));
-
-    // --- SIMPLIFIED FILTER LOGIC: Keep all results returned by findSimilarCode within the limit ---
-    const guidelineSnippets = guidelineResults.map((guideline, index) => {
-      // *** ADD CONTENT TRUNCATION HERE ***
-      let truncatedContent = guideline.content || '';
-      if (truncatedContent.length > MAX_SNIPPET_LENGTH) {
-        debug(
-          `[loadProjectGuidelines] Truncating snippet content for: ${guideline.path} (from ${truncatedContent.length} to ${MAX_SNIPPET_LENGTH} chars)`
-        );
-        truncatedContent = truncatedContent.substring(0, MAX_SNIPPET_LENGTH) + '...';
-      }
-      // Return the mapped object with potentially truncated content
-      return {
-        index: index + 1,
-        path: guideline.file_path || guideline.path,
-        similarity: guideline.similarity,
-        language: guideline.language || 'text',
-        content: truncatedContent, // Use truncated content
-        type: guideline.type || 'documentation',
-        headingText: guideline.headingText || null,
-      };
-    });
-
-    console.log(chalk.green(`Found ${guidelineSnippets.length} guideline snippets after filtering.`));
-
-    // Log if project structure was included
-    const hasProjectStructure = guidelineSnippets.some((g) => g.type === 'project-structure');
-    if (hasProjectStructure) {
-      console.log(chalk.green('Project directory structure included in final guidelines'));
-    }
-
-    // If we didn't find any guidelines, add a generic one
-    if (guidelineSnippets.length === 0) {
-      console.log(chalk.yellow('No project guidelines found in embeddings. Using generic guidelines.'));
-      guidelineSnippets.push({
-        index: 1,
-        path: 'generic-guidelines',
-        similarity: 1.0,
-        language: '',
-        content:
-          'No specific project guidelines found. Follow general best practices for the language and maintain consistency with the existing code style.',
-        type: 'documentation',
-        headingText: null,
-      });
-    }
-
-    return guidelineSnippets;
-  } catch (error) {
-    console.error(chalk.red(`Error loading project guidelines: ${error.message}`));
-    // Return a basic guideline if there's an error
-    return [
-      {
-        index: 1,
-        path: 'generic-guidelines',
-        similarity: 1.0,
-        language: '',
-        content:
-          'Error loading project guidelines. Follow general best practices for the language and maintain consistency with the existing code style.',
-        type: 'documentation',
-        headingText: null,
-      },
-    ];
   }
 }
 
