@@ -694,12 +694,9 @@ async function findSupportedFiles(directory, options = {}) {
     signal: AbortSignal.timeout(120000), // Add a timeout (e.g., 2 minutes) to prevent infinite hangs
   };
 
-  if (options.gitignore === false) {
-    globOptions.ignore = [...excludePatterns]; // Use only explicit excludes
-  } else {
-    globOptions.ignore = [...excludePatterns, '.gitignore']; // Let glob handle gitignore via the ignore option
-    globOptions.gitignore = true; // Explicitly enable gitignore handling in glob
-  }
+  // Note: We don't use glob's gitignore option because it's not working correctly
+  // Instead, we rely on the shouldProcessFile check in embeddings.js which uses git check-ignore
+  globOptions.ignore = [...excludePatterns]; // Use only explicit excludes
 
   if (verbose) {
     console.log(chalk.cyan('Using async glob to find files...'));

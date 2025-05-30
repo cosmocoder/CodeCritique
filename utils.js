@@ -659,9 +659,16 @@ function shouldProcessFile(filePath, content = '', options = {}) {
   // Check gitignore patterns if enabled
   if (respectGitignore) {
     try {
+      // Calculate relative path from baseDir for git check-ignore
+      const relativePath = path.relative(baseDir, filePath);
+
       // Use git check-ignore to determine if a file is ignored
       // This is the most accurate way to check as it uses Git's own ignore logic
-      execSync(`git check-ignore -q "${filePath}"`, { stdio: 'ignore' });
+      // Use baseDir as cwd to ensure git runs in the correct context
+      execSync(`git check-ignore -q "${relativePath}"`, {
+        stdio: 'ignore',
+        cwd: baseDir,
+      });
 
       // If we get here, the file is ignored by git
       return false;
