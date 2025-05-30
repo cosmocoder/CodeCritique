@@ -3,6 +3,16 @@
  *
  * This module provides functionality to generate and use embeddings
  * using fastembed-js and LanceDB for storage.
+ *
+ * Organization:
+ * - Configuration & Constants
+ * - Internal Helper Functions
+ * - Database Management Functions
+ * - Embedding Generation Functions
+ * - Search & Similarity Functions
+ * - Batch Processing Functions
+ * - Cache & Cleanup Functions
+ * - Public API Functions
  */
 
 import * as lancedb from '@lancedb/lancedb';
@@ -11,15 +21,15 @@ import {
   detectLanguageFromExtension,
   extractMarkdownChunks,
   inferContextFromDocumentContent,
-  isDocumentationFile, // Ensure this is imported
-  slugify, // Ensure this is imported
-  shouldProcessFile as utilsShouldProcessFile, // <<< IMPORTED
+  isDocumentationFile,
+  slugify,
+  shouldProcessFile as utilsShouldProcessFile,
 } from './utils.js';
 import { EmbeddingModel, FlagEmbedding } from 'fastembed';
-import { Field, FixedSizeList, Float32, Schema, Utf8 } from 'apache-arrow'; // Use wildcard import for simplicity now
+import { Field, FixedSizeList, Float32, Schema, Utf8 } from 'apache-arrow';
 import { fileURLToPath } from 'url';
 import chalk from 'chalk';
-import dotenv from 'dotenv'; // Keep fastembed imports
+import dotenv from 'dotenv';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -30,34 +40,30 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Debug function for logging
-function debug(message) {
-  const DEBUG = process.env.DEBUG || false;
-  if (DEBUG || process.env.VERBOSE === 'true' || process.argv.includes('--verbose')) {
-    console.log(chalk.cyan(`[DEBUG] ${message}`));
-  }
-}
+// ============================================================================
+// CONFIGURATION & CONSTANTS
+// ============================================================================
 
-// --- fastembed Configuration ---
+// FastEmbed Configuration
 const EMBEDDING_DIMENSIONS = 384; // Dimension for bge-small-en-v1.5
-// Correctly reference the model name string if needed elsewhere, e.g., for display
 const MODEL_NAME_STRING = 'bge-small-en-v1.5';
 console.log(chalk.magenta(`[embeddings.js] Using MODEL = ${MODEL_NAME_STRING}, DIMENSIONS = ${EMBEDDING_DIMENSIONS}`));
-// -----------------------------
 
-// --- Constants ---
-const EMBEDDING_TIMEOUT = 60000;
+// System Constants
 const MAX_RETRIES = 3;
-// Store LanceDB in user's home directory with tool-specific prefix
+
+// Database Paths
 const LANCEDB_PATH = path.join(process.env.HOME || process.env.USERPROFILE || __dirname, '.ai-review-lancedb');
 const FILE_EMBEDDINGS_TABLE = 'file_embeddings';
 const DOCUMENT_CHUNK_TABLE = 'document_chunk_embeddings';
-// Store FastEmbed cache in user's home directory with tool-specific prefix
+
+// FastEmbed Cache Directory
 const FASTEMBED_CACHE_DIR = path.join(process.env.HOME || process.env.USERPROFILE || __dirname, '.ai-review-fastembed-cache');
 
-const FILE_PROCESSING_BATCH_SIZE = 128; // Number of files to process in one embedding batch (increased for better performance)
+// ============================================================================
+// STATE & CACHES
+// ============================================================================
 
-// --- Caches and State ---
 const processedFiles = new Map();
 let dbConnection = null;
 let embeddingModel = null; // Cache for fastembed model instance
@@ -68,7 +74,7 @@ const documentContextCache = new Map();
 // Cache for H1 embeddings to avoid re-calculating for H1 relevance bonus
 const h1EmbeddingCache = new Map();
 
-// --- Progress Tracker ---
+// Progress Tracker
 const progressTracker = {
   totalFiles: 0,
   processedCount: 0,
@@ -87,14 +93,138 @@ const progressTracker = {
     if (type === 'skipped') this.skippedCount++;
     if (type === 'failed') this.failedCount++;
     // Progress logging is now handled by the spinner in index.js via onProgress callback
-    // No need for duplicate progress logging here
   },
 };
 
-// --- Core Functions ---
+// ============================================================================
+// INTERNAL HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Debug function for logging
+ * @private
+ */
+function debug(message) {
+  const DEBUG = process.env.DEBUG || false;
+  if (DEBUG || process.env.VERBOSE === 'true' || process.argv.includes('--verbose')) {
+    console.log(chalk.cyan(`[DEBUG] ${message}`));
+  }
+}
+
+/**
+ * Check if content has extensive comments
+ * @private
+ */
+function hasExtensiveComments(content) {
+  if (!content || typeof content !== 'string') {
+    return false;
+  }
+
+  // Calculate approximate comment density
+  const contentLength = content.length;
+  if (contentLength === 0) return false;
+
+  let commentLines = 0;
+  let codeLines = 0;
+
+  // Count lines that appear to be comments
+  const lines = content.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Skip empty lines
+    if (trimmed === '') continue;
+
+    // Check for common comment patterns across many languages
+    if (
+      // C-style comments
+      trimmed.startsWith('//') ||
+      trimmed.startsWith('/*') ||
+      trimmed.startsWith('*') ||
+      // Script-style comments
+      trimmed.startsWith('#') ||
+      // HTML/XML comments
+      trimmed.startsWith('<!--') ||
+      // Python doc comments
+      trimmed.startsWith('"""') ||
+      trimmed.startsWith("'''") ||
+      // JavaDoc style
+      trimmed.startsWith('///') ||
+      trimmed.startsWith('//!') ||
+      // Lisp/Clojure style
+      trimmed.startsWith(';;') ||
+      // Haskell style
+      trimmed.startsWith('--') ||
+      // Documentation-specific formats
+      trimmed.startsWith('@param') ||
+      trimmed.startsWith('@return') ||
+      trimmed.startsWith('@example') ||
+      // Plain English with minimal symbols likely indicates comments/docs
+      (line.length > 30 && !/[;{}=()<>[\]]/.test(line) && /^[A-Z]/.test(trimmed))
+    ) {
+      commentLines++;
+    } else {
+      codeLines++;
+    }
+  }
+
+  // More flexible criteria - recognize even modest commenting
+  const totalLines = commentLines + codeLines;
+
+  // Low threshold for small snippets, higher for larger ones
+  if (totalLines < 10) {
+    return commentLines >= 2; // For very small snippets, even a couple of comments is good
+  } else if (totalLines < 30) {
+    return commentLines >= 3; // For medium-sized snippets
+  } else {
+    // For larger files, use a percentage but with a reasonable minimum
+    return commentLines >= 5 && commentLines / totalLines >= 0.15; // At least 15% comments
+  }
+}
+
+/**
+ * Check if two languages are similar
+ * @private
+ */
+function isSimilarLanguage(lang1, lang2) {
+  if (!lang1 || !lang2) return false;
+
+  // Normalize languages
+  lang1 = lang1.toLowerCase();
+  lang2 = lang2.toLowerCase();
+
+  // Don't penalize unknown languages
+  if (lang1 === 'unknown' || lang2 === 'unknown') return true;
+
+  // Define groups of similar languages
+  const languageGroups = [
+    // JavaScript ecosystem
+    ['javascript', 'typescript', 'jsx', 'tsx'],
+    // Web technologies
+    ['html', 'css', 'scss', 'less', 'sass'],
+    // JVM languages
+    ['java', 'kotlin', 'scala', 'groovy'],
+    // .NET languages
+    ['csharp', 'fsharp', 'vb'],
+    // C-like languages
+    ['c', 'cpp', 'c++', 'cxx', 'h', 'hpp'],
+    // Shell scripting
+    ['bash', 'sh', 'zsh', 'shell'],
+    // Python-like
+    ['python', 'jupyter'],
+  ];
+
+  // Check if languages are in the same group
+  return languageGroups.some((group) => group.includes(lang1) && group.includes(lang2));
+}
+
+// ============================================================================
+// EMBEDDING MODEL MANAGEMENT
+// ============================================================================
 
 /**
  * Initialize the FastEmbed model instance
+ * @private
  * @returns {Promise<FlagEmbedding>}
  */
 async function initEmbeddingModel() {
@@ -108,8 +238,7 @@ async function initEmbeddingModel() {
         fs.mkdirSync(FASTEMBED_CACHE_DIR, { recursive: true });
       }
       let retries = 0;
-      const maxRetries = 3; // Use MAX_RETRIES constant
-      while (retries < maxRetries) {
+      while (retries < MAX_RETRIES) {
         try {
           embeddingModel = await FlagEmbedding.init({
             model: modelIdentifier,
@@ -119,9 +248,9 @@ async function initEmbeddingModel() {
           break; // Exit loop on success
         } catch (initError) {
           retries++;
-          console.error(chalk.yellow(`Model initialization attempt ${retries}/${maxRetries} failed: ${initError.message}`));
-          if (retries >= maxRetries) {
-            throw new Error(`Failed to initialize model after ${maxRetries} attempts: ${initError.message}`);
+          console.error(chalk.yellow(`Model initialization attempt ${retries}/${MAX_RETRIES} failed: ${initError.message}`));
+          if (retries >= MAX_RETRIES) {
+            throw new Error(`Failed to initialize model after ${MAX_RETRIES} attempts: ${initError.message}`);
           }
           await new Promise((resolve) => setTimeout(resolve, retries * 2000)); // Wait before retrying
         }
@@ -133,6 +262,10 @@ async function initEmbeddingModel() {
   }
   return embeddingModel;
 }
+
+// ============================================================================
+// EMBEDDING GENERATION FUNCTIONS
+// ============================================================================
 
 /**
  * Calculate embedding for a text using fastembed
@@ -177,6 +310,7 @@ export async function calculateEmbedding(text) {
 
 /**
  * Calculate embeddings for a batch of texts using fastembed.
+ * @private
  * @param {string[]} texts - An array of texts to embed.
  * @returns {Promise<Array<Array<number>>>} - A promise that resolves to an array of embedding vectors.
  */
@@ -226,7 +360,50 @@ async function calculateEmbeddingBatch(texts) {
 }
 
 /**
+ * Calculate embedding for a query text using fastembed.
+ * @param {string} text - The query text to embed.
+ * @returns {Promise<Array<number> | null>} - The embedding vector or null on error.
+ */
+export async function calculateQueryEmbedding(text) {
+  if (typeof text !== 'string' || text.trim().length === 0) {
+    debug('Skipping query embedding for empty or invalid text.');
+    return null;
+  }
+
+  try {
+    const model = await initEmbeddingModel();
+    // queryEmbed directly returns the embedding for the single query text
+    const embeddingArray = await model.queryEmbed(text);
+
+    // Validate the generated query embedding
+    if (embeddingArray && typeof embeddingArray.length === 'number' && embeddingArray.length === EMBEDDING_DIMENSIONS) {
+      // queryEmbed in fastembed-js v0.2.0+ might return number[] directly or Float32Array
+      // Array.from() handles both cases correctly, converting Float32Array to number[] or returning number[] as is.
+      const embedding = Array.from(embeddingArray);
+
+      debug(`Query embedding generated successfully, dimensions: ${embedding.length}`);
+      return embedding;
+    } else {
+      console.error(
+        chalk.red(
+          `Generated query embedding dimension (${embeddingArray?.length}) does not match expected (${EMBEDDING_DIMENSIONS}) or embedding is invalid.`
+        )
+      );
+      return null;
+    }
+  } catch (error) {
+    console.error(chalk.red(`Error calculating query embedding: ${error.message}`), error);
+    return null;
+  }
+}
+
+// ============================================================================
+// DATABASE MANAGEMENT FUNCTIONS
+// ============================================================================
+
+/**
  * Initialize the database and ensure tables exist using schema inference
+ * @private
  * @returns {Promise<lancedb.Connection>} Initialized database object
  */
 async function initializeDB() {
@@ -243,7 +420,17 @@ async function initializeDB() {
 }
 
 /**
+ * Get database connection (alias for initializeDB)
+ * @private
+ * @returns {Promise<lancedb.Connection>} Database connection
+ */
+async function getDB() {
+  return initializeDB();
+}
+
+/**
  * Adaptive indexing strategy for any project size
+ * @private
  * @param {lancedb.Table} table - Table to index
  * @param {string} tableName - Name of the table for logging
  * @returns {Promise<object>} Index information
@@ -289,6 +476,7 @@ async function createAdaptiveVectorIndexes(table, tableName) {
 
 /**
  * Ensure necessary tables exist with adaptive indexing
+ * @private
  * @param {lancedb.Connection} db - Database connection
  * @returns {Promise<void>}
  */
@@ -413,15 +601,8 @@ async function ensureTablesExist(db) {
 }
 
 /**
- * Get database connection (alias for initializeDB)
- * @returns {Promise<lancedb.Connection>} Database connection
- */
-async function getDB() {
-  return initializeDB();
-}
-
-/**
  * Open an existing table.
+ * @private
  * @param {lancedb.Connection} db - Database connection
  * @param {string} tableName - Name of the table
  * @returns {Promise<lancedb.Table | null>} Table object or null if not found/error
@@ -441,11 +622,15 @@ async function getTable(db, tableName) {
   }
 }
 
+// ============================================================================
+// FILE & DIRECTORY PROCESSING FUNCTIONS
+// ============================================================================
+
 /**
  * Generate embeddings for a specific file using fastembed and store them in LanceDB
- * ADDED: Detailed logging and error catching for table.add
  * @param {string} filePath - Path to the file
  * @param {string} content - Content of the file
+ * @param {string} baseDir - Base directory for relative path calculation
  * @returns {Promise<{path: string, success: boolean} | null>} Result or null on error
  */
 export async function generateFileEmbeddings(filePath, content, baseDir = process.cwd()) {
@@ -536,10 +721,10 @@ export async function generateFileEmbeddings(filePath, content, baseDir = proces
   }
 }
 
-// --- Directory Structure Functions (Modified for explicit embedding) ---
-
 /**
  * Generate directory structure string
+ * @param {Object} options - Options for generating directory structure
+ * @returns {string} Directory structure as a string
  */
 export const generateDirectoryStructure = (options = {}) => {
   const { rootDir = process.cwd(), maxDepth = 5, ignorePatterns = [], showFiles = true } = options;
@@ -591,7 +776,6 @@ export const generateDirectoryStructure = (options = {}) => {
 
 /**
  * Generate and store an embedding for the project directory structure
- * ADDED: Detailed logging and error catching for table.add
  * @param {Object} options - Options for generating the directory structure
  * @returns {Promise<boolean>} True if successful, false otherwise
  */
@@ -667,7 +851,16 @@ export const generateDirectoryStructureEmbedding = async (options = {}) => {
   }
 };
 
-// --- Batch Processing ---
+// ============================================================================
+// BATCH PROCESSING FUNCTIONS
+// ============================================================================
+
+/**
+ * Process embeddings for multiple files in batch
+ * @param {string[]} filePaths - Array of file paths to process
+ * @param {Object} options - Processing options
+ * @returns {Promise<Object>} Processing results
+ */
 export async function processBatchEmbeddings(filePaths, options = {}) {
   const {
     concurrency = 10, // Concurrency for pLimit if we reintroduce it for I/O
@@ -1351,6 +1544,14 @@ export async function processBatchEmbeddings(filePaths, options = {}) {
 // It might be kept for other single-file processing scenarios if any exist,
 // or removed if processBatchEmbeddings is the sole entry point for bulk processing.
 // For now, its content is largely absorbed/replaced.
+/**
+ * Process a file with retries on failure
+ * @private
+ * @param {string} filePath - Path to the file
+ * @param {boolean} verbose - Whether to log verbose output
+ * @param {Object} options - Processing options
+ * @returns {Promise<Object|null>} Processing result or null on failure
+ */
 async function processFileWithRetries(filePath, verbose, options = {}) {
   console.warn(
     chalk.magenta(
@@ -1400,7 +1601,7 @@ async function processFileWithRetries(filePath, verbose, options = {}) {
     } catch (error) {
       lastError = error;
       retries++;
-      console.error(chalk.yellow(`Retry ${retries}{MAX_RETRIES} for ${relativePath}: ${error.message}`));
+      console.error(chalk.yellow(`Retry ${retries}/${MAX_RETRIES} for ${relativePath}: ${error.message}`));
       if (retries < MAX_RETRIES) {
         await new Promise((resolve) => setTimeout(resolve, 1000 * Math.pow(2, retries - 1))); // Exponential backoff
       }
@@ -1478,7 +1679,6 @@ export const findSimilarCode = async (queryText, options = {}) => {
     queryFilePath = null,
     queryContextForReranking = null,
     excludeNonDocs = false,
-    searchType = 'documentation',
     projectPath = process.cwd(), // Add project path for filtering
   } = options;
 
@@ -2024,13 +2224,23 @@ export async function clearAllEmbeddings() {
   }
 }
 
-// Keep the old function name for backward compatibility, but make it project-specific
+/**
+ * Clear embeddings (backward compatibility wrapper)
+ * @param {string} projectPath - Path to the project
+ * @returns {Promise<boolean>} True if successful
+ */
 export async function clearEmbeddings(projectPath = process.cwd()) {
   return clearProjectEmbeddings(projectPath);
 }
 
+// ============================================================================
+// PUBLIC API FUNCTIONS
+// ============================================================================
+
 /**
  * Get singleton project embeddings interface
+ * @param {string} projectPath - Path to the project
+ * @returns {Object} Project embeddings interface
  */
 export function getProjectEmbeddings(projectPath = process.cwd()) {
   if (projectEmbeddingsCache) return projectEmbeddingsCache;
@@ -2098,147 +2308,28 @@ export function getProjectEmbeddings(projectPath = process.cwd()) {
   return projectEmbeddingsCache;
 }
 
+// ============================================================================
+// MODULE EXPORTS SUMMARY
+// ============================================================================
 /**
  * Export approach for this module:
  * - All public functions are exported directly at their definition using 'export function' or 'export const'
  * - Helper/internal functions are not exported and remain module-private
  * - When adding new functions, export them directly at their definition if they're meant to be public
+ *
+ * Public API:
+ * - calculateEmbedding: Generate embedding for a single text
+ * - calculateQueryEmbedding: Generate embedding for a query text
+ * - generateFileEmbeddings: Generate and store embeddings for a file
+ * - generateDirectoryStructure: Generate directory structure string
+ * - generateDirectoryStructureEmbedding: Generate and store directory structure embedding
+ * - processBatchEmbeddings: Process embeddings for multiple files
+ * - findSimilarCode: Find similar code snippets
+ * - calculateCosineSimilarity: Calculate similarity between vectors
+ * - cleanup: Close database connections
+ * - clearCaches: Clear all caches
+ * - clearProjectEmbeddings: Clear project-specific embeddings
+ * - clearAllEmbeddings: Clear all embeddings
+ * - clearEmbeddings: Backward compatibility wrapper
+ * - getProjectEmbeddings: Get project embeddings interface
  */
-
-function hasExtensiveComments(content) {
-  if (!content || typeof content !== 'string') {
-    return false;
-  }
-
-  // Calculate approximate comment density
-  const contentLength = content.length;
-  if (contentLength === 0) return false;
-
-  let commentLines = 0;
-  let codeLines = 0;
-
-  // Count lines that appear to be comments
-  const lines = content.split('\n');
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    // Skip empty lines
-    if (trimmed === '') continue;
-
-    // Check for common comment patterns across many languages
-    if (
-      // C-style comments
-      trimmed.startsWith('//') ||
-      trimmed.startsWith('/*') ||
-      trimmed.startsWith('*') ||
-      // Script-style comments
-      trimmed.startsWith('#') ||
-      // HTML/XML comments
-      trimmed.startsWith('<!--') ||
-      // Python doc comments
-      trimmed.startsWith('"""') ||
-      trimmed.startsWith("'''") ||
-      // JavaDoc style
-      trimmed.startsWith('///') ||
-      trimmed.startsWith('//!') ||
-      // Lisp/Clojure style
-      trimmed.startsWith(';;') ||
-      // Haskell style
-      trimmed.startsWith('--') ||
-      // Documentation-specific formats
-      trimmed.startsWith('@param') ||
-      trimmed.startsWith('@return') ||
-      trimmed.startsWith('@example') ||
-      // Plain English with minimal symbols likely indicates comments/docs
-      (line.length > 30 && !/[;{}=()<>[\]]/.test(line) && /^[A-Z]/.test(trimmed))
-    ) {
-      commentLines++;
-    } else {
-      codeLines++;
-    }
-  }
-
-  // More flexible criteria - recognize even modest commenting
-  const totalLines = commentLines + codeLines;
-
-  // Low threshold for small snippets, higher for larger ones
-  if (totalLines < 10) {
-    return commentLines >= 2; // For very small snippets, even a couple of comments is good
-  } else if (totalLines < 30) {
-    return commentLines >= 3; // For medium-sized snippets
-  } else {
-    // For larger files, use a percentage but with a reasonable minimum
-    return commentLines >= 5 && commentLines / totalLines >= 0.15; // At least 15% comments
-  }
-}
-
-// Add a helper function to check for similar languages
-function isSimilarLanguage(lang1, lang2) {
-  if (!lang1 || !lang2) return false;
-
-  // Normalize languages
-  lang1 = lang1.toLowerCase();
-  lang2 = lang2.toLowerCase();
-
-  // Don't penalize unknown languages
-  if (lang1 === 'unknown' || lang2 === 'unknown') return true;
-
-  // Define groups of similar languages
-  const languageGroups = [
-    // JavaScript ecosystem
-    ['javascript', 'typescript', 'jsx', 'tsx'],
-    // Web technologies
-    ['html', 'css', 'scss', 'less', 'sass'],
-    // JVM languages
-    ['java', 'kotlin', 'scala', 'groovy'],
-    // .NET languages
-    ['csharp', 'fsharp', 'vb'],
-    // C-like languages
-    ['c', 'cpp', 'c++', 'cxx', 'h', 'hpp'],
-    // Shell scripting
-    ['bash', 'sh', 'zsh', 'shell'],
-    // Python-like
-    ['python', 'jupyter'],
-  ];
-
-  // Check if languages are in the same group
-  return languageGroups.some((group) => group.includes(lang1) && group.includes(lang2));
-}
-
-/**
- * Calculate embedding for a query text using fastembed.
- * @param {string} text - The query text to embed.
- * @returns {Promise<Array<number> | null>} - The embedding vector or null on error.
- */
-export async function calculateQueryEmbedding(text) {
-  if (typeof text !== 'string' || text.trim().length === 0) {
-    debug('Skipping query embedding for empty or invalid text.');
-    return null;
-  }
-
-  try {
-    const model = await initEmbeddingModel();
-    // queryEmbed directly returns the embedding for the single query text
-    const embeddingArray = await model.queryEmbed(text);
-
-    // Validate the generated query embedding
-    if (embeddingArray && typeof embeddingArray.length === 'number' && embeddingArray.length === EMBEDDING_DIMENSIONS) {
-      // queryEmbed in fastembed-js v0.2.0+ might return number[] directly or Float32Array
-      // Array.from() handles both cases correctly, converting Float32Array to number[] or returning number[] as is.
-      const embedding = Array.from(embeddingArray);
-
-      debug(`Query embedding generated successfully, dimensions: ${embedding.length}`);
-      return embedding;
-    } else {
-      console.error(
-        chalk.red(
-          `Generated query embedding dimension (${embeddingArray?.length}) does not match expected (${EMBEDDING_DIMENSIONS}) or embedding is invalid.`
-        )
-      );
-      return null;
-    }
-  } catch (error) {
-    console.error(chalk.red(`Error calculating query embedding: ${error.message}`), error);
-    return null;
-  }
-}
