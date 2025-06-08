@@ -26,6 +26,17 @@ import {
   reviewPullRequest as cagReviewPullRequest,
 } from './cag-review.js';
 
+// Import PR history analyzer and CLI utilities
+import {
+  displayAnalysisResults,
+  displayDatabaseStats,
+  displayProgress,
+  displayStatus,
+  getRepositoryAndProjectPath,
+  validateGitHubToken,
+} from './src/pr-history/cli-utils.js';
+import { PRHistoryAnalyzer } from './src/pr-history/analyzer.js';
+
 // Get __dirname equivalent in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -103,6 +114,38 @@ program
   .option('-d, --directory <dir>', 'Directory of the project to show stats for (shows all projects if not specified)')
   .action(showEmbeddingStats);
 
+// PR History Analysis commands
+program
+  .command('pr-history:analyze')
+  .description('Analyze PR comment history for the current project or specified repository')
+  .option('-d, --directory <dir>', 'Project directory to analyze (auto-detects GitHub repo)', '.')
+  .option('-r, --repository <repo>', 'GitHub repository in format "owner/repo" (overrides auto-detection)')
+  .option('-t, --token <token>', 'GitHub API token (or set GITHUB_TOKEN env var)')
+  .option('--since <date>', 'Only analyze PRs since this date (ISO format)')
+  .option('--until <date>', 'Only analyze PRs until this date (ISO format)')
+  .option('--limit <number>', 'Limit number of PRs to analyze', parseInt)
+  .option('--resume', 'Resume interrupted analysis')
+  .option('--clear', 'Clear existing data before analysis')
+  .option('--concurrency <number>', 'Number of concurrent requests', parseInt, 2)
+  .option('--batch-size <number>', 'Batch size for processing', parseInt, 50)
+  .option('--verbose', 'Show verbose output')
+  .action(analyzePRHistory);
+
+program
+  .command('pr-history:status')
+  .description('Check PR analysis status for the current project or specified repository')
+  .option('-d, --directory <dir>', 'Project directory to check status for', '.')
+  .option('-r, --repository <repo>', 'GitHub repository in format "owner/repo" (overrides auto-detection)')
+  .action(getPRHistoryStatus);
+
+program
+  .command('pr-history:clear')
+  .description('Clear PR analysis data for the current project or specified repository')
+  .option('-d, --directory <dir>', 'Project directory to clear data for', '.')
+  .option('-r, --repository <repo>', 'GitHub repository in format "owner/repo" (overrides auto-detection)')
+  .option('--force', 'Skip confirmation prompts')
+  .action(clearPRHistory);
+
 // Add examples to the help text (simplified analyze examples)
 program.on('--help', () => {
   console.log(`
@@ -121,6 +164,13 @@ Examples:
   $ ai-code-review embeddings:clear
   $ ai-code-review embeddings:clear --directory /path/to/project
   $ ai-code-review embeddings:clear-all
+  $ ai-code-review pr-history:analyze
+  $ ai-code-review pr-history:analyze --repository owner/repo --token ghp_xxx
+  $ ai-code-review pr-history:analyze --directory /path/to/project --since 2024-01-01
+  $ ai-code-review pr-history:status
+  $ ai-code-review pr-history:status --repository owner/repo
+  $ ai-code-review pr-history:clear
+  $ ai-code-review pr-history:clear --repository owner/repo --force
 `);
 });
 
@@ -133,7 +183,10 @@ const hasCommand = process.argv
       arg === 'embeddings:generate' ||
       arg === 'embeddings:clear' ||
       arg === 'embeddings:clear-all' ||
-      arg === 'embeddings:stats'
+      arg === 'embeddings:stats' ||
+      arg === 'pr-history:analyze' ||
+      arg === 'pr-history:status' ||
+      arg === 'pr-history:clear'
   );
 
 if (!hasCommand && process.argv.length > 2) {
@@ -1061,5 +1114,174 @@ function getSeverityEmoji(severity = 'low') {
       return 'ℹ️'; // Explicit Info
     default:
       return '•';
+  }
+}
+
+// ============================================================================
+// PR HISTORY ANALYSIS FUNCTIONS
+// ============================================================================
+
+/**
+ * Analyze PR comment history for a repository
+ * @param {Object} options - CLI options
+ */
+async function analyzePRHistory(options) {
+  const startTime = Date.now();
+
+  try {
+    console.log(chalk.bold.blue('AI Code Review - PR History Analysis'));
+
+    // Get repository and project path using utility functions
+    const { repository, projectPath } = getRepositoryAndProjectPath(options);
+    console.log(chalk.cyan(`Project directory: ${projectPath}`));
+
+    // Validate GitHub token
+    const token = validateGitHubToken(options);
+
+    // Initialize analyzer
+    const analyzer = new PRHistoryAnalyzer({
+      concurrency: options.concurrency || 2,
+      batchSize: options.batchSize || 50,
+      skipDependabot: true,
+      includeDrafts: false,
+    });
+
+    analyzer.initialize(token);
+
+    // Prepare analysis options
+    const analysisOptions = {
+      since: options.since,
+      until: options.until,
+      limit: options.limit,
+      resume: options.resume,
+      clearExisting: options.clear,
+      projectPath,
+      onProgress: (progress) => displayProgress(progress, options.verbose),
+    };
+
+    console.log(chalk.blue(`Starting analysis for ${repository}...`));
+
+    // Run analysis
+    const results = await analyzer.analyzeRepository(repository, analysisOptions);
+
+    const endTime = Date.now();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
+
+    // Display results using utility function
+    displayAnalysisResults(results, duration);
+    console.log(chalk.bold.green(`\nPR history analysis complete for ${repository}!`));
+  } catch (error) {
+    const endTime = Date.now();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
+    console.error(chalk.red(`\nError during PR history analysis (${duration}s):`), error.message);
+    if (options.verbose) {
+      console.error(error.stack);
+    }
+    process.exit(1);
+  }
+}
+
+/**
+ * Get PR analysis status for a repository
+ * @param {Object} options - CLI options
+ */
+async function getPRHistoryStatus(options) {
+  try {
+    console.log(chalk.bold.blue('AI Code Review - PR History Status'));
+
+    // Get repository and project path using utility functions
+    const { repository, projectPath } = getRepositoryAndProjectPath(options);
+    console.log(chalk.cyan(`Project directory: ${projectPath}`));
+
+    // Create analyzer instance to get status
+    const analyzer = new PRHistoryAnalyzer();
+    const status = await analyzer.getProgressStatus(repository);
+
+    // Display status using utility function
+    displayStatus(status);
+
+    // Check database for stored comments
+    const { hasPRComments, getPRCommentsStats } = await import('./src/pr-history/database.js');
+    const hasComments = await hasPRComments(repository, projectPath);
+
+    if (hasComments) {
+      const stats = await getPRCommentsStats(repository, projectPath);
+      displayDatabaseStats(stats, hasComments);
+    } else {
+      displayDatabaseStats(null, hasComments);
+    }
+  } catch (error) {
+    console.error(chalk.red('Error getting PR history status:'), error.message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Clear PR analysis data for a repository
+ * @param {Object} options - CLI options
+ */
+async function clearPRHistory(options) {
+  try {
+    console.log(chalk.bold.blue('AI Code Review - Clear PR History Data'));
+
+    // Get repository and project path using utility functions
+    const { repository, projectPath } = getRepositoryAndProjectPath(options);
+    console.log(chalk.cyan(`Project directory: ${projectPath}`));
+    console.log(chalk.cyan(`Repository: ${repository}`));
+
+    // Check if data exists before confirmation
+    const { hasPRComments, getPRCommentsStats } = await import('./src/pr-history/database.js');
+    const hasComments = await hasPRComments(repository, projectPath);
+
+    if (!hasComments) {
+      console.log(chalk.yellow(`No PR analysis data found for ${repository}`));
+      return;
+    }
+
+    // Get stats for confirmation message
+    const stats = await getPRCommentsStats(repository, projectPath);
+    console.log(chalk.yellow('\nData to be cleared:'));
+    console.log(chalk.yellow(`  - ${stats.totalComments} comments`));
+    console.log(chalk.yellow(`  - ${stats.totalPRs} pull requests`));
+    console.log(chalk.yellow(`  - ${stats.uniqueAuthors} unique authors`));
+    console.log(chalk.yellow(`  - Date range: ${stats.dateRange.earliest} to ${stats.dateRange.latest}`));
+
+    // Confirmation prompt (unless --force flag is used)
+    if (!options.force) {
+      const readline = await import('readline');
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+
+      const answer = await new Promise((resolve) => {
+        rl.question(chalk.red('\nThis will permanently delete all PR analysis data. Continue? (y/N): '), resolve);
+      });
+
+      rl.close();
+
+      if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
+        console.log(chalk.cyan('Operation cancelled.'));
+        return;
+      }
+    }
+
+    // Clear the data
+    const { clearPRComments } = await import('./src/pr-history/database.js');
+    console.log(chalk.blue('Clearing PR analysis data...'));
+
+    const cleared = await clearPRComments(repository, projectPath);
+
+    if (cleared) {
+      console.log(chalk.bold.green(`\nPR analysis data cleared successfully for ${repository}`));
+    } else {
+      console.log(chalk.yellow('No data was found to clear.'));
+    }
+  } catch (error) {
+    console.error(chalk.red('Error clearing PR history data:'), error.message);
+    if (options.verbose) {
+      console.error(error.stack);
+    }
+    process.exit(1);
   }
 }

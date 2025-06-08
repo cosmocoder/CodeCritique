@@ -26,7 +26,7 @@ import {
   shouldProcessFile as utilsShouldProcessFile,
 } from './utils.js';
 import { EmbeddingModel, FlagEmbedding } from 'fastembed';
-import { Field, FixedSizeList, Float32, Schema, Utf8 } from 'apache-arrow';
+import { Field, FixedSizeList, Float32, Int32, Schema, Utf8 } from 'apache-arrow';
 import { fileURLToPath } from 'url';
 import chalk from 'chalk';
 import dotenv from 'dotenv';
@@ -56,6 +56,7 @@ const MAX_RETRIES = 3;
 const LANCEDB_PATH = path.join(process.env.HOME || process.env.USERPROFILE || __dirname, '.ai-review-lancedb');
 const FILE_EMBEDDINGS_TABLE = 'file_embeddings';
 const DOCUMENT_CHUNK_TABLE = 'document_chunk_embeddings';
+const PR_COMMENTS_TABLE = 'pr_comments'; // Add PR comments table
 
 // FastEmbed Cache Directory
 const FASTEMBED_CACHE_DIR = path.join(process.env.HOME || process.env.USERPROFILE || __dirname, '.ai-review-fastembed-cache');
@@ -433,9 +434,10 @@ async function getDB() {
  * @private
  * @param {lancedb.Table} table - Table to index
  * @param {string} tableName - Name of the table for logging
+ * @param {string} vectorField - Name of the vector field to index (default: 'vector')
  * @returns {Promise<object>} Index information
  */
-async function createAdaptiveVectorIndexes(table, tableName) {
+async function createAdaptiveVectorIndexes(table, tableName, vectorField = 'vector') {
   try {
     const rowCount = await table.countRows();
     console.log(chalk.blue(`[${tableName}] Row count: ${rowCount}`));
@@ -451,7 +453,7 @@ async function createAdaptiveVectorIndexes(table, tableName) {
     } else if (rowCount < 10000) {
       const numPartitions = Math.max(Math.floor(Math.sqrt(rowCount / 50)), 2);
       console.log(chalk.blue(`[${tableName}] Creating IVF-Flat index for medium dataset (${rowCount} rows, ${numPartitions} partitions)`));
-      await table.createIndex('vector', {
+      await table.createIndex(vectorField, {
         config: lancedb.Index.ivfFlat({ numPartitions }),
       });
       return { indexType: 'ivf_flat', rowCount, numPartitions };
@@ -459,7 +461,7 @@ async function createAdaptiveVectorIndexes(table, tableName) {
       const numPartitions = Math.max(Math.floor(Math.sqrt(rowCount / 100)), 8);
       const numSubVectors = Math.floor(EMBEDDING_DIMENSIONS / 4);
       console.log(chalk.blue(`[${tableName}] Creating IVF-PQ index for large dataset (${rowCount} rows, ${numPartitions} partitions)`));
-      await table.createIndex('vector', {
+      await table.createIndex(vectorField, {
         config: lancedb.Index.ivfPq({
           numPartitions,
           numSubVectors,
@@ -472,6 +474,52 @@ async function createAdaptiveVectorIndexes(table, tableName) {
     console.warn(chalk.yellow(`[${tableName}] Index creation failed: ${error.message}. Falling back to exact search.`));
     return { indexType: 'exact_fallback', error: error.message };
   }
+}
+
+/**
+ * Create PR comments table schema
+ * @private
+ * @returns {Schema} Apache Arrow schema for PR comments
+ */
+function createPRCommentsSchema() {
+  const vectorType = new FixedSizeList(EMBEDDING_DIMENSIONS, new Field('item', new Float32(), true));
+
+  const fields = [
+    new Field('id', new Utf8(), false),
+    new Field('pr_number', new Int32(), false),
+    new Field('repository', new Utf8(), false),
+    new Field('project_path', new Utf8(), false),
+    new Field('comment_type', new Utf8(), false),
+    new Field('comment_text', new Utf8(), false),
+    new Field('comment_embedding', vectorType, false),
+
+    // Code context fields
+    new Field('file_path', new Utf8(), true),
+    new Field('line_number', new Int32(), true),
+    new Field('line_range_start', new Int32(), true),
+    new Field('line_range_end', new Int32(), true),
+    new Field('original_code', new Utf8(), true),
+    new Field('suggested_code', new Utf8(), true),
+    new Field('diff_hunk', new Utf8(), true),
+
+    // Code embedding
+    new Field('code_embedding', vectorType, true),
+    new Field('combined_embedding', vectorType, false),
+
+    // Metadata
+    new Field('author', new Utf8(), false),
+    new Field('created_at', new Utf8(), false),
+    new Field('updated_at', new Utf8(), true),
+    new Field('review_id', new Utf8(), true),
+    new Field('review_state', new Utf8(), true),
+
+    // Analysis metadata
+    new Field('issue_category', new Utf8(), true),
+    new Field('severity', new Utf8(), true),
+    new Field('pattern_tags', new Utf8(), true),
+  ];
+
+  return new Schema(fields);
 }
 
 /**
@@ -515,8 +563,11 @@ async function ensureTablesExist(db) {
     ];
     const documentChunkSchema = new Schema(documentChunkFields);
 
+    // PR comments table schema
+    const prCommentsSchema = createPRCommentsSchema();
+
     // Create or open tables
-    let fileTable, documentChunkTable;
+    let fileTable, documentChunkTable, prCommentsTable;
 
     if (!tableNames.includes(FILE_EMBEDDINGS_TABLE)) {
       console.log(chalk.yellow(`Creating ${FILE_EMBEDDINGS_TABLE} table with optimized schema...`));
@@ -570,15 +621,25 @@ async function ensureTablesExist(db) {
       }
     }
 
+    // Create PR comments table
+    if (!tableNames.includes(PR_COMMENTS_TABLE)) {
+      console.log(chalk.yellow(`Creating ${PR_COMMENTS_TABLE} table with optimized schema...`));
+      prCommentsTable = await db.createEmptyTable(PR_COMMENTS_TABLE, prCommentsSchema, { mode: 'create' });
+      console.log(chalk.green(`Created ${PR_COMMENTS_TABLE} table.`));
+    } else {
+      prCommentsTable = await db.openTable(PR_COMMENTS_TABLE);
+    }
+
     // Create FTS indexes
     console.log(chalk.blue('Creating native FTS indexes...'));
 
-    for (const [table, tableName] of [
-      [fileTable, FILE_EMBEDDINGS_TABLE],
-      [documentChunkTable, DOCUMENT_CHUNK_TABLE],
+    for (const [table, tableName, contentField] of [
+      [fileTable, FILE_EMBEDDINGS_TABLE, 'content'],
+      [documentChunkTable, DOCUMENT_CHUNK_TABLE, 'content'],
+      [prCommentsTable, PR_COMMENTS_TABLE, 'comment_text'],
     ]) {
       try {
-        await table.createIndex('content', { config: lancedb.Index.fts() });
+        await table.createIndex(contentField, { config: lancedb.Index.fts() });
         console.log(chalk.green(`FTS index created for ${tableName}`));
       } catch (error) {
         if (!error.message.toLowerCase().includes('already exists')) {
@@ -592,8 +653,13 @@ async function ensureTablesExist(db) {
 
     const fileIndexInfo = await createAdaptiveVectorIndexes(fileTable, FILE_EMBEDDINGS_TABLE);
     const docIndexInfo = await createAdaptiveVectorIndexes(documentChunkTable, DOCUMENT_CHUNK_TABLE);
+    const prCommentsIndexInfo = await createAdaptiveVectorIndexes(prCommentsTable, PR_COMMENTS_TABLE, 'combined_embedding');
 
-    console.log(chalk.green(`Indexing complete - File: ${JSON.stringify(fileIndexInfo)}, Docs: ${JSON.stringify(docIndexInfo)}`));
+    console.log(
+      chalk.green(
+        `Indexing complete - File: ${JSON.stringify(fileIndexInfo)}, Docs: ${JSON.stringify(docIndexInfo)}, PR Comments: ${JSON.stringify(prCommentsIndexInfo)}`
+      )
+    );
   } catch (error) {
     console.error(chalk.red(`Error ensuring tables exist: ${error.message}`), error.stack);
     throw error;
@@ -2307,6 +2373,30 @@ export function getProjectEmbeddings(projectPath = process.cwd()) {
   };
   return projectEmbeddingsCache;
 }
+
+/**
+ * Get PR Comments table from database
+ * @param {string} projectPath - Project path for context
+ * @returns {Promise<lancedb.Table|null>} PR comments table or null
+ */
+export async function getPRCommentsTable(projectPath = process.cwd()) {
+  try {
+    const db = await getDB();
+    return await getTable(db, PR_COMMENTS_TABLE);
+  } catch (error) {
+    console.error(chalk.red(`Error getting PR comments table: ${error.message}`));
+    return null;
+  }
+}
+
+/**
+ * Export constants for use by PR history modules
+ */
+export const CONSTANTS = {
+  EMBEDDING_DIMENSIONS,
+  PR_COMMENTS_TABLE,
+  LANCEDB_PATH,
+};
 
 // ============================================================================
 // MODULE EXPORTS SUMMARY

@@ -12,6 +12,7 @@ import {
   detectLanguageFromExtension,
   inferContextFromCodeContent,
   inferContextFromDocumentContent,
+  isTestFile,
   shouldProcessFile,
 } from './utils.js';
 import chalk from 'chalk';
@@ -232,9 +233,8 @@ async function analyzeFile(filePath, options = {}) {
     }
 
     // Determine the project directory for embedding searches
-    // Priority: 1. Explicit projectPath option, 2. Directory option, 3. File's directory
-    const projectPath =
-      options.projectPath || (options.directory ? path.resolve(options.directory) : null) || path.dirname(path.resolve(filePath));
+    // Priority: 1. Explicit projectPath option, 2. Directory option, 3. Current working directory (for PR comments)
+    const projectPath = options.projectPath || (options.directory ? path.resolve(options.directory) : null) || process.cwd();
 
     console.log(chalk.gray(`Using project path for embeddings: ${projectPath}`));
 
@@ -254,6 +254,49 @@ async function analyzeFile(filePath, options = {}) {
 
     if (isTestFile) {
       console.log(chalk.blue(`Detected test file: ${filePath}`));
+    }
+
+    // --- Stage 0: PR Comment Context Retrieval ---
+    console.log(chalk.blue('--- Stage 0: Retrieving PR Comment History ---'));
+    let prCommentContext = [];
+    let prContextAvailable = false;
+
+    try {
+      const prContextOptions = {
+        ...options,
+        maxComments: options.maxPRComments || 3,
+        similarityThreshold: options.prSimilarityThreshold || 0.3,
+        timeout: options.prTimeout || 10000,
+        projectPath: projectPath,
+        repository: options.repository || null,
+      };
+
+      const prContextResult = await Promise.race([
+        getPRCommentContext(filePath, prContextOptions),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('PR context timeout')), prContextOptions.timeout)),
+      ]);
+
+      if (prContextResult && prContextResult.comments && prContextResult.comments.length > 0) {
+        prCommentContext = prContextResult.comments;
+        prContextAvailable = true;
+        console.log(chalk.green(`✅ Found ${prCommentContext.length} relevant PR comments`));
+        console.log(chalk.blue(`PR Comments preview:`));
+        prCommentContext.forEach((comment, idx) => {
+          console.log(chalk.gray(`  ${idx + 1}. PR #${comment.prNumber} by ${comment.author}: ${comment.body.substring(0, 100)}...`));
+        });
+      } else {
+        console.log(chalk.yellow('❌ No relevant PR comments found'));
+        if (prContextResult) {
+          console.log(
+            chalk.gray(
+              `PR context result: success=${prContextResult.success}, hasContext=${prContextResult.hasContext}, totalFound=${prContextResult.metadata?.totalCommentsFound || 0}`
+            )
+          );
+        }
+      }
+    } catch (error) {
+      console.warn(chalk.yellow(`PR comment context unavailable: ${error.message}`));
+      debug(`[analyzeFile] PR context error: ${error.stack}`);
     }
 
     // --- PHASE 1: UNDERSTAND THE CODE SNIPPET BEING REVIEWED ---
@@ -704,21 +747,43 @@ async function analyzeFile(filePath, options = {}) {
       // Pass the formatted lists
       formattedCodeExamples,
       formattedGuidelines, // Always pass the formatted guidelines
+      prCommentContext, // Pass PR comment context
       { ...options, isTestFile } // Pass isTestFile flag in options
     );
 
     // Call LLM for analysis
-    const analysisResults = await callLLMForAnalysis(context.file, formattedCodeExamples, formattedGuidelines, options);
+    const analysisResults = await callLLMForAnalysis(context, options);
 
     return {
       success: true,
       filePath,
       language,
       results: analysisResults,
+      context: {
+        codeExamples: finalCodeExamples.length,
+        guidelines: finalGuidelineSnippets.length,
+        prComments: prCommentContext.length,
+        prContextAvailable: prContextAvailable,
+      },
+      prHistory: prContextAvailable
+        ? {
+            commentsFound: prCommentContext.length,
+            patterns: extractCommentPatterns(prCommentContext),
+            summary: generateContextSummary(prCommentContext, extractCommentPatterns(prCommentContext)),
+          }
+        : null,
       similarExamples: finalCodeExamples.map((ex) => ({
         path: ex.path,
         similarity: ex.similarity,
       })),
+      metadata: {
+        analysisTimestamp: new Date().toISOString(),
+        featuresUsed: {
+          codeExamples: finalCodeExamples.length > 0,
+          guidelines: finalGuidelineSnippets.length > 0,
+          prHistory: prContextAvailable,
+        },
+      },
     };
   } catch (error) {
     console.error(chalk.red(`Error analyzing file: ${error.message}`));
@@ -738,10 +803,11 @@ async function analyzeFile(filePath, options = {}) {
  * @param {string} language - File language
  * @param {Array<Object>} codeExamples - Processed list of code examples
  * @param {Array<Object>} guidelineSnippets - Processed list of guideline snippets
+ * @param {Array<Object>} prCommentContext - PR comment context
  * @param {Object} options - Options
  * @returns {Object} Context for LLM
  */
-function prepareContextForLLM(filePath, content, language, finalCodeExamples, finalGuidelineSnippets, options = {}) {
+function prepareContextForLLM(filePath, content, language, finalCodeExamples, finalGuidelineSnippets, prCommentContext = [], options = {}) {
   // Extract file name and directory
   const fileName = path.basename(filePath);
   const dirPath = path.dirname(filePath);
@@ -750,6 +816,43 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
   // Format similar code examples and guideline snippets
   const codeExamples = formatContextItems(finalCodeExamples, 'code');
   const guidelineSnippets = formatContextItems(finalGuidelineSnippets, 'guideline');
+
+  const contextSections = [];
+
+  // Add existing context sections
+  if (codeExamples.length > 0) {
+    contextSections.push({
+      title: 'Similar Code Examples',
+      description: 'Code patterns from the project that are similar to the file being reviewed',
+      items: codeExamples,
+    });
+  }
+
+  if (guidelineSnippets.length > 0) {
+    contextSections.push({
+      title: 'Project Guidelines',
+      description: 'Documentation and guidelines relevant to this code',
+      items: guidelineSnippets,
+    });
+  }
+
+  // Add PR Comment Context Section
+  if (prCommentContext && prCommentContext.length > 0) {
+    contextSections.push({
+      title: 'Historical Review Comments',
+      description: 'Similar code patterns and issues identified by human reviewers in past PRs',
+      items: prCommentContext.map((comment) => ({
+        type: 'pr_comment',
+        pr_number: comment.prNumber,
+        author: comment.author,
+        comment_text: comment.body,
+        file_path: comment.filePath,
+        comment_type: comment.commentType,
+        similarity_score: comment.relevanceScore,
+        created_at: comment.createdAt,
+      })),
+    });
+  }
 
   return {
     file: {
@@ -760,8 +863,15 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
       language,
       content,
     },
+    context: contextSections,
     codeExamples,
     guidelineSnippets,
+    metadata: {
+      hasCodeExamples: finalCodeExamples.length > 0,
+      hasGuidelines: finalGuidelineSnippets.length > 0,
+      hasPRHistory: prCommentContext.length > 0,
+      analysisTimestamp: new Date().toISOString(),
+    },
     options,
   };
 }
@@ -773,16 +883,8 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
  * @param {Object} options - Options
  * @returns {Promise<Object>} Analysis results
  */
-async function callLLMForAnalysis(file, codeExamples, guidelineSnippets, options = {}) {
+async function callLLMForAnalysis(context, options = {}) {
   try {
-    // Create context object for prompt generation
-    const context = {
-      file,
-      codeExamples,
-      guidelineSnippets,
-      options,
-    };
-
     // Prepare the prompt using the dedicated function
     const prompt = options?.isTestFile ? generateTestFileAnalysisPrompt(context) : generateAnalysisPrompt(context);
 
@@ -877,10 +979,51 @@ ${ex.content}
       })
       .join('\n') || 'No specific guideline snippets found.';
 
+  // Check for PR comment context in the context object
+  const { context: contextSections } = context;
+  let prHistorySection = '';
+
+  console.log(chalk.blue(`🔍 Checking for PR comments in prompt generation...`));
+  console.log(chalk.gray(`Context sections available: ${contextSections ? contextSections.length : 0}`));
+
+  if (contextSections && contextSections.length > 0) {
+    contextSections.forEach((section, idx) => {
+      console.log(chalk.gray(`  Section ${idx + 1}: ${section.title} (${section.items?.length || 0} items)`));
+    });
+
+    const prComments = contextSections.find((section) => section.title === 'Historical Review Comments');
+    if (prComments && prComments.items.length > 0) {
+      console.log(chalk.green(`✅ Adding ${prComments.items.length} PR comments to LLM prompt`));
+      prHistorySection = `
+
+CONTEXT C: HISTORICAL REVIEW COMMENTS
+Similar code patterns and issues identified by human reviewers in past PRs
+
+`;
+      prComments.items.forEach((comment, idx) => {
+        prHistorySection += `### Historical Comment ${idx + 1}\n`;
+        prHistorySection += `- **PR**: #${comment.pr_number} by ${comment.author}\n`;
+        prHistorySection += `- **File**: ${comment.file_path}\n`;
+        prHistorySection += `- **Type**: ${comment.comment_type}\n`;
+        prHistorySection += `- **Relevance**: ${(comment.similarity_score * 100).toFixed(1)}%\n`;
+        prHistorySection += `- **Review**: ${comment.comment_text}\n\n`;
+      });
+
+      prHistorySection += `Consider these historical patterns when analyzing the current code. `;
+      prHistorySection += `Look for similar issues and apply the insights from past human reviews.\n\n`;
+
+      console.log(chalk.blue(`PR History section preview: ${prHistorySection.substring(0, 200)}...`));
+    } else {
+      console.log(chalk.yellow(`❌ No PR comments section found in context`));
+    }
+  } else {
+    console.log(chalk.yellow(`❌ No context sections available for PR comments`));
+  }
+
   // Corrected prompt with full two-stage analysis + combined output stage
   return `
 You are an expert code reviewer acting as a senior developer on this specific project.
-Your task is to review the following code file by performing a two-stage analysis based **only** on the provided context, prioritizing documented guidelines.
+Your task is to review the following code file by performing a two-stage analysis based **only** on the provided context, prioritizing documented guidelines and historical review patterns.
 
 FILE TO REVIEW:
 Path: ${file.path}
@@ -897,6 +1040,8 @@ ${formattedGuidelines}
 
 CONTEXT B: SIMILAR CODE EXAMPLES FROM PROJECT
 ${formattedCodeExamples}
+
+${prHistorySection}
 
 INSTRUCTIONS:
 
@@ -927,19 +1072,33 @@ INSTRUCTIONS:
     - The code deviates from patterns that appear in 3+ examples
 5.  Pay special attention to imports - if most similar files import certain utilities, the reviewed file should too.
 
-**STAGE 3: Consolidate, Prioritize, and Generate Output**
-1.  Combine the potential issues identified in Stage 1 (Guideline-Based) and Stage 2 (Example-Based).
+**STAGE 3: Historical Review Comments Analysis**
+1.  **CRITICAL**: If 'CONTEXT C: HISTORICAL REVIEW COMMENTS' is present, analyze each historical comment carefully:
+    - Look for patterns in the types of issues human reviewers have identified in similar code
+    - Check if any of the historical issues apply to the current file being reviewed
+    - Pay special attention to comments with high relevance scores (>70%)
+2.  **Apply Historical Insights**: For each historical comment:
+    - Check if the same type of issue exists in the current file
+    - Consider the reviewer's suggestions and see if they apply to the current context
+    - Look for recurring themes across multiple historical comments
+3.  **Prioritize Historical Issues**: Issues that have been flagged by human reviewers in similar contexts should be given high priority
+4.  **Learn from Past Reviews**: Use the historical comments to understand what human reviewers consider important in this codebase
+
+**STAGE 4: Consolidate, Prioritize, and Generate Output**
+1.  Combine the potential issues identified in Stage 1 (Guideline-Based), Stage 2 (Example-Based), and Stage 3 (Historical Review Comments).
 2.  **Apply Conflict Resolution AND Citation Rules:**
-    *   **Guideline Precedence:** If an issue identified in Stage 2 (from code examples) **contradicts** an explicit guideline from Stage 1, **discard the Stage 2 issue**. Guidelines always take precedence.
+    *   **Guideline Precedence:** If an issue identified in Stage 2 (from code examples) or Stage 3 (from historical comments) **contradicts** an explicit guideline from Stage 1, **discard the conflicting issue**. Guidelines always take precedence.
     *   **Citation Priority:** When reporting an issue:
-        *   If the relevant convention or standard is defined in 'CONTEXT A: EXPLICIT GUIDELINES', cite the guideline document.
-        *   For implicit patterns discovered from code examples (like helper utilities, common practices), cite the specific code examples that demonstrate the pattern.
-        *   **IMPORTANT**: When citing implicit patterns from Context B, be specific about which files demonstrate the pattern and what the pattern is.
+       *   If the relevant convention or standard is defined in 'CONTEXT A: EXPLICIT GUIDELINES', cite the guideline document.
+       *   For implicit patterns discovered from code examples (like helper utilities, common practices), cite the specific code examples that demonstrate the pattern.
+       *   For issues identified from historical review comments, report them as standard code review findings without referencing the historical source.
+       *   **IMPORTANT**: When citing implicit patterns from Context B, be specific about which files demonstrate the pattern and what the pattern is.
 3.  **Special attention to implicit patterns**: Issues related to not using project-specific utilities or helpers should be marked as high priority if the pattern appears consistently across multiple examples in Context B.
-4.  Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
-4.  Ensure all reported issue descriptions clearly state the deviation/problem and suggestions align with the prioritized context (guidelines first, then examples). Avoid general advice conflicting with context.
-5.  Format the final, consolidated, and prioritized list of issues, along with a brief overall summary, **strictly** according to the JSON structure below.
-6.  Respond **only** with the valid JSON object. Do not include any other text before or after the JSON.
+4.  **Special attention to historical patterns**: Issues that have been previously identified by human reviewers in similar code (from Context C) should be given high priority, especially those with high relevance scores.
+5.  Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
+6.  Ensure all reported issue descriptions clearly state the deviation/problem and suggestions align with the prioritized context (guidelines first, then examples, then historical patterns). Avoid general advice conflicting with context.
+7.  Format the final, consolidated, and prioritized list of issues, along with a brief overall summary, **strictly** according to the JSON structure below.
+8.  Respond **only** with the valid JSON object. Do not include any other text before or after the JSON.
 
 JSON Output Structure:
 {
@@ -1147,4 +1306,319 @@ function parseAnalysisResponse(response) {
   }
 }
 
-export { analyzeFile };
+/**
+ * Get PR comment context for historical analysis integration
+ *
+ * @param {string} filePath - Path to the file being analyzed
+ * @param {Object} options - Options for context retrieval
+ * @returns {Promise<Object>} Historical PR comment context
+ */
+async function getPRCommentContext(filePath, options = {}) {
+  try {
+    const { dateRange = null, maxComments = 20, similarityThreshold = 0.15, projectPath = process.cwd() } = options;
+
+    // Normalize file path for comparison
+    const normalizedPath = path.normalize(filePath);
+    const fileExtension = path.extname(normalizedPath);
+    const fileName = path.basename(normalizedPath);
+    const directoryPath = path.dirname(normalizedPath);
+
+    debug(`[getPRCommentContext] Getting context for ${normalizedPath}`);
+
+    // Import database functions
+    const { findSimilarPRComments } = await import('./src/pr-history/database.js');
+
+    // Read the file content to create embedding for semantic search
+    let fileContent = '';
+    try {
+      const fs = await import('node:fs');
+      fileContent = fs.readFileSync(filePath, 'utf8');
+    } catch (readError) {
+      debug(`[getPRCommentContext] Could not read file ${filePath}: ${readError.message}`);
+      return {
+        success: false,
+        hasContext: false,
+        error: `Could not read file: ${readError.message}`,
+        comments: [],
+        summary: 'Failed to read file for context analysis',
+      };
+    }
+
+    // Detect if this is a test file using existing utility
+    const isTest = isTestFile(filePath);
+
+    // Truncate content for embedding if too long
+    const maxEmbeddingLength = 8000; // Reasonable limit for embedding
+    const truncatedContent = fileContent.length > maxEmbeddingLength ? fileContent.substring(0, maxEmbeddingLength) : fileContent;
+
+    // Use semantic search to find similar PR comments
+    let relevantComments = [];
+
+    console.log(chalk.blue(`🔍 Searching for PR comments with:`));
+
+    console.log(chalk.gray(`  Project Path: ${projectPath}`));
+    console.log(chalk.gray(`  File: ${fileName}`));
+    console.log(chalk.gray(`  Similarity Threshold: ${similarityThreshold}`));
+    console.log(chalk.gray(`  Content Length: ${truncatedContent.length} chars`));
+
+    try {
+      console.log(chalk.blue(`🔍 Attempting semantic search...`));
+      relevantComments = await findSimilarPRComments(truncatedContent, {
+        projectPath,
+        threshold: similarityThreshold,
+        limit: maxComments,
+        enableMultiStage: true, // Enable enhanced multi-stage search
+        isTestFile: isTest, // Pass test file context for filtering
+        fileExtension: fileName.split('.').pop(), // Pass file extension
+        targetCodeContent: truncatedContent, // Pass the file content for chunking
+        targetFilePath: fileName, // Pass the file path for context
+        // Remove file_path filter to allow broader search across all files
+      });
+      console.log(chalk.green(`✅ Semantic search returned ${relevantComments.length} comments`));
+      if (relevantComments.length > 0) {
+        console.log(chalk.blue(`Top comment similarities:`));
+        relevantComments.slice(0, 3).forEach((comment, idx) => {
+          console.log(
+            chalk.gray(`  ${idx + 1}. Score: ${comment.similarity_score?.toFixed(3)} - ${comment.comment_text?.substring(0, 80)}...`)
+          );
+        });
+      }
+    } catch (dbError) {
+      console.log(chalk.yellow(`⚠️ Semantic search failed: ${dbError.message}`));
+      debug(`[getPRCommentContext] Semantic search failed: ${dbError.message}`);
+      // No fallback needed - if semantic search fails, we just return empty results
+      relevantComments = [];
+    }
+
+    // Filter by similarity threshold and sort
+    const filteredComments = relevantComments
+      .filter((comment) => comment.similarity_score >= similarityThreshold)
+      .sort((a, b) => b.similarity_score - a.similarity_score)
+      .slice(0, maxComments);
+
+    // Extract patterns and insights
+    const patterns = extractCommentPatterns(filteredComments);
+    const summary = generateContextSummary(filteredComments, patterns);
+
+    debug(`[getPRCommentContext] Found ${filteredComments.length} relevant comments for ${normalizedPath}`);
+
+    return {
+      success: true,
+      hasContext: filteredComments.length > 0,
+      filePath: normalizedPath,
+      comments: filteredComments.map(formatCommentForContext),
+      patterns,
+      summary,
+      metadata: {
+        totalCommentsFound: relevantComments.length,
+        relevantCommentsReturned: filteredComments.length,
+        averageRelevanceScore:
+          filteredComments.length > 0 ? filteredComments.reduce((sum, c) => sum + c.similarity_score, 0) / filteredComments.length : 0,
+        searchMethod:
+          relevantComments.length > 0 && relevantComments[0].similarity_score !== 0.5 ? 'semantic_embedding' : 'file_path_fallback',
+      },
+    };
+  } catch (error) {
+    debug(`[getPRCommentContext] Error getting PR comment context: ${error.message}`);
+    return {
+      success: false,
+      hasContext: false,
+      error: error.message,
+      comments: [],
+      summary: 'Failed to retrieve historical context',
+    };
+  }
+}
+
+/**
+ * Score comment relevance to a specific file path
+ */
+async function scoreCommentRelevance(comments, targetFilePath, options = {}) {
+  const { relevanceThreshold = 0.3 } = options;
+  const targetFileName = path.basename(targetFilePath);
+  const targetExtension = path.extname(targetFilePath);
+
+  const scoredComments = [];
+
+  for (const comment of comments) {
+    let score = 0;
+
+    // Direct file path match (highest score)
+    if (comment.file_path === targetFilePath) {
+      score += 1.0;
+    }
+    // File name match in different directory
+    else if (comment.file_path && path.basename(comment.file_path) === targetFileName) {
+      score += 0.7;
+    }
+    // Same file extension
+    else if (comment.file_path && path.extname(comment.file_path) === targetExtension) {
+      score += 0.3;
+    }
+
+    // Content relevance based on keywords
+    if (comment.body) {
+      const contentScore = calculateContentRelevance(comment.body, targetFilePath);
+      score += contentScore * 0.5;
+    }
+
+    // Review type weighting
+    if (comment.comment_type === 'review_comment') {
+      score += 0.2; // Inline code comments are more relevant
+    }
+
+    // Recency bonus (more recent comments slightly more relevant)
+    if (comment.created_at) {
+      const daysSinceComment = (Date.now() - new Date(comment.created_at).getTime()) / (1000 * 60 * 60 * 24);
+      const recencyBonus = Math.max(0, 0.1 - (daysSinceComment / 365) * 0.1); // Small bonus, decaying over year
+      score += recencyBonus;
+    }
+
+    // Only include comments above threshold
+    if (score >= relevanceThreshold) {
+      scoredComments.push({
+        ...comment,
+        relevanceScore: score,
+      });
+    }
+  }
+
+  return scoredComments;
+}
+
+/**
+ * Calculate content relevance based on keywords and context
+ */
+function calculateContentRelevance(commentBody, targetFilePath) {
+  if (!commentBody || !targetFilePath) return 0;
+
+  const lowerBody = commentBody.toLowerCase();
+  const fileName = path.basename(targetFilePath).toLowerCase();
+  const fileNameWithoutExt = path.basename(targetFilePath, path.extname(targetFilePath)).toLowerCase();
+
+  let relevanceScore = 0;
+
+  // File name mentions
+  if (lowerBody.includes(fileName)) {
+    relevanceScore += 0.5;
+  }
+  if (lowerBody.includes(fileNameWithoutExt)) {
+    relevanceScore += 0.3;
+  }
+
+  // Technical keywords that might be relevant
+  const technicalKeywords = [
+    'function',
+    'method',
+    'class',
+    'component',
+    'module',
+    'import',
+    'export',
+    'bug',
+    'error',
+    'fix',
+    'issue',
+    'problem',
+    'refactor',
+    'optimize',
+    'test',
+    'testing',
+    'coverage',
+    'performance',
+    'security',
+    'validation',
+  ];
+
+  const keywordMatches = technicalKeywords.filter((keyword) => lowerBody.includes(keyword)).length;
+
+  relevanceScore += Math.min(keywordMatches * 0.05, 0.3); // Cap at 0.3
+
+  return Math.min(relevanceScore, 1.0);
+}
+
+/**
+ * Extract patterns from historical comments
+ */
+function extractCommentPatterns(comments) {
+  const patterns = {
+    commonIssues: [],
+    reviewPatterns: [],
+    technicalConcerns: [],
+    suggestedImprovements: [],
+  };
+
+  // Analyze comment content for patterns
+  const allText = comments
+    .map((c) => c.body || '')
+    .join(' ')
+    .toLowerCase();
+
+  // Common issue keywords
+  const issueKeywords = ['bug', 'error', 'issue', 'problem', 'broken', 'fail'];
+  patterns.commonIssues = issueKeywords.filter((keyword) => allText.includes(keyword));
+
+  // Review pattern keywords
+  const reviewKeywords = ['suggest', 'recommend', 'consider', 'improve', 'better'];
+  patterns.reviewPatterns = reviewKeywords.filter((keyword) => allText.includes(keyword));
+
+  // Technical concern keywords
+  const techKeywords = ['performance', 'security', 'memory', 'optimization', 'scalability'];
+  patterns.technicalConcerns = techKeywords.filter((keyword) => allText.includes(keyword));
+
+  return patterns;
+}
+
+/**
+ * Generate summary of historical context
+ */
+function generateContextSummary(comments, patterns) {
+  if (comments.length === 0) {
+    return 'No relevant historical comments found for this file.';
+  }
+
+  const summaryParts = [`Found ${comments.length} relevant historical comments.`];
+
+  if (patterns.commonIssues.length > 0) {
+    summaryParts.push(`Common issues mentioned: ${patterns.commonIssues.join(', ')}.`);
+  }
+
+  if (patterns.reviewPatterns.length > 0) {
+    summaryParts.push(`Review suggestions often involve: ${patterns.reviewPatterns.join(', ')}.`);
+  }
+
+  if (patterns.technicalConcerns.length > 0) {
+    summaryParts.push(`Technical concerns raised: ${patterns.technicalConcerns.join(', ')}.`);
+  }
+
+  // Add recency information
+  const recentComments = comments.filter((c) => {
+    const daysSince = (Date.now() - new Date(c.created_at).getTime()) / (1000 * 60 * 60 * 24);
+    return daysSince <= 30;
+  });
+
+  if (recentComments.length > 0) {
+    summaryParts.push(`${recentComments.length} comments from the last 30 days.`);
+  }
+
+  return summaryParts.join(' ');
+}
+
+/**
+ * Format comment for context usage
+ */
+function formatCommentForContext(comment) {
+  return {
+    id: comment.id,
+    author: comment.author_login,
+    body: comment.body ? comment.body.substring(0, 500) : '', // Truncate long comments
+    createdAt: comment.created_at,
+    commentType: comment.comment_type,
+    filePath: comment.file_path,
+    prNumber: comment.pr_number,
+    prTitle: comment.pr_title,
+    relevanceScore: comment.relevanceScore,
+  };
+}
+
+export { analyzeFile, getPRCommentContext };
