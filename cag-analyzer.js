@@ -28,6 +28,7 @@ const CONTENT_LENGTH_BONUS_THRESHOLD = 300;
 const CONTENT_LENGTH_PENALTY_THRESHOLD = 150;
 const DEBUG_PREVIEW_LENGTH = 300;
 const RESPONSE_TRUNCATE_LENGTH = 1000;
+const MAX_PR_COMMENTS = 50;
 
 // Debug function for logging
 function debug(message) {
@@ -264,26 +265,38 @@ async function analyzeFile(filePath, options = {}) {
     try {
       const prContextOptions = {
         ...options,
-        maxComments: options.maxPRComments || 3,
+        maxComments: MAX_PR_COMMENTS,
         similarityThreshold: options.prSimilarityThreshold || 0.3,
-        timeout: options.prTimeout || 10000,
+        timeout: options.prTimeout || 300000, // Increased timeout to 5 minutes for LLM verification
         projectPath: projectPath,
         repository: options.repository || null,
       };
 
-      const prContextResult = await Promise.race([
-        getPRCommentContext(filePath, prContextOptions),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('PR context timeout')), prContextOptions.timeout)),
-      ]);
+      // Use a more robust timeout that allows for LLM verification
+      let prContextResult;
+      try {
+        console.log(chalk.blue(`⏱️ Starting PR comment search with ${prContextOptions.timeout / 1000}s timeout...`));
+        prContextResult = await Promise.race([
+          getPRCommentContext(filePath, prContextOptions),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('PR context timeout - LLM verification may need more time')), prContextOptions.timeout)
+          ),
+        ]);
+      } catch (timeoutError) {
+        if (timeoutError.message.includes('timeout')) {
+          console.log(chalk.yellow(`⚠️ PR comment search timed out after ${prContextOptions.timeout / 1000}s`));
+          console.log(chalk.yellow(`This may be due to LLM verification taking longer than expected`));
+          console.log(chalk.blue(`Continuing with analysis without PR comments...`));
+          prContextResult = { success: false, hasContext: false, comments: [] };
+        } else {
+          throw timeoutError;
+        }
+      }
 
       if (prContextResult && prContextResult.comments && prContextResult.comments.length > 0) {
         prCommentContext = prContextResult.comments;
         prContextAvailable = true;
         console.log(chalk.green(`✅ Found ${prCommentContext.length} relevant PR comments`));
-        console.log(chalk.blue(`PR Comments preview:`));
-        prCommentContext.forEach((comment, idx) => {
-          console.log(chalk.gray(`  ${idx + 1}. PR #${comment.prNumber} by ${comment.author}: ${comment.body.substring(0, 100)}...`));
-        });
       } else {
         console.log(chalk.yellow('❌ No relevant PR comments found'));
         if (prContextResult) {
@@ -1326,7 +1339,7 @@ async function getPRCommentContext(filePath, options = {}) {
     debug(`[getPRCommentContext] Getting context for ${normalizedPath}`);
 
     // Import database functions
-    const { findSimilarPRComments } = await import('./src/pr-history/database.js');
+    const { findRelevantPRComments } = await import('./src/pr-history/database.js');
 
     // Read the file content to create embedding for semantic search
     let fileContent = '';
@@ -1362,19 +1375,13 @@ async function getPRCommentContext(filePath, options = {}) {
     console.log(chalk.gray(`  Content Length: ${truncatedContent.length} chars`));
 
     try {
-      console.log(chalk.blue(`🔍 Attempting semantic search...`));
-      relevantComments = await findSimilarPRComments(truncatedContent, {
+      console.log(chalk.blue(`🔍 Attempting hybrid search with chunking...`));
+      relevantComments = await findRelevantPRComments(truncatedContent, {
         projectPath,
-        threshold: similarityThreshold,
         limit: maxComments,
-        enableMultiStage: true, // Enable enhanced multi-stage search
         isTestFile: isTest, // Pass test file context for filtering
-        fileExtension: fileName.split('.').pop(), // Pass file extension
-        targetCodeContent: truncatedContent, // Pass the file content for chunking
-        targetFilePath: fileName, // Pass the file path for context
-        // Remove file_path filter to allow broader search across all files
       });
-      console.log(chalk.green(`✅ Semantic search returned ${relevantComments.length} comments`));
+      console.log(chalk.green(`✅ Hybrid search returned ${relevantComments.length} comments`));
       if (relevantComments.length > 0) {
         console.log(chalk.blue(`Top comment similarities:`));
         relevantComments.slice(0, 3).forEach((comment, idx) => {
@@ -1384,36 +1391,32 @@ async function getPRCommentContext(filePath, options = {}) {
         });
       }
     } catch (dbError) {
-      console.log(chalk.yellow(`⚠️ Semantic search failed: ${dbError.message}`));
-      debug(`[getPRCommentContext] Semantic search failed: ${dbError.message}`);
-      // No fallback needed - if semantic search fails, we just return empty results
+      console.log(chalk.yellow(`⚠️ Hybrid search failed: ${dbError.message}`));
+      debug(`[getPRCommentContext] Hybrid search failed: ${dbError.message}`);
+      // No fallback needed - if hybrid search fails, we just return empty results
       relevantComments = [];
     }
 
-    // Filter by similarity threshold and sort
-    const filteredComments = relevantComments
-      .filter((comment) => comment.similarity_score >= similarityThreshold)
-      .sort((a, b) => b.similarity_score - a.similarity_score)
-      .slice(0, maxComments);
+    console.log('Total relevant comments number:', relevantComments.length);
 
     // Extract patterns and insights
-    const patterns = extractCommentPatterns(filteredComments);
-    const summary = generateContextSummary(filteredComments, patterns);
+    const patterns = extractCommentPatterns(relevantComments);
+    const summary = generateContextSummary(relevantComments, patterns);
 
-    debug(`[getPRCommentContext] Found ${filteredComments.length} relevant comments for ${normalizedPath}`);
+    debug(`[getPRCommentContext] Found ${relevantComments.length} relevant comments for ${normalizedPath}`);
 
     return {
       success: true,
-      hasContext: filteredComments.length > 0,
+      hasContext: relevantComments.length > 0,
       filePath: normalizedPath,
-      comments: filteredComments.map(formatCommentForContext),
+      comments: relevantComments.map(formatCommentForContext),
       patterns,
       summary,
       metadata: {
         totalCommentsFound: relevantComments.length,
-        relevantCommentsReturned: filteredComments.length,
+        relevantCommentsReturned: relevantComments.length,
         averageRelevanceScore:
-          filteredComments.length > 0 ? filteredComments.reduce((sum, c) => sum + c.similarity_score, 0) / filteredComments.length : 0,
+          relevantComments.length > 0 ? relevantComments.reduce((sum, c) => sum + c.similarity_score, 0) / relevantComments.length : 0,
         searchMethod:
           relevantComments.length > 0 && relevantComments[0].similarity_score !== 0.5 ? 'semantic_embedding' : 'file_path_fallback',
       },
@@ -1610,14 +1613,14 @@ function generateContextSummary(comments, patterns) {
 function formatCommentForContext(comment) {
   return {
     id: comment.id,
-    author: comment.author_login,
-    body: comment.body ? comment.body.substring(0, 500) : '', // Truncate long comments
+    author: comment.author || comment.author_login, // Handle both field names
+    body: (comment.comment_text || comment.body || '').substring(0, 500), // Handle both field names and truncate
     createdAt: comment.created_at,
     commentType: comment.comment_type,
     filePath: comment.file_path,
     prNumber: comment.pr_number,
     prTitle: comment.pr_title,
-    relevanceScore: comment.relevanceScore,
+    relevanceScore: comment.similarity_score || comment.relevanceScore, // Handle both field names
   };
 }
 

@@ -27,6 +27,7 @@ import {
 } from './cag-review.js';
 
 // Import PR history analyzer and CLI utilities
+import { cleanupClassifier } from './src/pr-history/database.js';
 import {
   displayAnalysisResults,
   displayDatabaseStats,
@@ -385,9 +386,20 @@ async function runCodeReview(options) {
     console.log(chalk.cyan('Cleaning up resources...'));
     try {
       await embeddings.cleanup();
+      await cleanupClassifier();
       console.log(chalk.green('All resources cleaned up successfully'));
+
+      // Force exit after a short delay to prevent hanging
+      setTimeout(() => {
+        console.log(chalk.cyan('Forcing process exit to prevent hanging...'));
+        process.exit(0);
+      }, 1000);
     } catch (cleanupErr) {
       console.error(chalk.yellow('Error during cleanup:'), cleanupErr.message);
+      // Force exit even on cleanup error
+      setTimeout(() => {
+        process.exit(1);
+      }, 1000);
     }
   } catch (err) {
     const endTime = Date.now();
@@ -397,6 +409,7 @@ async function runCodeReview(options) {
     // Clean up resources even on error
     try {
       await embeddings.cleanup();
+      await cleanupClassifier();
       console.log(chalk.green('All resources cleaned up successfully'));
     } catch (cleanupErr) {
       console.error(chalk.red('Error during cleanup:'), cleanupErr.message);

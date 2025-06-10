@@ -123,8 +123,10 @@ export class PRCommentProcessor {
         codeEmbedding = await this.generateCodeEmbedding(codeContext.original_code);
       }
 
-      // Combine embeddings
-      const combinedEmbedding = codeEmbedding ? this.combineEmbeddings(commentEmbedding, codeEmbedding) : commentEmbedding;
+      // Combine embeddings from concatenated text
+      const combinedEmbedding = codeContext.original_code
+        ? await this.combineEmbeddings(comment.body, codeContext.original_code)
+        : commentEmbedding;
 
       // Classify comment
       let classification;
@@ -346,22 +348,26 @@ export class PRCommentProcessor {
   }
 
   /**
-   * Combine comment and code embeddings
-   * @param {Array<number>} commentEmbedding - Comment embedding
-   * @param {Array<number>} codeEmbedding - Code embedding
-   * @returns {Array<number>} Combined embedding
+   * Combine comment and code text, then generate embedding from concatenated content
+   * @param {string} commentText - Comment text
+   * @param {string} codeText - Code text
+   * @returns {Promise<Array<number>>} Combined embedding from concatenated text
    */
-  combineEmbeddings(commentEmbedding, codeEmbedding) {
-    if (!commentEmbedding || !codeEmbedding) {
-      return commentEmbedding || codeEmbedding;
+  async combineEmbeddings(commentText, codeText) {
+    if (!commentText && !codeText) {
+      return null;
     }
 
-    // Weighted average: 60% comment, 40% code
-    const combined = [];
-    for (let i = 0; i < commentEmbedding.length; i++) {
-      combined[i] = commentEmbedding[i] * 0.6 + codeEmbedding[i] * 0.4;
+    // Concatenate comment and code text with clear separation
+    const combinedText = [commentText, codeText].filter(Boolean).join('\n\n--- CODE CONTEXT ---\n\n');
+
+    // Generate embedding from the concatenated text
+    const combinedEmbedding = await calculateEmbedding(combinedText);
+    if (!combinedEmbedding || combinedEmbedding.length !== 384) {
+      throw new Error(`Invalid combined embedding dimensions: expected 384, got ${combinedEmbedding?.length}`);
     }
-    return combined;
+
+    return combinedEmbedding;
   }
 
   /**
