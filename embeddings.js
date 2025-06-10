@@ -68,12 +68,17 @@ const FASTEMBED_CACHE_DIR = path.join(process.env.HOME || process.env.USERPROFIL
 const processedFiles = new Map();
 let dbConnection = null;
 let embeddingModel = null; // Cache for fastembed model instance
+let modelInitialized = false; // Flag to track if model has been initialized
+let modelInitializationPromise = null; // Promise to prevent concurrent initialization
 let projectEmbeddingsCache = null;
 
 // Cache for document contexts to avoid re-inferring for multiple chunks from the same doc
 const documentContextCache = new Map();
 // Cache for H1 embeddings to avoid re-calculating for H1 relevance bonus
 const h1EmbeddingCache = new Map();
+// Cache for embedding results to avoid redundant calculations
+const embeddingCache = new Map();
+const MAX_EMBEDDING_CACHE_SIZE = 1000;
 
 // Progress Tracker
 const progressTracker = {
@@ -229,10 +234,26 @@ function isSimilarLanguage(lang1, lang2) {
  * @returns {Promise<FlagEmbedding>}
  */
 async function initEmbeddingModel() {
-  if (!embeddingModel) {
+  // If model is already initialized, return it immediately
+  if (embeddingModel) {
+    return embeddingModel;
+  }
+
+  // If initialization is already in progress, wait for it
+  if (modelInitializationPromise) {
+    return await modelInitializationPromise;
+  }
+
+  // Start initialization and store the promise
+  modelInitializationPromise = (async () => {
     const modelIdentifier = EmbeddingModel.BGESmallENV15;
-    console.log(chalk.blue(`Attempting to initialize fastembed model. Identifier: ${MODEL_NAME_STRING}`));
-    console.log(chalk.blue(`FastEmbed Cache Directory: ${FASTEMBED_CACHE_DIR}`));
+
+    // Only print logs if we haven't initialized before
+    if (!modelInitialized) {
+      console.log(chalk.blue(`Attempting to initialize fastembed model. Identifier: ${MODEL_NAME_STRING}`));
+      console.log(chalk.blue(`FastEmbed Cache Directory: ${FASTEMBED_CACHE_DIR}`));
+    }
+
     try {
       if (!fs.existsSync(FASTEMBED_CACHE_DIR)) {
         console.log(chalk.yellow(`Creating fastembed cache directory: ${FASTEMBED_CACHE_DIR}`));
@@ -245,7 +266,12 @@ async function initEmbeddingModel() {
             model: modelIdentifier,
             cacheDir: FASTEMBED_CACHE_DIR,
           });
-          console.log(chalk.green('FastEmbed model initialized successfully.'));
+
+          // Only print success message if we haven't initialized before
+          if (!modelInitialized) {
+            console.log(chalk.green('FastEmbed model initialized successfully.'));
+            modelInitialized = true;
+          }
           break; // Exit loop on success
         } catch (initError) {
           retries++;
@@ -256,12 +282,19 @@ async function initEmbeddingModel() {
           await new Promise((resolve) => setTimeout(resolve, retries * 2000)); // Wait before retrying
         }
       }
+
+      // Clear the initialization promise since we're done
+      modelInitializationPromise = null;
+      return embeddingModel;
     } catch (err) {
+      // Clear the initialization promise on error
+      modelInitializationPromise = null;
       console.error(chalk.red(`Fatal: Failed to initialize fastembed model: ${err.message}`), err);
       throw err; // Re-throw critical error
     }
-  }
-  return embeddingModel;
+  })();
+
+  return await modelInitializationPromise;
 }
 
 // ============================================================================
@@ -276,8 +309,13 @@ async function initEmbeddingModel() {
 export async function calculateEmbedding(text) {
   // Ensure text is a non-empty string
   if (typeof text !== 'string' || text.trim().length === 0) {
-    debug('Skipping embedding for empty or invalid text.');
     return null; // Return null for empty text to avoid errors downstream
+  }
+
+  // Check cache first
+  const cacheKey = text.trim().substring(0, 200); // Use first 200 chars as cache key
+  if (embeddingCache.has(cacheKey)) {
+    return embeddingCache.get(cacheKey);
   }
 
   try {
@@ -301,7 +339,20 @@ export async function calculateEmbedding(text) {
       );
       return null; // Return null if dimensions mismatch or invalid
     }
-    debug(`Embedding generated successfully, dimensions: ${embedding.length}`);
+
+    // Cache the result
+    if (embeddingCache.size >= MAX_EMBEDDING_CACHE_SIZE) {
+      // Remove oldest entry
+      const firstKey = embeddingCache.keys().next().value;
+      embeddingCache.delete(firstKey);
+    }
+    embeddingCache.set(cacheKey, embedding);
+
+    // Only log in debug mode and less frequently
+    if (embeddingCache.size % 10 === 0) {
+      debug(`Embedding cache size: ${embeddingCache.size}, latest dimensions: ${embedding.length}`);
+    }
+
     return embedding;
   } catch (error) {
     console.error(chalk.red(`Error calculating embedding: ${error.message}`), error);
@@ -367,8 +418,13 @@ async function calculateEmbeddingBatch(texts) {
  */
 export async function calculateQueryEmbedding(text) {
   if (typeof text !== 'string' || text.trim().length === 0) {
-    debug('Skipping query embedding for empty or invalid text.');
     return null;
+  }
+
+  // Check cache first (use 'query:' prefix to distinguish from passage embeddings)
+  const cacheKey = `query:${text.trim().substring(0, 200)}`;
+  if (embeddingCache.has(cacheKey)) {
+    return embeddingCache.get(cacheKey);
   }
 
   try {
@@ -382,7 +438,19 @@ export async function calculateQueryEmbedding(text) {
       // Array.from() handles both cases correctly, converting Float32Array to number[] or returning number[] as is.
       const embedding = Array.from(embeddingArray);
 
-      debug(`Query embedding generated successfully, dimensions: ${embedding.length}`);
+      // Cache the result
+      if (embeddingCache.size >= MAX_EMBEDDING_CACHE_SIZE) {
+        // Remove oldest entry
+        const firstKey = embeddingCache.keys().next().value;
+        embeddingCache.delete(firstKey);
+      }
+      embeddingCache.set(cacheKey, embedding);
+
+      // Only log in debug mode and less frequently
+      if (embeddingCache.size % 10 === 0) {
+        debug(`Query embedding cache size: ${embeddingCache.size}, latest dimensions: ${embedding.length}`);
+      }
+
       return embedding;
     } else {
       console.error(
@@ -2111,6 +2179,8 @@ export async function cleanup() {
       dbConnection = null;
     }
     embeddingModel = null; // Allow embedding model to be GC'd if not held elsewhere
+    modelInitialized = false; // Reset initialization flag
+    modelInitializationPromise = null; // Reset initialization promise
     // Clear caches to free memory
     clearCaches();
     console.log(chalk.green('Embeddings resources potentially released (connection nulled).'));
@@ -2128,11 +2198,17 @@ export async function cleanup() {
 export function clearCaches() {
   const docCacheSize = documentContextCache.size;
   const h1CacheSize = h1EmbeddingCache.size;
+  const embeddingCacheSize = embeddingCache.size;
 
   documentContextCache.clear();
   h1EmbeddingCache.clear();
+  embeddingCache.clear();
 
-  console.log(chalk.yellow(`[CACHE] Cleared caches - Document contexts: ${docCacheSize}, H1 embeddings: ${h1CacheSize}`));
+  console.log(
+    chalk.yellow(
+      `[CACHE] Cleared caches - Document contexts: ${docCacheSize}, H1 embeddings: ${h1CacheSize}, Embeddings: ${embeddingCacheSize}`
+    )
+  );
 }
 
 /**
