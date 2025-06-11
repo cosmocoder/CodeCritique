@@ -71,6 +71,7 @@ let embeddingModel = null; // Cache for fastembed model instance
 let modelInitialized = false; // Flag to track if model has been initialized
 let modelInitializationPromise = null; // Promise to prevent concurrent initialization
 let projectEmbeddingsCache = null;
+let tablesInitialized = false; // NEW: Track if tables have been initialized
 
 // Cache for document contexts to avoid re-inferring for multiple chunks from the same doc
 const documentContextCache = new Map();
@@ -467,15 +468,15 @@ export async function calculateQueryEmbedding(text) {
 }
 
 // ============================================================================
-// DATABASE MANAGEMENT FUNCTIONS
+// DATABASE MANAGEMENT FUNCTIONS (SEPARATED: INIT vs ACCESS)
 // ============================================================================
 
 /**
- * Initialize the database and ensure tables exist using schema inference
+ * Get database connection without triggering table creation
  * @private
- * @returns {Promise<lancedb.Connection>} Initialized database object
+ * @returns {Promise<lancedb.Connection>} Database connection
  */
-async function initializeDB() {
+async function getDBConnection() {
   if (!dbConnection) {
     console.log(chalk.blue(`Initializing DB connection. Target Path: ${LANCEDB_PATH}`));
     if (!fs.existsSync(LANCEDB_PATH)) {
@@ -483,18 +484,93 @@ async function initializeDB() {
     }
     dbConnection = await lancedb.connect(LANCEDB_PATH);
     console.log(chalk.green('LanceDB connected.'));
-    await ensureTablesExist(dbConnection); // Ensure tables are created/verified
   }
   return dbConnection;
 }
 
 /**
- * Get database connection (alias for initializeDB)
+ * Initialize all database tables and indices (ONE-TIME SETUP)
+ * This should be called once during application startup or before batch processing
+ * @returns {Promise<void>}
+ */
+export async function initializeTables() {
+  if (tablesInitialized) {
+    debug('Tables already initialized, skipping...');
+    return;
+  }
+
+  console.log(chalk.blue('Initializing database tables and indices...'));
+  const db = await getDBConnection();
+  await ensureTablesExist(db);
+  tablesInitialized = true;
+  console.log(chalk.green('Database tables and indices initialized successfully.'));
+}
+
+/**
+ * Get database connection and ensure tables exist (LEGACY - for backward compatibility)
+ * @private
+ * @returns {Promise<lancedb.Connection>} Initialized database object
+ */
+async function initializeDB() {
+  const db = await getDBConnection();
+  if (!tablesInitialized) {
+    await ensureTablesExist(db);
+    tablesInitialized = true;
+  }
+  return db;
+}
+
+/**
+ * Get database connection (alias for initializeDB - LEGACY)
  * @private
  * @returns {Promise<lancedb.Connection>} Database connection
  */
 async function getDB() {
   return initializeDB();
+}
+
+/**
+ * Get a specific table instance (LIGHTWEIGHT OPERATION)
+ * @param {string} tableName - Name of the table
+ * @returns {Promise<lancedb.Table | null>} Table object or null if not found/error
+ */
+export async function getTableInstance(tableName) {
+  try {
+    const db = await getDBConnection();
+    const tableNames = await db.tableNames();
+    if (tableNames.includes(tableName)) {
+      return await db.openTable(tableName);
+    }
+    console.warn(chalk.yellow(`Table ${tableName} does not exist. Call initializeTables() first.`));
+    return null;
+  } catch (error) {
+    console.error(chalk.red(`Error opening table ${tableName}: ${error.message}`), error);
+    return null;
+  }
+}
+
+/**
+ * Get file embeddings table
+ * @returns {Promise<lancedb.Table | null>}
+ */
+export async function getFileEmbeddingsTable() {
+  return getTableInstance(FILE_EMBEDDINGS_TABLE);
+}
+
+/**
+ * Get document chunk embeddings table
+ * @returns {Promise<lancedb.Table | null>}
+ */
+export async function getDocumentChunkTable() {
+  return getTableInstance(DOCUMENT_CHUNK_TABLE);
+}
+
+/**
+ * Get PR comments table
+ * @returns {Promise<lancedb.Table | null>}
+ */
+export async function getPRCommentsTableInstance() {
+  return getTableInstance(PR_COMMENTS_TABLE);
 }
 
 /**
@@ -735,20 +811,19 @@ async function ensureTablesExist(db) {
 }
 
 /**
- * Open an existing table.
+ * Open an existing table (lightweight operation)
  * @private
- * @param {lancedb.Connection} db - Database connection
  * @param {string} tableName - Name of the table
  * @returns {Promise<lancedb.Table | null>} Table object or null if not found/error
  */
-async function getTable(db, tableName) {
+async function getTable(tableName) {
   try {
+    const db = await getDBConnection();
     const tableNames = await db.tableNames();
     if (tableNames.includes(tableName)) {
       return await db.openTable(tableName);
     }
     // Don't warn here, let the calling function decide if it's an error
-    // console.warn(chalk.yellow(`Table ${tableName} does not exist.`));
     return null;
   } catch (error) {
     console.error(chalk.red(`Error opening table ${tableName}: ${error.message}`), error);
@@ -790,7 +865,7 @@ export async function generateFileEmbeddings(filePath, content, baseDir = proces
     debug(`[generateFileEmbeddings] Embedding calculated for ${relativePath}, length: ${embedding.length}`);
 
     const db = await getDB();
-    const table = await getTable(db, FILE_EMBEDDINGS_TABLE);
+    const table = await getTable(FILE_EMBEDDINGS_TABLE);
     if (!table) {
       // This might happen if ensureTablesExist failed earlier
       console.error(chalk.red(`[generateFileEmbeddings] Table ${FILE_EMBEDDINGS_TABLE} not found!`));
@@ -917,7 +992,7 @@ export const generateDirectoryStructureEmbedding = async (options = {}) => {
   console.log(chalk.cyan('[generateDirEmb] Starting...')); // Log entry
   try {
     const db = await getDB();
-    const table = await getTable(db, FILE_EMBEDDINGS_TABLE);
+    const table = await getTable(FILE_EMBEDDINGS_TABLE);
     if (!table) {
       throw new Error(`[generateDirEmb] Table ${FILE_EMBEDDINGS_TABLE} not found.`);
     }
@@ -1041,7 +1116,7 @@ export async function processBatchEmbeddings(filePaths, options = {}) {
     console.warn(chalk.yellow(`Warning: Failed to generate directory structure embedding: ${structureError.message}`));
   }
 
-  const fileTable = await getTable(db, FILE_EMBEDDINGS_TABLE);
+  const fileTable = await getTable(FILE_EMBEDDINGS_TABLE);
   if (!fileTable) {
     console.error(chalk.red(`Table ${FILE_EMBEDDINGS_TABLE} not found. Aborting batch file embedding.`));
     // Mark all as failed if table is missing
@@ -1440,7 +1515,7 @@ export async function processBatchEmbeddings(filePaths, options = {}) {
 
   // --- Phase 2: Batch process DOCUMENT CHUNK embeddings ---
   console.log(chalk.cyan('--- Starting Phase 2: Document Chunk Embeddings ---'));
-  const documentChunkTable = await getTable(db, DOCUMENT_CHUNK_TABLE);
+  const documentChunkTable = await getTable(DOCUMENT_CHUNK_TABLE);
   if (documentChunkTable) {
     const allDocChunksToEmbed = [];
     const allDocChunkRecordsToAdd = [];
@@ -1826,7 +1901,7 @@ export const findSimilarCode = async (queryText, options = {}) => {
 
     const db = await getDB();
     const tableName = excludeNonDocs ? DOCUMENT_CHUNK_TABLE : FILE_EMBEDDINGS_TABLE;
-    const table = await getTable(db, tableName);
+    const table = await getTable(tableName);
 
     if (!table) {
       console.warn(chalk.yellow(`Table ${tableName} not found`));
@@ -1989,9 +2064,6 @@ export const findSimilarCode = async (queryText, options = {}) => {
               queryContextForReranking.language || 'typescript'
             );
             documentContextCache.set(docPath, chunkParentDocContext);
-            debug(`[CACHE] Document context cached for: ${docPath}`);
-          } else {
-            debug(`[CACHE] Document context retrieved from cache for: ${docPath}`);
           }
 
           // Area and tech matching with heavy bonuses/penalties
@@ -2025,11 +2097,9 @@ export const findSimilarCode = async (queryText, options = {}) => {
               h1Emb = await calculateEmbedding(docH1);
               if (h1Emb) {
                 h1EmbeddingCache.set(docH1, h1Emb);
-                debug(`[CACHE] H1 embedding cached for: "${docH1.substring(0, 50)}..."`);
               }
-            } else {
-              debug(`[CACHE] H1 embedding retrieved from cache for: "${docH1.substring(0, 50)}..."`);
             }
+
             if (h1Emb && queryEmbedding) {
               h1RelevanceBonus = calculateCosineSimilarity(queryEmbedding, h1Emb) * WEIGHT_H1_CHUNK_RERANK;
             }
@@ -2081,7 +2151,7 @@ export const findSimilarCode = async (queryText, options = {}) => {
     // Include project structure if requested (project-specific)
     if (includeProjectStructure) {
       try {
-        const fileTable = await getTable(db, FILE_EMBEDDINGS_TABLE);
+        const fileTable = await getTable(FILE_EMBEDDINGS_TABLE);
         if (fileTable) {
           // Look for project-specific structure ID
           const projectStructureId = `__project_structure__${path.basename(resolvedProjectPath)}`;
@@ -2181,6 +2251,7 @@ export async function cleanup() {
     embeddingModel = null; // Allow embedding model to be GC'd if not held elsewhere
     modelInitialized = false; // Reset initialization flag
     modelInitializationPromise = null; // Reset initialization promise
+    tablesInitialized = false; // Reset tables initialization flag
     // Clear caches to free memory
     clearCaches();
     console.log(chalk.green('Embeddings resources potentially released (connection nulled).'));
@@ -2358,10 +2429,12 @@ export async function clearAllEmbeddings() {
       console.log(chalk.green('No embedding tables found to drop.'));
     }
     dbConnection = null; // <<< Force connection to be re-established on next getDB() call
+    tablesInitialized = false; // Reset tables initialization flag since tables were dropped
     return true;
   } catch (error) {
     console.error(chalk.red(`Error clearing embeddings: ${error.message}`), error);
     dbConnection = null; // Also nullify on error to be safe for next attempt
+    tablesInitialized = false; // Reset tables initialization flag on error
     throw error; // Re-throw
   }
 }
@@ -2419,7 +2492,7 @@ export function getProjectEmbeddings(projectPath = process.cwd()) {
           stats.tables[tableName] = 0; // Initialize count
           if (tableNames.includes(tableName)) {
             try {
-              const table = await getTable(db, tableName); // Use getTable which handles non-existence
+              const table = await getTable(tableName); // Use getTable which handles non-existence
               if (table) {
                 const count = await table.countRows();
                 stats.tables[tableName] = count;
@@ -2458,7 +2531,7 @@ export function getProjectEmbeddings(projectPath = process.cwd()) {
 export async function getPRCommentsTable(projectPath = process.cwd()) {
   try {
     const db = await getDB();
-    return await getTable(db, PR_COMMENTS_TABLE);
+    return await getTable(PR_COMMENTS_TABLE);
   } catch (error) {
     console.error(chalk.red(`Error getting PR comments table: ${error.message}`));
     return null;

@@ -257,65 +257,21 @@ async function analyzeFile(filePath, options = {}) {
       console.log(chalk.blue(`Detected test file: ${filePath}`));
     }
 
-    // --- Stage 0: PR Comment Context Retrieval ---
-    console.log(chalk.blue('--- Stage 0: Retrieving PR Comment History ---'));
-    let prCommentContext = [];
-    let prContextAvailable = false;
-
+    // --- Stage 0: Initialize Tables (ONE-TIME SETUP) ---
+    console.log(chalk.blue('--- Stage 0: Initializing Database Tables ---'));
     try {
-      const prContextOptions = {
-        ...options,
-        maxComments: MAX_PR_COMMENTS,
-        similarityThreshold: options.prSimilarityThreshold || 0.3,
-        timeout: options.prTimeout || 300000, // Increased timeout to 5 minutes for LLM verification
-        projectPath: projectPath,
-        repository: options.repository || null,
-      };
-
-      // Use a more robust timeout that allows for LLM verification
-      let prContextResult;
-      try {
-        console.log(chalk.blue(`⏱️ Starting PR comment search with ${prContextOptions.timeout / 1000}s timeout...`));
-        prContextResult = await Promise.race([
-          getPRCommentContext(filePath, prContextOptions),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('PR context timeout - LLM verification may need more time')), prContextOptions.timeout)
-          ),
-        ]);
-      } catch (timeoutError) {
-        if (timeoutError.message.includes('timeout')) {
-          console.log(chalk.yellow(`⚠️ PR comment search timed out after ${prContextOptions.timeout / 1000}s`));
-          console.log(chalk.yellow(`This may be due to LLM verification taking longer than expected`));
-          console.log(chalk.blue(`Continuing with analysis without PR comments...`));
-          prContextResult = { success: false, hasContext: false, comments: [] };
-        } else {
-          throw timeoutError;
-        }
-      }
-
-      if (prContextResult && prContextResult.comments && prContextResult.comments.length > 0) {
-        prCommentContext = prContextResult.comments;
-        prContextAvailable = true;
-        console.log(chalk.green(`✅ Found ${prCommentContext.length} relevant PR comments`));
-      } else {
-        console.log(chalk.yellow('❌ No relevant PR comments found'));
-        if (prContextResult) {
-          console.log(
-            chalk.gray(
-              `PR context result: success=${prContextResult.success}, hasContext=${prContextResult.hasContext}, totalFound=${prContextResult.metadata?.totalCommentsFound || 0}`
-            )
-          );
-        }
-      }
-    } catch (error) {
-      console.warn(chalk.yellow(`PR comment context unavailable: ${error.message}`));
-      debug(`[analyzeFile] PR context error: ${error.stack}`);
+      // Import the initializeTables function
+      const { initializeTables } = await import('./embeddings.js');
+      await initializeTables();
+      console.log(chalk.green('✅ Database tables initialized successfully'));
+    } catch (initError) {
+      console.warn(chalk.yellow(`Database initialization warning: ${initError.message}`));
+      // Continue with analysis even if table initialization fails
     }
 
     // --- PHASE 1: UNDERSTAND THE CODE SNIPPET BEING REVIEWED ---
     const reviewedSnippetContext = inferContextFromCodeContent(content, language);
     debug('[analyzeFile] Reviewed Snippet Context:', reviewedSnippetContext);
-    // +++ END +++
 
     // +++ Get embedding for the file under review (for H1 proxy similarity - can be removed if H1 sim logic changes) +++
     let analyzedFileEmbedding = null;
@@ -327,7 +283,6 @@ async function analyzeFile(filePath, options = {}) {
     } else {
       debug(`[analyzeFile] Content of ${filePath} is empty. H1 proxy similarity will be skipped.`);
     }
-    // +++ END +++
 
     // Check if file should be processed
     if (!shouldProcessFile(filePath, content)) {
@@ -339,40 +294,92 @@ async function analyzeFile(filePath, options = {}) {
       };
     }
 
-    // --- Stage 1 (was PHASE 2): GENERATE CONTEXTUAL QUERY FOR DOCUMENTATION ---
-    console.log(chalk.blue('--- Stage 1: Generating Contextual Guideline Query ---'));
+    // --- Stage 1: PARALLEL CONTEXT RETRIEVAL ---
+    console.log(chalk.blue('--- Stage 1: Parallel Context Retrieval (PR Comments + Documentation + Code Examples) ---'));
+
+    // Prepare queries and options for parallel execution
     const guidelineQuery = isTestFile
       ? createTestGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language)
       : createGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language);
+
+    const prContextOptions = {
+      ...options,
+      maxComments: MAX_PR_COMMENTS,
+      similarityThreshold: options.prSimilarityThreshold || 0.3,
+      timeout: options.prTimeout || 300000,
+      projectPath: projectPath,
+      repository: options.repository || null,
+    };
+
+    const GUIDELINE_CANDIDATE_LIMIT = 100;
+    const CODE_EXAMPLE_LIMIT = 40;
+
+    // Execute all three context retrieval operations in parallel
+    console.log(chalk.blue('🚀 Starting parallel context retrieval...'));
+    const [prContextResult, guidelineCandidates, codeExampleCandidates] = await Promise.all([
+      // 1. PR Comment Context Retrieval
+      getPRCommentContext(filePath, prContextOptions).catch((error) => {
+        console.warn(chalk.yellow(`PR comment context unavailable: ${error.message}`));
+        debug(`[analyzeFile] PR context error: ${error.stack}`);
+        return { success: false, hasContext: false, comments: [] };
+      }),
+
+      // 2. Documentation Guidelines Retrieval
+      findSimilarCode(guidelineQuery, {
+        similarityThreshold: 0.05,
+        limit: GUIDELINE_CANDIDATE_LIMIT,
+        queryFilePath: filePath,
+        searchStrategy: 'hybrid',
+        excludeNonDocs: true, // Search document_chunks table
+        queryContextForReranking: reviewedSnippetContext,
+        projectPath: projectPath,
+      }).catch((error) => {
+        console.warn(chalk.yellow(`Documentation context unavailable: ${error.message}`));
+        return [];
+      }),
+
+      // 3. Similar Code Examples Retrieval
+      findSimilarCode(isTestFile ? `${content}\n// Looking for similar test files and testing patterns` : content, {
+        similarityThreshold: 0.3,
+        limit: CODE_EXAMPLE_LIMIT,
+        useReranking: false,
+        queryFilePath: filePath,
+        includeProjectStructure: false,
+        searchStrategy: 'vector_only',
+        excludeNonDocs: false, // Search file_embeddings table
+        searchType: 'code',
+        projectPath: projectPath,
+      }).catch((error) => {
+        console.warn(chalk.yellow(`Code examples context unavailable: ${error.message}`));
+        return [];
+      }),
+    ]);
+
+    // Process PR comment results
+    let prCommentContext = [];
+    let prContextAvailable = false;
+    if (prContextResult && prContextResult.comments && prContextResult.comments.length > 0) {
+      prCommentContext = prContextResult.comments;
+      prContextAvailable = true;
+      console.log(chalk.green(`✅ Found ${prCommentContext.length} relevant PR comments`));
+    } else {
+      console.log(chalk.yellow('❌ No relevant PR comments found'));
+    }
+
     console.log(
-      chalk.blue(
-        `[analyzeFile DEBUG] Using ${isTestFile ? 'test-specific' : 'standard'} guidelineQuery (first ${DEBUG_PREVIEW_LENGTH} chars): `
-      ),
-      guidelineQuery.substring(0, DEBUG_PREVIEW_LENGTH) + '...'
+      chalk.green(
+        `🎉 Parallel context retrieval completed - PR: ${prCommentContext.length}, Guidelines: ${guidelineCandidates.length}, Code: ${codeExampleCandidates.length}`
+      )
     );
 
-    const GUIDELINE_CANDIDATE_LIMIT = 100; // <<< INCREASED from 30, as findSimilarCode will do more contextual ranking
-    const RELEVANT_CHUNK_THRESHOLD = 0.1; // <<< LOWERED FURTHER to accommodate automatic classifier differences
+    // --- Stage 2: PROCESS DOCUMENTATION GUIDELINES ---
+    console.log(chalk.blue('--- Stage 2: Processing Documentation Guidelines ---'));
 
-    // These weights are for document-level scoring AFTER findSimilarCode returns its contextually ranked chunks
-    const W_H1_SIM = 0.2; // Weight for H1 proxy similarity (less emphasis now)
-    const W_DOC_CONTEXT_MATCH = 0.6; // <<< NEW: Heavy weight for explicit document context match
-
-    // Regex for generic documentation files to be penalized
+    const RELEVANT_CHUNK_THRESHOLD = 0.1;
+    const W_H1_SIM = 0.2;
+    const W_DOC_CONTEXT_MATCH = 0.6;
     const GENERIC_DOC_REGEX = /(README|RUNBOOK|CONTRIBUTING|CHANGELOG|LICENSE|SETUP|INSTALL)(\.md|$)/i;
     const GENERIC_DOC_PENALTY_FACTOR = 0.7;
-
-    // --- Stage 2 (was PHASE 3): RETRIEVE AND CONTEXTUALLY RE-RANK CHUNKS ---
-    console.log(chalk.blue('--- Stage 2: Retrieving and Contextually Re-ranking Chunks ---'));
-    const guidelineCandidates = await findSimilarCode(guidelineQuery, {
-      similarityThreshold: 0.05, // Lowered to ensure we get enough candidates with automatic classifier
-      limit: GUIDELINE_CANDIDATE_LIMIT, // Pass the increased limit
-      queryFilePath: filePath, // For logging or non-path heuristics if any
-      searchStrategy: 'hybrid',
-      excludeNonDocs: true, // Ensure we are searching document_chunks table
-      queryContextForReranking: reviewedSnippetContext, // <<< PASS SNIPPET CONTEXT
-      projectPath: projectPath, // Use the determined project path
-    });
 
     // --- Stage 3 (was PHASE 4): DOCUMENT SCORING AND SELECTION ---
     console.log(chalk.blue('--- Stage 3: Document Scoring and Selection ---'));
@@ -572,105 +579,15 @@ async function analyzeFile(filePath, options = {}) {
       )
     );
 
-    // --- Stage 2 of original plan (Code Example Retrieval) becomes Stage 5 here ---
-    console.log(chalk.blue('--- Stage 5: Retrieving Code Examples and Implicit Patterns ---'));
-    const CODE_EXAMPLE_LIMIT = 40; // Reduced to make room for utility search
-    const UTILITY_SEARCH_LIMIT = 20; // Additional search for utilities
-    const MAX_FINAL_EXAMPLES = 8; // Increased to include utilities
-    const highSimilarityThreshold = 0.9; // Reverted threshold
+    // --- Stage 3: PROCESS CODE EXAMPLES ---
+    console.log(chalk.blue('--- Stage 3: Processing Code Examples ---'));
 
-    // First search: Find similar code
-    const searchOptions = {
-      similarityThreshold: 0.3,
-      limit: CODE_EXAMPLE_LIMIT,
-      useReranking: false,
-      queryFilePath: filePath,
-      includeProjectStructure: false,
-      searchStrategy: 'vector_only',
-      excludeNonDocs: false,
-      searchType: 'code',
-      projectPath: projectPath,
-    };
-
-    // If it's a test file, add a note in the query to prioritize other test files
-    const codeQuery = isTestFile ? `${content}\n// Looking for similar test files and testing patterns` : content;
-
-    const codeExampleCandidates = await findSimilarCode(codeQuery, searchOptions);
-
-    // Second search: Find helper utilities and common patterns
-    // Extract function/method calls from the content to find utilities
-    const functionCallPattern = /\b(\w+)\s*\(/g;
-    const functionCalls = [...new Set(content.match(functionCallPattern) || [])];
-    const importPattern = /(?:import|require)\s*(?:\{[^}]*\}|\w+)\s*from\s*['"]([^'"]+)['"]/g;
-    const imports = [...new Set([...content.matchAll(importPattern)].map((m) => m[1]))];
-
-    // Create a query focused on finding utilities and helpers
-    let utilityQuery = 'Helper functions, utility methods, shared code patterns, and common abstractions used across the project. ';
-    if (functionCalls.length > 0) {
-      utilityQuery += `Functions that might be related to: ${functionCalls.slice(0, 10).join(', ')}. `;
-    }
-    if (imports.length > 0) {
-      utilityQuery += `Modules or utilities from: ${imports.slice(0, 5).join(', ')}. `;
-    }
-    if (isTestFile) {
-      utilityQuery += 'Test utilities, test helpers, custom render functions, test setup utilities. ';
-    }
-
-    console.log(chalk.blue('Searching for project utilities and patterns...'));
-    const utilitySearchOptions = {
-      ...searchOptions,
-      limit: UTILITY_SEARCH_LIMIT,
-      similarityThreshold: 0.25, // Lower threshold for utilities
-    };
-
-    const utilityCandidates = await findSimilarCode(utilityQuery, utilitySearchOptions);
-
-    // Third search: Look for commonly imported helper files based on patterns in similar files
-    console.log(chalk.blue('Analyzing imports from similar files to find common utilities...'));
-    const helperImports = new Set();
-
-    // Analyze imports from the code examples we found
-    for (const example of codeExampleCandidates.slice(0, 10)) {
-      if (example.content) {
-        const exampleImports = [...example.content.matchAll(importPattern)].map((m) => m[1]);
-        exampleImports.forEach((imp) => {
-          // Look for imports that seem like helpers/utilities
-          if (
-            imp.includes('helper') ||
-            imp.includes('util') ||
-            imp.includes('test') ||
-            imp.includes('shared') ||
-            imp.includes('common') ||
-            imp.includes('lib')
-          ) {
-            helperImports.add(imp);
-          }
-        });
-      }
-    }
-
-    // If we found common helper imports, search for those specific files
-    let helperFileCandidates = [];
-    if (helperImports.size > 0) {
-      const helperQuery = `Helper utility files commonly used in the project: ${[...helperImports].join(', ')}`;
-      console.log(chalk.blue(`Searching for specific helper files: ${[...helperImports].slice(0, 3).join(', ')}...`));
-
-      helperFileCandidates = await findSimilarCode(helperQuery, {
-        ...searchOptions,
-        limit: 10,
-        similarityThreshold: 0.2, // Very low threshold to find these files
-      });
-    }
-
-    // Combine and deduplicate results
-    const allCandidates = [...codeExampleCandidates, ...utilityCandidates, ...helperFileCandidates];
+    // Filter and process the code examples we got from parallel retrieval
     const uniqueCandidates = [];
     const seenPaths = new Set();
-
-    // Normalize the file path being reviewed for comparison
     const normalizedReviewPath = path.resolve(filePath);
 
-    for (const candidate of allCandidates) {
+    for (const candidate of codeExampleCandidates) {
       // Exclude the file being reviewed and documentation files
       const normalizedCandidatePath = path.resolve(candidate.path);
       if (!seenPaths.has(candidate.path) && !candidate.isDocumentation && normalizedCandidatePath !== normalizedReviewPath) {
@@ -681,19 +598,16 @@ async function analyzeFile(filePath, options = {}) {
 
     // Sort by relevance and limit
     uniqueCandidates.sort((a, b) => b.similarity - a.similarity);
+    const MAX_FINAL_EXAMPLES = 8;
     let finalCodeExamples = uniqueCandidates.slice(0, MAX_FINAL_EXAMPLES);
 
     // Log if we filtered out the file being reviewed
-    const filteredSelf = allCandidates.some((c) => path.resolve(c.path) === normalizedReviewPath);
+    const filteredSelf = codeExampleCandidates.some((c) => path.resolve(c.path) === normalizedReviewPath);
     if (filteredSelf) {
       console.log(chalk.yellow(`Filtered out the file being reviewed (${filePath}) from code examples.`));
     }
 
-    console.log(
-      chalk.green(
-        `Found ${finalCodeExamples.length} final code examples (including utilities) from ${codeExampleCandidates.length} similar code + ${utilityCandidates.length} utility candidates.`
-      )
-    );
+    console.log(chalk.green(`Found ${finalCodeExamples.length} final code examples from ${codeExampleCandidates.length} candidates.`));
 
     // Log the top code examples with their similarity scores
     console.log(chalk.cyan('--- Code Examples Found ---'));
@@ -706,24 +620,10 @@ async function analyzeFile(filePath, options = {}) {
     }
     console.log(chalk.cyan('---------------------------'));
 
-    // --- Prepare Context --- //
-    let finalCodeExamplesForContext = [];
+    let finalCodeExamplesForContext = finalCodeExamples;
 
-    // First, prepare the potential list of final code examples (filtered and limited)
-    let potentialFinalCodeExamples = finalCodeExamples; // Use the already processed list that includes utilities
-    const topCodeExample = potentialFinalCodeExamples.length > 0 ? potentialFinalCodeExamples[0] : null;
-
-    // REMOVED: High similarity logic that was limiting to only one example
-    // Always use multiple examples to ensure we capture implicit patterns and utilities
-    finalCodeExamplesForContext = potentialFinalCodeExamples;
-
-    if (topCodeExample && topCodeExample.similarity >= highSimilarityThreshold) {
-      console.log(
-        chalk.blue(
-          `Found high similarity match (${topCodeExample.similarity.toFixed(3)}), but still including other examples for pattern detection.`
-        )
-      );
-    }
+    // --- Stage 4: PREPARE CONTEXT FOR LLM ---
+    console.log(chalk.blue('--- Stage 4: Preparing Context for LLM ---'));
 
     // Format the lists that will be passed
     const formattedCodeExamples = formatContextItems(finalCodeExamplesForContext, 'code');
