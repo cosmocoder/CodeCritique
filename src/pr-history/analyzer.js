@@ -9,16 +9,13 @@ import { clearPRComments, getPRCommentsStats, getProcessedPRDateRange, shouldSki
 import { GitHubAPIClient } from './github-client.js';
 import { PRCommentProcessor } from './comment-processor.js';
 import chalk from 'chalk';
-import fs from 'node:fs/promises';
-import path from 'node:path';
 
 /**
  * Progress tracking for PR analysis
  */
 class PRAnalysisProgress {
-  constructor(repository, outputFile = null) {
+  constructor(repository) {
     this.repository = repository;
-    this.outputFile = outputFile || path.join(process.cwd(), `.pr-analysis-${repository.replace('/', '-')}.json`);
     this.progress = {
       repository,
       total_prs: 0,
@@ -36,28 +33,10 @@ class PRAnalysisProgress {
   }
 
   async save() {
-    try {
-      this.progress.last_updated = new Date().toISOString();
-      await fs.writeFile(this.outputFile, JSON.stringify(this.progress, null, 2));
-    } catch (error) {
-      console.warn(chalk.yellow(`Warning: Could not save progress file: ${error.message}`));
-    }
+    this.progress.last_updated = new Date().toISOString();
   }
 
   async load() {
-    try {
-      const exists = await fs
-        .access(this.outputFile)
-        .then(() => true)
-        .catch(() => false);
-      if (exists) {
-        const data = await fs.readFile(this.outputFile, 'utf8');
-        this.progress = { ...this.progress, ...JSON.parse(data) };
-        return true;
-      }
-    } catch (error) {
-      console.warn(chalk.yellow(`Warning: Could not load progress file: ${error.message}`));
-    }
     return false;
   }
 
@@ -160,7 +139,7 @@ export class PRHistoryAnalyzer {
     } = options;
 
     // Initialize progress tracking
-    this.progress = new PRAnalysisProgress(repository, options.outputFile);
+    this.progress = new PRAnalysisProgress(repository);
 
     // Load existing progress if resuming
     if (resume) {
