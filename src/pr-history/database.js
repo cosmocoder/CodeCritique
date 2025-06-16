@@ -628,6 +628,9 @@ function preFilterWithKeywords(candidate) {
 export async function findRelevantPRComments(reviewFileContent, options = {}) {
   const { limit = 10, projectPath = process.cwd(), isTestFile = false } = options;
 
+  let db = null;
+  let tempChunkTable = null;
+
   try {
     console.log(chalk.cyan('🔍 Starting REVERSE Hybrid Search with LLM Verification'));
 
@@ -653,9 +656,9 @@ export async function findRelevantPRComments(reviewFileContent, options = {}) {
       }))
     );
 
-    const db = await lancedb.connect('data/tmp');
+    db = await lancedb.connect('data/tmp');
     await fs.rm('data/tmp', { recursive: true, force: true });
-    const tempChunkTable = await db.createTable('review_chunks', chunkEmbeddings);
+    tempChunkTable = await db.createTable('review_chunks', chunkEmbeddings);
     console.log(chalk.blue(`🚀 Created temporary in-memory table for review file chunks.`));
 
     // --- Step 2: Iterate through historical comments and search against the temp table ---
@@ -756,5 +759,23 @@ export async function findRelevantPRComments(reviewFileContent, options = {}) {
   } catch (error) {
     console.error(chalk.red(`Error in reverse hybrid search: ${error.message}`));
     return [];
+  } finally {
+    // Clean up temporary database resources
+    if (db) {
+      try {
+        await db.close();
+        console.log(chalk.blue('✓ Temporary database connection closed'));
+      } catch (closeError) {
+        console.warn(chalk.yellow(`Warning: Error closing temporary database: ${closeError.message}`));
+      }
+    }
+
+    // Clean up temporary files
+    try {
+      await fs.rm('data/tmp', { recursive: true, force: true });
+      console.log(chalk.blue('✓ Temporary files cleaned up'));
+    } catch (cleanupError) {
+      console.warn(chalk.yellow(`Warning: Error cleaning up temporary files: ${cleanupError.message}`));
+    }
   }
 }
