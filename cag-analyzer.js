@@ -349,6 +349,7 @@ async function analyzeFile(filePath, options = {}) {
         excludeNonDocs: false, // Search file_embeddings table
         searchType: 'code',
         projectPath: projectPath,
+        isTestFile: isTestFile,
       }).catch((error) => {
         console.warn(chalk.yellow(`Code examples context unavailable: ${error.message}`));
         return [];

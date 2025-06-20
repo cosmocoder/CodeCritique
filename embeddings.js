@@ -1909,9 +1909,14 @@ export const findSimilarCode = async (queryText, options = {}) => {
     queryContextForReranking = null,
     excludeNonDocs = false,
     projectPath = process.cwd(), // Add project path for filtering
+    isTestFile = null,
   } = options;
 
-  console.log(chalk.cyan(`Native hybrid search - limit: ${limit}, threshold: ${similarityThreshold}, excludeNonDocs: ${excludeNonDocs}`));
+  console.log(
+    chalk.cyan(
+      `Native hybrid search - limit: ${limit}, threshold: ${similarityThreshold}, excludeNonDocs: ${excludeNonDocs}, isTestFile: ${isTestFile}`
+    )
+  );
 
   try {
     if (!queryText?.trim()) {
@@ -1936,6 +1941,21 @@ export const findSimilarCode = async (queryText, options = {}) => {
     const conditions = [];
     if (!excludeNonDocs) {
       conditions.push("type != 'directory-structure'");
+    }
+
+    // Add filtering for test files.
+    if (isTestFile !== null) {
+      if (isTestFile) {
+        // Only include test files
+        conditions.push(`(path LIKE '%.test.%' OR path LIKE '%.spec.%' OR path LIKE '%_test.py' OR path LIKE 'test_%.py')`);
+        console.log(chalk.blue(`Filtering to include only test files.`));
+      } else {
+        // Exclude test files
+        conditions.push(
+          `(path NOT LIKE '%.test.%' AND path NOT LIKE '%.spec.%' AND path NOT LIKE '%_test.py' AND path NOT LIKE 'test_%.py')`
+        );
+        console.log(chalk.blue(`Filtering to exclude test files.`));
+      }
     }
 
     // Resolve project path once for use in multiple places
