@@ -6,7 +6,7 @@
  * It identifies patterns, best practices, and generates review comments.
  */
 
-import { calculateCosineSimilarity, calculateEmbedding, findRelevantDocs, findSimilarCode } from './embeddings.js';
+import { calculateCosineSimilarity, calculateEmbedding, calculateQueryEmbedding, findRelevantDocs, findSimilarCode } from './embeddings.js';
 import {
   detectFileType,
   detectLanguageFromExtension,
@@ -273,15 +273,42 @@ async function analyzeFile(filePath, options = {}) {
     const reviewedSnippetContext = inferContextFromCodeContent(content, language);
     debug('[analyzeFile] Reviewed Snippet Context:', reviewedSnippetContext);
 
-    // +++ Get embedding for the file under review (for H1 proxy similarity - can be removed if H1 sim logic changes) +++
+    // +++ Compute embeddings once for reuse across all context retrieval functions +++
     let analyzedFileEmbedding = null;
+    let fileContentQueryEmbedding = null;
+    let guidelineQueryEmbedding = null;
+
+    // Compute file content embedding for H1 similarity (passage embedding)
     if (content.trim().length > 0) {
       analyzedFileEmbedding = await calculateEmbedding(content.substring(0, MAX_EMBEDDING_CONTENT_LENGTH));
       if (!analyzedFileEmbedding) {
-        debug(`[analyzeFile] Could not generate embedding for the content of ${filePath}. H1 proxy similarity will be skipped.`);
+        debug(`[analyzeFile] Could not generate passage embedding for the content of ${filePath}. H1 proxy similarity will be skipped.`);
       }
     } else {
       debug(`[analyzeFile] Content of ${filePath} is empty. H1 proxy similarity will be skipped.`);
+    }
+
+    // Compute file content query embedding (used by findSimilarCode and getPRCommentContext)
+    if (content.trim().length > 0) {
+      const queryContent = isTestFile ? `${content}\n// Looking for similar test files and testing patterns` : content;
+      fileContentQueryEmbedding = await calculateQueryEmbedding(queryContent);
+      if (!fileContentQueryEmbedding) {
+        debug(
+          `[analyzeFile] Could not generate query embedding for the content of ${filePath}. Similarity-based searches will be limited.`
+        );
+      }
+    }
+
+    // Prepare and compute guideline query embedding (used by findRelevantDocs)
+    const guidelineQuery = isTestFile
+      ? createTestGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language)
+      : createGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language);
+
+    if (guidelineQuery && guidelineQuery.trim().length > 0) {
+      guidelineQueryEmbedding = await calculateQueryEmbedding(guidelineQuery);
+      if (!guidelineQueryEmbedding) {
+        debug(`[analyzeFile] Could not generate embedding for guideline query. Documentation search will be limited.`);
+      }
     }
 
     // Check if file should be processed
@@ -297,11 +324,7 @@ async function analyzeFile(filePath, options = {}) {
     // --- Stage 1: PARALLEL CONTEXT RETRIEVAL ---
     console.log(chalk.blue('--- Stage 1: Parallel Context Retrieval (PR Comments + Documentation + Code Examples) ---'));
 
-    // Prepare queries and options for parallel execution
-    const guidelineQuery = isTestFile
-      ? createTestGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language)
-      : createGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language);
-
+    // Prepare options for parallel execution
     const prContextOptions = {
       ...options,
       maxComments: MAX_PR_COMMENTS,
@@ -309,6 +332,7 @@ async function analyzeFile(filePath, options = {}) {
       timeout: options.prTimeout || 300000,
       projectPath: projectPath,
       repository: options.repository || null,
+      precomputedQueryEmbedding: fileContentQueryEmbedding, // Pass pre-computed query embedding
     };
 
     const GUIDELINE_CANDIDATE_LIMIT = 100;
@@ -332,6 +356,7 @@ async function analyzeFile(filePath, options = {}) {
         useReranking: true,
         queryContextForReranking: reviewedSnippetContext,
         projectPath: projectPath,
+        precomputedQueryEmbedding: guidelineQueryEmbedding, // Pass pre-computed guideline query embedding
       }).catch((error) => {
         console.warn(chalk.yellow(`Documentation context unavailable: ${error.message}`));
         return [];
@@ -345,6 +370,7 @@ async function analyzeFile(filePath, options = {}) {
         includeProjectStructure: false,
         projectPath: projectPath,
         isTestFile: isTestFile,
+        precomputedQueryEmbedding: fileContentQueryEmbedding, // Pass pre-computed file content query embedding
       }).catch((error) => {
         console.warn(chalk.yellow(`Code examples context unavailable: ${error.message}`));
         return [];
@@ -1224,7 +1250,13 @@ function parseAnalysisResponse(response) {
  */
 async function getPRCommentContext(filePath, options = {}) {
   try {
-    const { dateRange = null, maxComments = 20, similarityThreshold = 0.15, projectPath = process.cwd() } = options;
+    const {
+      dateRange = null,
+      maxComments = 20,
+      similarityThreshold = 0.15,
+      projectPath = process.cwd(),
+      precomputedQueryEmbedding = null,
+    } = options;
 
     // Normalize file path for comparison
     const normalizedPath = path.normalize(filePath);
@@ -1237,28 +1269,49 @@ async function getPRCommentContext(filePath, options = {}) {
     // Import database functions
     const { findRelevantPRComments } = await import('./src/pr-history/database.js');
 
-    // Read the file content to create embedding for semantic search
+    // Use pre-computed embedding if available, otherwise compute it
     let fileContent = '';
-    try {
-      const fs = await import('node:fs');
-      fileContent = fs.readFileSync(filePath, 'utf8');
-    } catch (readError) {
-      debug(`[getPRCommentContext] Could not read file ${filePath}: ${readError.message}`);
-      return {
-        success: false,
-        hasContext: false,
-        error: `Could not read file: ${readError.message}`,
-        comments: [],
-        summary: 'Failed to read file for context analysis',
-      };
+    let contentForSearch = '';
+
+    if (precomputedQueryEmbedding) {
+      console.log(chalk.blue(`🔍 Using pre-computed query embedding for PR comment search`));
+      // We still need the file content for the search function, but not for embedding
+      try {
+        fileContent = fs.readFileSync(filePath, 'utf8');
+        const maxEmbeddingLength = 8000; // Keep consistent with original truncation
+        contentForSearch = fileContent.length > maxEmbeddingLength ? fileContent.substring(0, maxEmbeddingLength) : fileContent;
+      } catch (readError) {
+        debug(`[getPRCommentContext] Could not read file ${filePath}: ${readError.message}`);
+        return {
+          success: false,
+          hasContext: false,
+          error: `Could not read file: ${readError.message}`,
+          comments: [],
+          summary: 'Failed to read file for context analysis',
+        };
+      }
+    } else {
+      // Fallback to original behavior if no pre-computed embedding provided
+      try {
+        fileContent = fs.readFileSync(filePath, 'utf8');
+      } catch (readError) {
+        debug(`[getPRCommentContext] Could not read file ${filePath}: ${readError.message}`);
+        return {
+          success: false,
+          hasContext: false,
+          error: `Could not read file: ${readError.message}`,
+          comments: [],
+          summary: 'Failed to read file for context analysis',
+        };
+      }
+
+      // Truncate content for embedding if too long
+      const maxEmbeddingLength = 8000; // Reasonable limit for embedding
+      contentForSearch = fileContent.length > maxEmbeddingLength ? fileContent.substring(0, maxEmbeddingLength) : fileContent;
     }
 
     // Detect if this is a test file using existing utility
     const isTest = isTestFile(filePath);
-
-    // Truncate content for embedding if too long
-    const maxEmbeddingLength = 8000; // Reasonable limit for embedding
-    const truncatedContent = fileContent.length > maxEmbeddingLength ? fileContent.substring(0, maxEmbeddingLength) : fileContent;
 
     // Use semantic search to find similar PR comments
     let relevantComments = [];
@@ -1268,14 +1321,16 @@ async function getPRCommentContext(filePath, options = {}) {
     console.log(chalk.gray(`  Project Path: ${projectPath}`));
     console.log(chalk.gray(`  File: ${fileName}`));
     console.log(chalk.gray(`  Similarity Threshold: ${similarityThreshold}`));
-    console.log(chalk.gray(`  Content Length: ${truncatedContent.length} chars`));
+    console.log(chalk.gray(`  Content Length: ${contentForSearch.length} chars`));
+    console.log(chalk.gray(`  Using Pre-computed Embedding: ${precomputedQueryEmbedding ? 'Yes' : 'No'}`));
 
     try {
       console.log(chalk.blue(`🔍 Attempting hybrid search with chunking...`));
-      relevantComments = await findRelevantPRComments(truncatedContent, {
+      relevantComments = await findRelevantPRComments(contentForSearch, {
         projectPath,
         limit: maxComments,
         isTestFile: isTest, // Pass test file context for filtering
+        precomputedQueryEmbedding: precomputedQueryEmbedding, // Pass pre-computed embedding if available
       });
       console.log(chalk.green(`✅ Hybrid search returned ${relevantComments.length} comments`));
       if (relevantComments.length > 0) {

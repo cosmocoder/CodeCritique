@@ -1906,6 +1906,7 @@ export const findRelevantDocs = async (queryText, options = {}) => {
     queryFilePath = null,
     queryContextForReranking = null,
     projectPath = process.cwd(),
+    precomputedQueryEmbedding = null,
   } = options;
 
   console.log(
@@ -2009,8 +2010,12 @@ export const findRelevantDocs = async (queryText, options = {}) => {
       const HEAVY_PENALTY_AREA_MISMATCH = -0.1;
       const PENALTY_GENERIC_DOC_LOW_CONTEXT_MATCH = -0.1;
 
-      queryEmbedding = await calculateQueryEmbedding(queryText);
-      debug(`[CACHE] Query embedding calculated once for reranking, dimensions: ${queryEmbedding?.length || 'null'}`);
+      queryEmbedding = precomputedQueryEmbedding || (await calculateQueryEmbedding(queryText));
+      if (precomputedQueryEmbedding) {
+        debug(`[CACHE] Using pre-computed query embedding for reranking, dimensions: ${queryEmbedding?.length || 'null'}`);
+      } else {
+        debug(`[CACHE] Query embedding calculated for reranking, dimensions: ${queryEmbedding?.length || 'null'}`);
+      }
 
       for (const result of finalResults) {
         let chunkInitialScore = result.similarity * WEIGHT_INITIAL_SIM;
@@ -2121,6 +2126,7 @@ export const findSimilarCode = async (queryText, options = {}) => {
     queryFilePath = null,
     projectPath = process.cwd(), // Add project path for filtering
     isTestFile = null,
+    precomputedQueryEmbedding = null,
   } = options;
 
   console.log(chalk.cyan(`Native hybrid code search - limit: ${limit}, threshold: ${similarityThreshold}, isTestFile: ${isTestFile}`));
@@ -2285,10 +2291,16 @@ export const findSimilarCode = async (queryText, options = {}) => {
           if (structureResults.length > 0) {
             const structureRecord = structureResults[0];
             if (structureRecord.vector) {
-              // PERFORMANCE FIX: Reuse query embedding if already calculated, otherwise calculate once
+              // PERFORMANCE FIX: Use pre-computed query embedding if available, otherwise calculate once
               if (!queryEmbedding) {
-                queryEmbedding = await calculateQueryEmbedding(queryText);
-                debug(`[CACHE] Query embedding calculated for project structure, dimensions: ${queryEmbedding?.length || 'null'}`);
+                queryEmbedding = precomputedQueryEmbedding || (await calculateQueryEmbedding(queryText));
+                if (precomputedQueryEmbedding) {
+                  debug(
+                    `[CACHE] Using pre-computed query embedding for project structure, dimensions: ${queryEmbedding?.length || 'null'}`
+                  );
+                } else {
+                  debug(`[CACHE] Query embedding calculated for project structure, dimensions: ${queryEmbedding?.length || 'null'}`);
+                }
               } else {
                 debug(`[CACHE] Query embedding reused from reranking for project structure`);
               }
