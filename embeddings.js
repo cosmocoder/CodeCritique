@@ -72,6 +72,7 @@ let modelInitialized = false; // Flag to track if model has been initialized
 let modelInitializationPromise = null; // Promise to prevent concurrent initialization
 let projectEmbeddingsCache = null;
 let tablesInitialized = false; // NEW: Track if tables have been initialized
+let tableInitializationPromise = null; // Promise to prevent concurrent table initialization
 
 // Cache for document contexts to avoid re-inferring for multiple chunks from the same doc
 const documentContextCache = new Map();
@@ -363,11 +364,10 @@ export async function calculateEmbedding(text) {
 
 /**
  * Calculate embeddings for a batch of texts using fastembed.
- * @private
  * @param {string[]} texts - An array of texts to embed.
  * @returns {Promise<Array<Array<number>>>} - A promise that resolves to an array of embedding vectors.
  */
-async function calculateEmbeddingBatch(texts) {
+export async function calculateEmbeddingBatch(texts) {
   // Ensure texts is a non-empty array of non-empty strings
   if (!Array.isArray(texts) || texts.length === 0 || texts.some((text) => typeof text !== 'string' || text.trim().length === 0)) {
     debug('Skipping batch embedding for empty or invalid texts array.');
@@ -495,15 +495,34 @@ async function getDBConnection() {
  */
 export async function initializeTables() {
   if (tablesInitialized) {
-    debug('Tables already initialized, skipping...');
     return;
   }
 
-  console.log(chalk.blue('Initializing database tables and indices...'));
-  const db = await getDBConnection();
-  await ensureTablesExist(db);
-  tablesInitialized = true;
-  console.log(chalk.green('Database tables and indices initialized successfully.'));
+  // If initialization is already in progress, wait for it to complete.
+  if (tableInitializationPromise) {
+    await tableInitializationPromise;
+    return;
+  }
+
+  // Start initialization and store the promise.
+  tableInitializationPromise = (async () => {
+    try {
+      console.log(chalk.blue('Initializing database tables and indices...'));
+      const db = await getDBConnection();
+      await ensureTablesExist(db);
+      tablesInitialized = true;
+      console.log(chalk.green('Database tables and indices initialized successfully.'));
+    } catch (error) {
+      tablesInitialized = false;
+      console.error(chalk.red('Failed to initialize database tables:'), error);
+      throw error; // Re-throw to propagate the error to callers
+    } finally {
+      // The initialization attempt is over, clear the promise
+      tableInitializationPromise = null;
+    }
+  })();
+
+  await tableInitializationPromise;
 }
 
 /**
@@ -513,10 +532,7 @@ export async function initializeTables() {
  */
 async function initializeDB() {
   const db = await getDBConnection();
-  if (!tablesInitialized) {
-    await ensureTablesExist(db);
-    tablesInitialized = true;
-  }
+  // The logic to ensure tables exist is now centralized in getDB -> initializeTables
   return db;
 }
 
@@ -526,7 +542,11 @@ async function initializeDB() {
  * @returns {Promise<lancedb.Connection>} Database connection
  */
 async function getDB() {
-  return initializeDB();
+  const db = await getDBConnection();
+  if (!tablesInitialized) {
+    await initializeTables();
+  }
+  return db;
 }
 
 /**
@@ -2244,9 +2264,10 @@ export const calculateCosineSimilarity = (vecA, vecB) => {
 export async function cleanup() {
   try {
     if (dbConnection) {
-      console.log('Closing LanceDB connection (signaled by setting to null)...');
-      // LanceDB JS connection doesn't have an explicit close. Nulling it allows GC.
+      console.log('Closing LanceDB connection...');
+      await dbConnection.close();
       dbConnection = null;
+      console.log('LanceDB connection closed.');
     }
     embeddingModel = null; // Allow embedding model to be GC'd if not held elsewhere
     modelInitialized = false; // Reset initialization flag
