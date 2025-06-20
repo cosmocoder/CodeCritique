@@ -1893,6 +1893,220 @@ export function calculatePathSimilarity(path1, path2) {
 // +++ END NEW HELPER FUNCTION +++
 
 /**
+ * Find similar documentation using native LanceDB hybrid search
+ * @param {string} queryText - The text query
+ * @param {Object} options - Search options
+ * @returns {Promise<Array<object>>} Search results
+ */
+export const findRelevantDocs = async (queryText, options = {}) => {
+  const {
+    limit = 10,
+    similarityThreshold = 0.1,
+    useReranking = true,
+    queryFilePath = null,
+    queryContextForReranking = null,
+    projectPath = process.cwd(),
+  } = options;
+
+  console.log(
+    chalk.cyan(`Native hybrid documentation search - limit: ${limit}, threshold: ${similarityThreshold}, reranking: ${useReranking}`)
+  );
+
+  try {
+    if (!queryText?.trim()) {
+      console.warn(chalk.yellow('Empty query text provided for documentation search'));
+      return [];
+    }
+
+    const db = await getDB();
+    const tableName = DOCUMENT_CHUNK_TABLE;
+    const table = await getTable(tableName);
+
+    if (!table) {
+      console.warn(chalk.yellow(`Documentation table ${tableName} not found`));
+      return [];
+    }
+
+    console.log(chalk.cyan('Performing native hybrid search for documentation...'));
+    let query = table.search(queryText).nearestToText(queryText);
+
+    const resolvedProjectPath = path.resolve(projectPath);
+    try {
+      const tableSchema = await table.schema;
+      if (tableSchema?.fields?.some((field) => field.name === 'project_path')) {
+        query = query.where(`project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`);
+        debug(`Filtering documentation by project_path: ${resolvedProjectPath}`);
+      }
+    } catch (schemaError) {
+      debug(`Could not check schema for project_path field: ${schemaError.message}`);
+    }
+
+    const results = await query.limit(Math.max(limit * 3, 20)).toArray();
+    console.log(chalk.green(`Native hybrid search returned ${results.length} documentation results`));
+
+    const projectFilteredResults = results.filter((result) => {
+      if (result.project_path) {
+        return result.project_path === resolvedProjectPath;
+      }
+      if (!result.original_document_path) return false;
+      const filePath = result.original_document_path;
+      try {
+        if (path.isAbsolute(filePath)) {
+          return filePath.startsWith(resolvedProjectPath);
+        }
+        const absolutePath = path.resolve(resolvedProjectPath, filePath);
+        if (absolutePath.startsWith(resolvedProjectPath)) {
+          try {
+            fs.accessSync(absolutePath, fs.constants.F_OK);
+            return true;
+          } catch {
+            debug(`Filtering out non-existent file: ${filePath}`);
+            return false;
+          }
+        }
+        return false;
+      } catch (error) {
+        debug(`Error filtering result for project: ${error.message}`);
+        return false;
+      }
+    });
+
+    console.log(chalk.blue(`Filtered to ${projectFilteredResults.length} documentation results from current project`));
+
+    let finalResults = projectFilteredResults.map((result) => {
+      let similarity;
+      if (result._distance !== undefined) {
+        similarity = Math.max(0, Math.min(1, 1 - result._distance));
+      } else if (result._score !== undefined) {
+        similarity = Math.max(0, Math.min(1, result._score));
+      } else {
+        similarity = 0.5;
+      }
+
+      return {
+        similarity,
+        type: 'documentation-chunk',
+        content: result.content,
+        path: result.original_document_path,
+        file_path: result.original_document_path,
+        language: result.language,
+        headingText: result.heading_text,
+        document_title: result.document_title,
+        startLine: result.start_line,
+        reranked: false,
+      };
+    });
+
+    finalResults = finalResults.filter((result) => result.similarity >= similarityThreshold);
+
+    let queryEmbedding = null;
+    if (useReranking && queryContextForReranking && finalResults.length >= 3) {
+      console.log(chalk.cyan('Applying sophisticated contextual reranking to documentation...'));
+      const WEIGHT_INITIAL_SIM = 0.3;
+      const WEIGHT_H1_CHUNK_RERANK = 0.15;
+      const HEAVY_BOOST_SAME_AREA = 0.4;
+      const MODERATE_BOOST_TECH_MATCH = 0.2;
+      const HEAVY_PENALTY_AREA_MISMATCH = -0.1;
+      const PENALTY_GENERIC_DOC_LOW_CONTEXT_MATCH = -0.1;
+
+      queryEmbedding = await calculateQueryEmbedding(queryText);
+      debug(`[CACHE] Query embedding calculated once for reranking, dimensions: ${queryEmbedding?.length || 'null'}`);
+
+      for (const result of finalResults) {
+        let chunkInitialScore = result.similarity * WEIGHT_INITIAL_SIM;
+        let contextMatchBonus = 0;
+        let h1RelevanceBonus = 0;
+        let genericDocPenalty = 0;
+        let pathSimilarityScore = 0;
+
+        const docPath = result.path;
+        const docH1 = result.document_title;
+
+        let chunkParentDocContext = documentContextCache.get(docPath);
+        if (!chunkParentDocContext) {
+          chunkParentDocContext = await inferContextFromDocumentContent(
+            docPath,
+            docH1,
+            [result],
+            queryContextForReranking.language || 'typescript'
+          );
+          documentContextCache.set(docPath, chunkParentDocContext);
+        }
+
+        if (
+          queryContextForReranking.area !== 'Unknown' &&
+          chunkParentDocContext.area !== 'Unknown' &&
+          chunkParentDocContext.area !== 'General'
+        ) {
+          if (queryContextForReranking.area === chunkParentDocContext.area) {
+            contextMatchBonus += HEAVY_BOOST_SAME_AREA;
+            if (queryContextForReranking.dominantTech && chunkParentDocContext.dominantTech) {
+              const techIntersection = queryContextForReranking.dominantTech.some((tech) =>
+                chunkParentDocContext.dominantTech.map((t) => t.toLowerCase()).includes(tech.toLowerCase())
+              );
+              if (techIntersection) {
+                contextMatchBonus += MODERATE_BOOST_TECH_MATCH;
+              }
+            }
+          } else if (queryContextForReranking.area !== 'GeneralJS_TS') {
+            contextMatchBonus += HEAVY_PENALTY_AREA_MISMATCH;
+          }
+        }
+
+        if (docH1) {
+          let h1Emb = h1EmbeddingCache.get(docH1);
+          if (!h1Emb) {
+            h1Emb = await calculateEmbedding(docH1);
+            if (h1Emb) h1EmbeddingCache.set(docH1, h1Emb);
+          }
+          if (h1Emb && queryEmbedding) {
+            h1RelevanceBonus = calculateCosineSimilarity(queryEmbedding, h1Emb) * WEIGHT_H1_CHUNK_RERANK;
+          }
+        }
+
+        if (chunkParentDocContext.isGeneralPurposeReadmeStyle) {
+          const contextMatchScore = queryContextForReranking.area === chunkParentDocContext.area ? 1.0 : 0.0;
+          if (contextMatchScore < 0.4) {
+            genericDocPenalty = PENALTY_GENERIC_DOC_LOW_CONTEXT_MATCH;
+            debug(
+              `[findSimilarDocumentation] Doc ${result.path} is generic with low context match, applying penalty: ${genericDocPenalty}`
+            );
+          }
+        }
+
+        if (queryFilePath && result.path) {
+          pathSimilarityScore = calculatePathSimilarity(queryFilePath, result.path) * 0.1;
+        }
+
+        const finalScore = chunkInitialScore + contextMatchBonus + h1RelevanceBonus + pathSimilarityScore + genericDocPenalty;
+        result.similarity = Math.max(0, Math.min(1, finalScore));
+        result.reranked = true;
+
+        if (finalResults.indexOf(result) < 5) {
+          debug(`[SophisticatedRerank] ${result.path?.substring(0, 30)}... Final=${result.similarity.toFixed(4)}`);
+        }
+      }
+
+      finalResults.sort((a, b) => b.similarity - a.similarity);
+      debug(`[CACHE STATS] Document context cache size: ${documentContextCache.size}`);
+      debug(`[CACHE STATS] H1 embedding cache size: ${h1EmbeddingCache.size}`);
+      debug('Sophisticated contextual reranking of documentation complete.');
+    }
+
+    finalResults.sort((a, b) => b.similarity - a.similarity);
+    if (finalResults.length > limit) {
+      finalResults = finalResults.slice(0, limit);
+    }
+
+    console.log(chalk.green(`Returning ${finalResults.length} documentation results`));
+    return finalResults;
+  } catch (error) {
+    console.error(chalk.red(`Error in findSimilarDocumentation: ${error.message}`), error);
+    return [];
+  }
+};
+
+/**
  * Find similar code using native LanceDB hybrid search
  * Optimized implementation using LanceDB's built-in vector + FTS + RRF
  * @param {string} queryText - The text query
@@ -1904,19 +2118,12 @@ export const findSimilarCode = async (queryText, options = {}) => {
     limit = 5,
     similarityThreshold = 0.7,
     includeProjectStructure = false,
-    useReranking = true,
     queryFilePath = null,
-    queryContextForReranking = null,
-    excludeNonDocs = false,
     projectPath = process.cwd(), // Add project path for filtering
     isTestFile = null,
   } = options;
 
-  console.log(
-    chalk.cyan(
-      `Native hybrid search - limit: ${limit}, threshold: ${similarityThreshold}, excludeNonDocs: ${excludeNonDocs}, isTestFile: ${isTestFile}`
-    )
-  );
+  console.log(chalk.cyan(`Native hybrid code search - limit: ${limit}, threshold: ${similarityThreshold}, isTestFile: ${isTestFile}`));
 
   try {
     if (!queryText?.trim()) {
@@ -1925,7 +2132,7 @@ export const findSimilarCode = async (queryText, options = {}) => {
     }
 
     const db = await getDB();
-    const tableName = excludeNonDocs ? DOCUMENT_CHUNK_TABLE : FILE_EMBEDDINGS_TABLE;
+    const tableName = FILE_EMBEDDINGS_TABLE;
     const table = await getTable(tableName);
 
     if (!table) {
@@ -1934,14 +2141,12 @@ export const findSimilarCode = async (queryText, options = {}) => {
     }
 
     // Native hybrid search with automatic vector + FTS + RRF
-    console.log(chalk.cyan('Performing native hybrid search...'));
+    console.log(chalk.cyan('Performing native hybrid search for code...'));
     let query = table.search(queryText).nearestToText(queryText);
 
     // Add filtering conditions
     const conditions = [];
-    if (!excludeNonDocs) {
-      conditions.push("type != 'directory-structure'");
-    }
+    conditions.push("type != 'directory-structure'");
 
     // Add filtering for test files.
     if (isTestFile !== null) {
@@ -2048,14 +2253,11 @@ export const findSimilarCode = async (queryText, options = {}) => {
 
       return {
         similarity,
-        type: excludeNonDocs ? 'documentation-chunk' : 'file',
+        type: 'file',
         content: result.content,
-        path: result.original_document_path || result.path,
-        file_path: result.original_document_path || result.path,
+        path: result.path,
+        file_path: result.path,
         language: result.language,
-        headingText: result.heading_text,
-        document_title: result.document_title,
-        startLine: result.start_line,
         reranked: false,
       };
     });
@@ -2065,128 +2267,6 @@ export const findSimilarCode = async (queryText, options = {}) => {
 
     // PERFORMANCE FIX: Calculate query embedding once and reuse for both reranking and project structure
     let queryEmbedding = null;
-
-    // Apply sophisticated contextual reranking if enabled
-    if (useReranking && queryContextForReranking && finalResults.length >= 3) {
-      console.log(chalk.cyan('Applying sophisticated contextual reranking...'));
-
-      // Reranking constants (from original implementation)
-      const WEIGHT_INITIAL_SIM = 0.3;
-      const WEIGHT_H1_CHUNK_RERANK = 0.15;
-      const HEAVY_BOOST_SAME_AREA = 0.4;
-      const MODERATE_BOOST_TECH_MATCH = 0.2;
-      const HEAVY_PENALTY_AREA_MISMATCH = -0.1; // Reduced from -0.5 to accommodate automatic classifier differences
-      const PENALTY_GENERIC_DOC_LOW_CONTEXT_MATCH = -0.1;
-
-      // Calculate query embedding once and cache it
-      queryEmbedding = await calculateQueryEmbedding(queryText);
-      debug(`[CACHE] Query embedding calculated once for reranking, dimensions: ${queryEmbedding?.length || 'null'}`);
-
-      for (const result of finalResults) {
-        let chunkInitialScore = result.similarity * WEIGHT_INITIAL_SIM;
-        let contextMatchBonus = 0;
-        let h1RelevanceBonus = 0;
-        let genericDocPenalty = 0;
-        let pathSimilarityScore = 0;
-
-        // Documentation-specific sophisticated reranking
-        if (result.type === 'documentation-chunk' && result.document_title && queryContextForReranking) {
-          const docPath = result.path;
-          const docH1 = result.document_title;
-
-          // Get or calculate document context
-          let chunkParentDocContext = documentContextCache.get(docPath);
-          if (!chunkParentDocContext) {
-            chunkParentDocContext = await inferContextFromDocumentContent(
-              docPath,
-              docH1,
-              [result],
-              queryContextForReranking.language || 'typescript'
-            );
-            documentContextCache.set(docPath, chunkParentDocContext);
-          }
-
-          // Area and tech matching with heavy bonuses/penalties
-          if (
-            queryContextForReranking.area !== 'Unknown' &&
-            chunkParentDocContext.area !== 'Unknown' &&
-            chunkParentDocContext.area !== 'General'
-          ) {
-            if (queryContextForReranking.area === chunkParentDocContext.area) {
-              contextMatchBonus += HEAVY_BOOST_SAME_AREA;
-
-              // Tech matching bonus
-              if (queryContextForReranking.dominantTech && chunkParentDocContext.dominantTech) {
-                const techIntersection = queryContextForReranking.dominantTech.some((tech) =>
-                  chunkParentDocContext.dominantTech.map((t) => t.toLowerCase()).includes(tech.toLowerCase())
-                );
-                if (techIntersection) {
-                  contextMatchBonus += MODERATE_BOOST_TECH_MATCH;
-                }
-              }
-            } else if (queryContextForReranking.area !== 'GeneralJS_TS') {
-              // Heavy penalty for area mismatch
-              contextMatchBonus += HEAVY_PENALTY_AREA_MISMATCH;
-            }
-          }
-
-          // H1 relevance bonus using embedding similarity
-          if (docH1) {
-            let h1Emb = h1EmbeddingCache.get(docH1);
-            if (!h1Emb) {
-              h1Emb = await calculateEmbedding(docH1);
-              if (h1Emb) {
-                h1EmbeddingCache.set(docH1, h1Emb);
-              }
-            }
-
-            if (h1Emb && queryEmbedding) {
-              h1RelevanceBonus = calculateCosineSimilarity(queryEmbedding, h1Emb) * WEIGHT_H1_CHUNK_RERANK;
-            }
-          }
-
-          // Generic document penalty for README-style docs with low context match
-          if (chunkParentDocContext.isGeneralPurposeReadmeStyle) {
-            const contextMatchScore = queryContextForReranking.area === chunkParentDocContext.area ? 1.0 : 0.0;
-            if (contextMatchScore < 0.4) {
-              genericDocPenalty = PENALTY_GENERIC_DOC_LOW_CONTEXT_MATCH;
-              debug(
-                `[findSimilarCode] Doc ${result.path} is generic README-style with low context match (${contextMatchScore.toFixed(
-                  2
-                )}), applying penalty: ${genericDocPenalty}`
-              );
-            }
-          }
-        }
-
-        // Path similarity bonus
-        if (queryFilePath && result.path) {
-          pathSimilarityScore = calculatePathSimilarity(queryFilePath, result.path) * 0.1;
-        }
-
-        // Calculate final sophisticated score
-        const finalScore = chunkInitialScore + contextMatchBonus + h1RelevanceBonus + pathSimilarityScore + genericDocPenalty;
-        result.similarity = Math.max(0, Math.min(1, finalScore));
-        result.reranked = true;
-
-        // Debug logging for first few results
-        if (finalResults.indexOf(result) < 5) {
-          debug(
-            `[SophisticatedRerank] ${result.path?.substring(0, 30)}...
-            Initial=${chunkInitialScore.toFixed(4)}, Context=${contextMatchBonus.toFixed(4)},
-            H1=${h1RelevanceBonus.toFixed(4)}, Path=${pathSimilarityScore.toFixed(4)},
-            GenericPenalty=${genericDocPenalty.toFixed(4)}, Final=${result.similarity.toFixed(4)}`
-          );
-        }
-      }
-
-      finalResults.sort((a, b) => b.similarity - a.similarity);
-
-      // Log cache statistics for performance monitoring
-      debug(`[CACHE STATS] Document context cache size: ${documentContextCache.size}`);
-      debug(`[CACHE STATS] H1 embedding cache size: ${h1EmbeddingCache.size}`);
-      debug('Sophisticated contextual reranking complete.');
-    }
 
     // Include project structure if requested (project-specific)
     if (includeProjectStructure) {
@@ -2605,6 +2685,7 @@ export const CONSTANTS = {
  * - generateDirectoryStructureEmbedding: Generate and store directory structure embedding
  * - processBatchEmbeddings: Process embeddings for multiple files
  * - findSimilarCode: Find similar code snippets
+ * - findRelevantDocs: Find relevant documentation files based on query text
  * - calculateCosineSimilarity: Calculate similarity between vectors
  * - cleanup: Close database connections
  * - clearCaches: Clear all caches

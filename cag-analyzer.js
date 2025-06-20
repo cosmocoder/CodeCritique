@@ -6,7 +6,7 @@
  * It identifies patterns, best practices, and generates review comments.
  */
 
-import { calculateCosineSimilarity, calculateEmbedding, findSimilarCode } from './embeddings.js';
+import { calculateCosineSimilarity, calculateEmbedding, findRelevantDocs, findSimilarCode } from './embeddings.js';
 import {
   detectFileType,
   detectLanguageFromExtension,
@@ -325,12 +325,11 @@ async function analyzeFile(filePath, options = {}) {
       }),
 
       // 2. Documentation Guidelines Retrieval
-      findSimilarCode(guidelineQuery, {
+      findRelevantDocs(guidelineQuery, {
         similarityThreshold: 0.05,
         limit: GUIDELINE_CANDIDATE_LIMIT,
         queryFilePath: filePath,
-        searchStrategy: 'hybrid',
-        excludeNonDocs: true, // Search document_chunks table
+        useReranking: true,
         queryContextForReranking: reviewedSnippetContext,
         projectPath: projectPath,
       }).catch((error) => {
@@ -342,12 +341,8 @@ async function analyzeFile(filePath, options = {}) {
       findSimilarCode(isTestFile ? `${content}\n// Looking for similar test files and testing patterns` : content, {
         similarityThreshold: 0.3,
         limit: CODE_EXAMPLE_LIMIT,
-        useReranking: false,
         queryFilePath: filePath,
         includeProjectStructure: false,
-        searchStrategy: 'vector_only',
-        excludeNonDocs: false, // Search file_embeddings table
-        searchType: 'code',
         projectPath: projectPath,
         isTestFile: isTestFile,
       }).catch((error) => {
