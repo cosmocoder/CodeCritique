@@ -609,25 +609,40 @@ async function analyzeFile(filePath, options = {}) {
     const seenPaths = new Set();
     const normalizedReviewPath = path.resolve(filePath);
 
+    debug(`[cag-analyzer] Filtering code examples. Review file: ${normalizedReviewPath}`);
+    debug(`[cag-analyzer] Total candidates received: ${codeExampleCandidates.length}`);
+
     for (const candidate of codeExampleCandidates) {
       // Exclude the file being reviewed and documentation files
       const normalizedCandidatePath = path.resolve(candidate.path);
-      if (!seenPaths.has(candidate.path) && !candidate.isDocumentation && normalizedCandidatePath !== normalizedReviewPath) {
-        uniqueCandidates.push(candidate);
-        seenPaths.add(candidate.path);
+      const isSameFile = normalizedCandidatePath === normalizedReviewPath;
+      const isDocumentation = candidate.isDocumentation;
+      const alreadySeen = seenPaths.has(candidate.path);
+
+      if (isSameFile) {
+        debug(`[cag-analyzer] Excluding review file: ${candidate.path} (similarity: ${candidate.similarity})`);
+        continue;
       }
+
+      if (isDocumentation) {
+        debug(`[cag-analyzer] Excluding documentation file: ${candidate.path}`);
+        continue;
+      }
+
+      if (alreadySeen) {
+        debug(`[cag-analyzer] Excluding duplicate: ${candidate.path}`);
+        continue;
+      }
+
+      uniqueCandidates.push(candidate);
+      seenPaths.add(candidate.path);
+      debug(`[cag-analyzer] Including candidate: ${candidate.path} (similarity: ${candidate.similarity})`);
     }
 
     // Sort by relevance and limit
     uniqueCandidates.sort((a, b) => b.similarity - a.similarity);
     const MAX_FINAL_EXAMPLES = 8;
     let finalCodeExamples = uniqueCandidates.slice(0, MAX_FINAL_EXAMPLES);
-
-    // Log if we filtered out the file being reviewed
-    const filteredSelf = codeExampleCandidates.some((c) => path.resolve(c.path) === normalizedReviewPath);
-    if (filteredSelf) {
-      console.log(chalk.yellow(`Filtered out the file being reviewed (${filePath}) from code examples.`));
-    }
 
     console.log(chalk.green(`Found ${finalCodeExamples.length} final code examples from ${codeExampleCandidates.length} candidates.`));
 

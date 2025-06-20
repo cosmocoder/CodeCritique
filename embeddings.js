@@ -2172,6 +2172,23 @@ export const findSimilarCode = async (queryText, options = {}) => {
     // Resolve project path once for use in multiple places
     const resolvedProjectPath = path.resolve(projectPath);
 
+    // Exclude the file being reviewed if queryFilePath is provided
+    if (queryFilePath) {
+      const normalizedQueryPath = path.resolve(queryFilePath);
+      // Add condition to exclude the file being reviewed
+      const escapedPath = normalizedQueryPath.replace(/'/g, "''");
+      conditions.push(`path != '${escapedPath}'`);
+
+      // Also check for relative path variants to be thorough
+      const relativePath = path.relative(resolvedProjectPath, normalizedQueryPath);
+      if (relativePath && !relativePath.startsWith('..')) {
+        const escapedRelativePath = relativePath.replace(/'/g, "''");
+        conditions.push(`path != '${escapedRelativePath}'`);
+      }
+
+      debug(`Excluding file being reviewed from similar code search: ${normalizedQueryPath}`);
+    }
+
     // Add project path filtering if the field exists in the schema
     // Check if the table has project_path field
     try {
