@@ -7,7 +7,7 @@
  */
 
 import * as lancedb from '@lancedb/lancedb';
-import { calculateQueryEmbedding, CONSTANTS, getPRCommentsTable } from '../../embeddings.js';
+import { calculateCosineSimilarity, calculateQueryEmbedding, CONSTANTS, getPRCommentsTable } from '../../embeddings.js';
 import { pipeline } from '@huggingface/transformers';
 import chalk from 'chalk';
 import fs from 'node:fs/promises';
@@ -511,12 +511,6 @@ export async function cleanupClassifier() {
 }
 
 /**
- * A faster, local alternative to the full LLM verification.
- * @param {object} historicalComment - { text: string, code_block: string }
- * @param {object} newCodeChunk - { code: string }
- * @returns {Promise<boolean>} - True if the comment is likely relevant to the code.
- */
-/**
  * A faster, local alternative to the full LLM verification that processes candidates in batches.
  * @param {Array<object>} candidates - An array of candidate objects to verify. Each object should have
  * `comment_text`, and a `matchedChunk` with `code`.
@@ -628,18 +622,15 @@ function preFilterWithKeywords(candidate) {
 export async function findRelevantPRComments(reviewFileContent, options = {}) {
   const { limit = 10, projectPath = process.cwd(), isTestFile = false } = options;
 
-  let db = null;
-  let tempChunkTable = null;
-
   try {
-    console.log(chalk.cyan('🔍 Starting REVERSE Hybrid Search with LLM Verification'));
+    console.log(chalk.cyan('🔍 Starting FORWARD Hybrid Search with LLM Verification'));
 
     if (!reviewFileContent) {
       console.warn(chalk.yellow('No review file content provided'));
       return [];
     }
 
-    // --- Step 1: Create a temporary in-memory table from the review file's chunks ---
+    // --- Step 1: Create chunks from the file under review ---
     const codeChunks = createCodeChunks(reviewFileContent);
     if (codeChunks.length === 0) {
       console.warn(chalk.yellow('No valid chunks created from review file'));
@@ -648,56 +639,54 @@ export async function findRelevantPRComments(reviewFileContent, options = {}) {
     console.log(chalk.blue(`📝 Created ${codeChunks.length} chunks from the review file.`));
 
     const chunkEmbeddings = await Promise.all(
-      codeChunks.map(async (chunk, i) => ({
-        id: i, // Simple ID for the temporary table
-        text: chunk.code,
+      codeChunks.map(async (chunk) => ({
         vector: await calculateQueryEmbedding(chunk.code),
         ...chunk,
       }))
     );
 
-    db = await lancedb.connect('data/tmp');
-    await fs.rm('data/tmp', { recursive: true, force: true });
-    tempChunkTable = await db.createTable('review_chunks', chunkEmbeddings);
-    console.log(chalk.blue(`🚀 Created temporary in-memory table for review file chunks.`));
-
-    // --- Step 2: Iterate through historical comments and search against the temp table ---
+    // --- Step 2: Search for relevant historical comments for each chunk ---
     const mainTable = await getPRCommentsTable(projectPath);
     if (!mainTable) throw new Error('Main PR comments table not found.');
 
-    const allHistoricalComments = await mainTable.query().toArray();
-    console.log(chalk.blue(`🏛️ Fetched ${allHistoricalComments.length} historical comments to check.`));
+    const candidateMatches = new Map();
 
-    let candidateMatches = [];
-    for (const historicalComment of allHistoricalComments) {
-      // Use the historical comment's combined_embedding to find the best matching chunk in the new file
-      if (!historicalComment.combined_embedding) continue;
+    const searchPromises = chunkEmbeddings.map((chunk) => {
+      if (!chunk.vector) return Promise.resolve([]);
+      return (
+        mainTable
+          .search(chunk.vector)
+          .column('combined_embedding')
+          .limit(15) // Get 15 potential candidates for each chunk
+          .toArray()
+          // Attach the chunk that was used for the search to each result
+          .then((results) => results.map((res) => ({ ...res, matchedChunk: chunk })))
+      );
+    });
 
-      const results = await tempChunkTable.search(historicalComment.combined_embedding).limit(HYBRID_SEARCH_CONFIG.SEARCH_LIMIT).toArray();
+    const allResults = await Promise.all(searchPromises);
+    const flattenedResults = allResults.flat();
 
-      // If we found a close enough match, create a candidate
-      if (results.length > 0 && results[0]._distance <= HYBRID_SEARCH_CONFIG.SIMILARITY_THRESHOLD) {
-        const bestChunkMatch = results[0];
-        candidateMatches.push({
-          // Reconstruct the match object with historical comment data + matched chunk data
-          ...historicalComment,
-          _distance: bestChunkMatch._distance,
-          matchedChunk: {
-            code: bestChunkMatch.text,
-            startLine: bestChunkMatch.startLine,
-            endLine: bestChunkMatch.endLine,
-          },
-        });
+    // Deduplicate results, keeping the best match (lowest distance) for each comment
+    for (const historicalComment of flattenedResults) {
+      const commentId = historicalComment.id;
+      const distance = historicalComment._distance;
+
+      if (distance <= HYBRID_SEARCH_CONFIG.SIMILARITY_THRESHOLD) {
+        if (!candidateMatches.has(commentId) || distance < candidateMatches.get(commentId)._distance) {
+          candidateMatches.set(commentId, historicalComment);
+        }
       }
     }
-    console.log(chalk.blue(`🎯 Found ${candidateMatches.length} unique candidate comments for verification.`));
+
+    console.log(chalk.blue(`🎯 Found ${candidateMatches.size} unique candidate comments for verification.`));
 
     // --- STEP 3: THE NEW PRE-FILTERING STEP ---
-    const preFilteredCandidates = candidateMatches.filter(preFilterWithKeywords);
+    const preFilteredCandidates = Array.from(candidateMatches.values()).filter(preFilterWithKeywords);
     console.log(chalk.yellow(`⚡ After keyword pre-filtering, ${preFilteredCandidates.length} candidates remain for LLM verification.`));
 
-    // --- Step 4: LLM Verification (same as before) ---
-    const candidatesArray = preFilteredCandidates; // Already de-duplicated by design
+    // --- Step 4: LLM Verification ---
+    const candidatesArray = preFilteredCandidates;
     const batchSize = HYBRID_SEARCH_CONFIG.LLM_BATCH_SIZE;
     const verifiedComments = [];
     console.log(chalk.cyan(`🤖 Starting LLM verification of ${candidatesArray.length} candidates...`));
@@ -759,23 +748,5 @@ export async function findRelevantPRComments(reviewFileContent, options = {}) {
   } catch (error) {
     console.error(chalk.red(`Error in reverse hybrid search: ${error.message}`));
     return [];
-  } finally {
-    // Clean up temporary database resources
-    if (db) {
-      try {
-        await db.close();
-        console.log(chalk.blue('✓ Temporary database connection closed'));
-      } catch (closeError) {
-        console.warn(chalk.yellow(`Warning: Error closing temporary database: ${closeError.message}`));
-      }
-    }
-
-    // Clean up temporary files
-    try {
-      await fs.rm('data/tmp', { recursive: true, force: true });
-      console.log(chalk.blue('✓ Temporary files cleaned up'));
-    } catch (cleanupError) {
-      console.warn(chalk.yellow(`Warning: Error cleaning up temporary files: ${cleanupError.message}`));
-    }
   }
 }
