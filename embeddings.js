@@ -1945,32 +1945,65 @@ export const findRelevantDocs = async (queryText, options = {}) => {
     const results = await query.limit(Math.max(limit * 3, 20)).toArray();
     console.log(chalk.green(`Native hybrid search returned ${results.length} documentation results`));
 
-    const projectFilteredResults = results.filter((result) => {
+    // OPTIMIZATION: Batch file existence checks for better performance
+    const docsToCheck = [];
+    const docProjectMatchMap = new Map();
+
+    // First pass: collect files that need existence checking
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+
       if (result.project_path) {
-        return result.project_path === resolvedProjectPath;
+        docProjectMatchMap.set(i, result.project_path === resolvedProjectPath);
+        continue;
       }
-      if (!result.original_document_path) return false;
+
+      if (!result.original_document_path) {
+        docProjectMatchMap.set(i, false);
+        continue;
+      }
+
       const filePath = result.original_document_path;
       try {
         if (path.isAbsolute(filePath)) {
-          return filePath.startsWith(resolvedProjectPath);
+          docProjectMatchMap.set(i, filePath.startsWith(resolvedProjectPath));
+          continue;
         }
+
         const absolutePath = path.resolve(resolvedProjectPath, filePath);
         if (absolutePath.startsWith(resolvedProjectPath)) {
-          try {
-            fs.accessSync(absolutePath, fs.constants.F_OK);
-            return true;
-          } catch {
-            debug(`Filtering out non-existent file: ${filePath}`);
-            return false;
-          }
+          // Mark for batch existence check
+          docsToCheck.push({ result, index: i, absolutePath, filePath });
+        } else {
+          docProjectMatchMap.set(i, false);
         }
-        return false;
       } catch (error) {
         debug(`Error filtering result for project: ${error.message}`);
-        return false;
+        docProjectMatchMap.set(i, false);
       }
-    });
+    }
+
+    // Batch check file existence for better performance
+    if (docsToCheck.length > 0) {
+      debug(`[OPTIMIZATION] Batch checking existence of ${docsToCheck.length} documentation files`);
+      const existencePromises = docsToCheck.map(async ({ result, index, absolutePath, filePath }) => {
+        try {
+          await fs.promises.access(absolutePath, fs.constants.F_OK);
+          return { index, exists: true };
+        } catch {
+          debug(`Filtering out non-existent documentation file: ${filePath}`);
+          return { index, exists: false };
+        }
+      });
+
+      const existenceResults = await Promise.all(existencePromises);
+      for (const { index, exists } of existenceResults) {
+        docProjectMatchMap.set(index, exists);
+      }
+    }
+
+    // Filter results based on project match using the map
+    const projectFilteredResults = results.filter((result, index) => docProjectMatchMap.get(index) === true);
 
     console.log(chalk.blue(`Filtered to ${projectFilteredResults.length} documentation results from current project`));
 
@@ -2017,7 +2050,66 @@ export const findRelevantDocs = async (queryText, options = {}) => {
         debug(`[CACHE] Query embedding calculated for reranking, dimensions: ${queryEmbedding?.length || 'null'}`);
       }
 
+      // OPTIMIZATION 1: Batch calculate missing H1 embeddings
+      const uniqueH1Titles = new Set();
+      const h1TitlesToCalculate = [];
+
       for (const result of finalResults) {
+        const docH1 = result.document_title;
+        if (docH1 && !uniqueH1Titles.has(docH1)) {
+          uniqueH1Titles.add(docH1);
+          if (!h1EmbeddingCache.has(docH1)) {
+            h1TitlesToCalculate.push(docH1);
+          }
+        }
+      }
+
+      // Batch calculate H1 embeddings for cache misses
+      if (h1TitlesToCalculate.length > 0) {
+        debug(`[OPTIMIZATION] Batch calculating ${h1TitlesToCalculate.length} H1 embeddings`);
+        const h1Embeddings = await calculateEmbeddingBatch(h1TitlesToCalculate);
+        for (let i = 0; i < h1TitlesToCalculate.length; i++) {
+          if (h1Embeddings[i]) {
+            h1EmbeddingCache.set(h1TitlesToCalculate[i], h1Embeddings[i]);
+          }
+        }
+      }
+
+      // OPTIMIZATION 2: Batch calculate missing document contexts
+      const uniqueDocPaths = new Set();
+      const docContextsToCalculate = [];
+
+      for (const result of finalResults) {
+        const docPath = result.path;
+        if (docPath && !uniqueDocPaths.has(docPath)) {
+          uniqueDocPaths.add(docPath);
+          if (!documentContextCache.has(docPath)) {
+            docContextsToCalculate.push({ docPath, docH1: result.document_title, result });
+          }
+        }
+      }
+
+      // Batch calculate document contexts for cache misses
+      if (docContextsToCalculate.length > 0) {
+        debug(`[OPTIMIZATION] Batch calculating ${docContextsToCalculate.length} document contexts`);
+        const contextPromises = docContextsToCalculate.map(async ({ docPath, docH1, result }) => {
+          const context = await inferContextFromDocumentContent(
+            docPath,
+            docH1,
+            [result],
+            queryContextForReranking.language || 'typescript'
+          );
+          return { docPath, context };
+        });
+
+        const contextResults = await Promise.all(contextPromises);
+        for (const { docPath, context } of contextResults) {
+          documentContextCache.set(docPath, context);
+        }
+      }
+
+      // OPTIMIZATION 3: Parallelize main reranking calculations
+      const rerankingPromises = finalResults.map(async (result) => {
         let chunkInitialScore = result.similarity * WEIGHT_INITIAL_SIM;
         let contextMatchBonus = 0;
         let h1RelevanceBonus = 0;
@@ -2027,18 +2119,11 @@ export const findRelevantDocs = async (queryText, options = {}) => {
         const docPath = result.path;
         const docH1 = result.document_title;
 
-        let chunkParentDocContext = documentContextCache.get(docPath);
-        if (!chunkParentDocContext) {
-          chunkParentDocContext = await inferContextFromDocumentContent(
-            docPath,
-            docH1,
-            [result],
-            queryContextForReranking.language || 'typescript'
-          );
-          documentContextCache.set(docPath, chunkParentDocContext);
-        }
+        // Context should now be cached from batch operation above
+        const chunkParentDocContext = documentContextCache.get(docPath);
 
         if (
+          chunkParentDocContext &&
           queryContextForReranking.area !== 'Unknown' &&
           chunkParentDocContext.area !== 'Unknown' &&
           chunkParentDocContext.area !== 'General'
@@ -2058,18 +2143,15 @@ export const findRelevantDocs = async (queryText, options = {}) => {
           }
         }
 
+        // H1 embedding should now be cached from batch operation above
         if (docH1) {
-          let h1Emb = h1EmbeddingCache.get(docH1);
-          if (!h1Emb) {
-            h1Emb = await calculateEmbedding(docH1);
-            if (h1Emb) h1EmbeddingCache.set(docH1, h1Emb);
-          }
+          const h1Emb = h1EmbeddingCache.get(docH1);
           if (h1Emb && queryEmbedding) {
             h1RelevanceBonus = calculateCosineSimilarity(queryEmbedding, h1Emb) * WEIGHT_H1_CHUNK_RERANK;
           }
         }
 
-        if (chunkParentDocContext.isGeneralPurposeReadmeStyle) {
+        if (chunkParentDocContext && chunkParentDocContext.isGeneralPurposeReadmeStyle) {
           const contextMatchScore = queryContextForReranking.area === chunkParentDocContext.area ? 1.0 : 0.0;
           if (contextMatchScore < 0.4) {
             genericDocPenalty = PENALTY_GENERIC_DOC_LOW_CONTEXT_MATCH;
@@ -2087,9 +2169,16 @@ export const findRelevantDocs = async (queryText, options = {}) => {
         result.similarity = Math.max(0, Math.min(1, finalScore));
         result.reranked = true;
 
-        if (finalResults.indexOf(result) < 5) {
-          debug(`[SophisticatedRerank] ${result.path?.substring(0, 30)}... Final=${result.similarity.toFixed(4)}`);
-        }
+        return result;
+      });
+
+      // Wait for all reranking calculations to complete
+      await Promise.all(rerankingPromises);
+
+      // Log debug info for first few results
+      for (let i = 0; i < Math.min(5, finalResults.length); i++) {
+        const result = finalResults[i];
+        debug(`[SophisticatedRerank] ${result.path?.substring(0, 30)}... Final=${result.similarity.toFixed(4)}`);
       }
 
       finalResults.sort((a, b) => b.similarity - a.similarity);
@@ -2215,47 +2304,72 @@ export const findSimilarCode = async (queryText, options = {}) => {
 
     console.log(chalk.green(`Native hybrid search returned ${results.length} results`));
 
-    // Filter results to only include files from the current project
-    const projectFilteredResults = results.filter((result) => {
+    // OPTIMIZATION: Batch file existence checks for better performance
+    const resultsToCheck = [];
+    const projectMatchMap = new Map();
+
+    // First pass: collect files that need existence checking
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+
       // Use project_path field if available (new schema)
       if (result.project_path) {
-        return result.project_path === resolvedProjectPath;
+        projectMatchMap.set(i, result.project_path === resolvedProjectPath);
+        continue;
       }
 
       // Fallback for old embeddings without project_path field
-      if (!result.path && !result.original_document_path) return false;
+      if (!result.path && !result.original_document_path) {
+        projectMatchMap.set(i, false);
+        continue;
+      }
 
       const filePath = result.original_document_path || result.path;
       try {
         // Check if this result belongs to the current project
         // First try as absolute path
         if (path.isAbsolute(filePath)) {
-          return filePath.startsWith(resolvedProjectPath);
+          projectMatchMap.set(i, filePath.startsWith(resolvedProjectPath));
+          continue;
         }
 
         // For relative paths, check if the file actually exists in the project
         const absolutePath = path.resolve(resolvedProjectPath, filePath);
 
-        // Verify the path is within project bounds AND the file exists
+        // Verify the path is within project bounds
         if (absolutePath.startsWith(resolvedProjectPath)) {
-          // For better filtering, check if file exists
-          // This helps avoid false positives from other projects with similar structure
-          try {
-            fs.accessSync(absolutePath, fs.constants.F_OK);
-            return true;
-          } catch {
-            // File doesn't exist in this project, likely from another project
-            debug(`Filtering out non-existent file: ${filePath}`);
-            return false;
-          }
+          // Mark for batch existence check
+          resultsToCheck.push({ result, index: i, absolutePath });
+        } else {
+          projectMatchMap.set(i, false);
         }
-
-        return false;
       } catch (error) {
         debug(`Error filtering result for project: ${error.message}`);
-        return false;
+        projectMatchMap.set(i, false);
       }
-    });
+    }
+
+    // Batch check file existence for better performance
+    if (resultsToCheck.length > 0) {
+      debug(`[OPTIMIZATION] Batch checking existence of ${resultsToCheck.length} files`);
+      const existencePromises = resultsToCheck.map(async ({ result, index, absolutePath }) => {
+        try {
+          await fs.promises.access(absolutePath, fs.constants.F_OK);
+          return { index, exists: true };
+        } catch {
+          debug(`Filtering out non-existent file: ${result.original_document_path || result.path}`);
+          return { index, exists: false };
+        }
+      });
+
+      const existenceResults = await Promise.all(existencePromises);
+      for (const { index, exists } of existenceResults) {
+        projectMatchMap.set(index, exists);
+      }
+    }
+
+    // Filter results based on project match using the map
+    const projectFilteredResults = results.filter((result, index) => projectMatchMap.get(index) === true);
 
     console.log(chalk.blue(`Filtered to ${projectFilteredResults.length} results from current project`));
 
