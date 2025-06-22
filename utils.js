@@ -643,7 +643,7 @@ function shouldProcessFile(filePath, content = '', options = {}) {
   }
 
   // Skip files that are likely to be generated
-  const skipFilePatterns = [/\.min\.(js|css)$/, /\.bundle\.(js|css)$/, /\.generated\./, /\.d\.ts$/];
+  const skipFilePatterns = [/\.min\.(js|css)$/, /\.bundle\.(js|css)$/, /\.generated\./, /\.d\.ts$/, /\.snap$/];
 
   if (skipFilePatterns.some((pattern) => pattern.test(filePath))) {
     return false;
