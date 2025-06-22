@@ -15,7 +15,8 @@
     "lint:ci": "npm run lint -- --cache-strategy content",
     "lint:fix": "npm run lint -- --fix",
     "prettier": "prettier --write . --cache --cache-location ./.prettier-cache",
-    "prettier:ci": "prettier --check . --cache --cache-location ./.prettier-cache --cache-strategy content"
+    "prettier:ci": "prettier --check . --cache --cache-location ./.prettier-cache --cache-strategy content",
+    "knip": "knip"
   },
   "keywords": [
     "code-review",
@@ -43,9 +44,6 @@
     "@huggingface/transformers": "^3.5.1",
     "@lancedb/lancedb": "0.19.0",
     "@octokit/rest": "21.1.1",
-    "acorn": "^8.10.0",
-    "acorn-jsx": "^5.3.2",
-    "acorn-walk": "^8.2.0",
     "chalk": "^5.3.0",
     "cli-spinner": "^0.2.10",
     "commander": "^11.0.0",
@@ -53,18 +51,16 @@
     "fastembed": "^1.14.4",
     "glob": "^10.3.0",
     "lru-cache": "11.1.0",
-    "marked": "^15.0.11",
-    "minimatch": "^9.0.3",
-    "natural": "^8.0.1",
-    "openai": "4.95.0",
-    "p-limit": "6.2.0",
-    "typescript": "^5.7.2"
+    "minimatch": "^9.0.3"
   },
   "devDependencies": {
+    "@types/node": "24.0.3",
     "eslint": "8.57.1",
     "eslint-plugin-sort-imports-es6-autofix": "0.6.0",
     "eslint-plugin-vitest": "0.5.4",
-    "prettier": "3.5.3"
+    "knip": "5.61.2",
+    "prettier": "3.5.3",
+    "typescript": "5.8.3"
   },
   "volta": {
     "node": "22.12.0",
