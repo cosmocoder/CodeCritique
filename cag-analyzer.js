@@ -8,6 +8,7 @@
 
 import { calculateCosineSimilarity, calculateEmbedding, calculateQueryEmbedding, findRelevantDocs, findSimilarCode } from './embeddings.js';
 import {
+  debug,
   detectFileType,
   detectLanguageFromExtension,
   inferContextFromCodeContent,
@@ -29,14 +30,6 @@ const CONTENT_LENGTH_PENALTY_THRESHOLD = 150;
 const DEBUG_PREVIEW_LENGTH = 300;
 const RESPONSE_TRUNCATE_LENGTH = 1000;
 const MAX_PR_COMMENTS = 50;
-
-// Debug function for logging
-function debug(message) {
-  const DEBUG = process.env.DEBUG || false;
-  if (DEBUG || process.env.VERBOSE === 'true' || process.argv.includes('--verbose')) {
-    console.log(chalk.cyan(`[DEBUG] ${message}`));
-  }
-}
 
 // Helper function for truncating content with line count
 function truncateContent(content, maxLines = DEFAULT_TRUNCATE_LINES) {

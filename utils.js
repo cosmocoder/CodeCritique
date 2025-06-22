@@ -13,6 +13,17 @@ import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
 
+/**
+ * Debug function for logging
+ * @param {string} message - Debug message to log
+ */
+function debug(message) {
+  const DEBUG = process.env.DEBUG || false;
+  if (DEBUG || process.env.VERBOSE === 'true' || process.argv.includes('--verbose')) {
+    console.log(chalk.cyan(`[DEBUG] ${message}`));
+  }
+}
+
 // --- Constants for File Extensions ---
 const DOCUMENTATION_EXTENSIONS = ['.md', '.mdx', '.markdown', '.rst', '.adoc', '.txt'];
 
@@ -1330,6 +1341,7 @@ function getChangedLinesInfo(filePath, baseBranch, targetBranch, workingDir = pr
 // --- END Git Helper Functions ---
 
 export {
+  debug,
   detectLanguageFromExtension,
   detectFileType,
   getSupportedFileExtensions,

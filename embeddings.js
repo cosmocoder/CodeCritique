@@ -18,6 +18,7 @@
 import * as lancedb from '@lancedb/lancedb';
 import { createHash } from 'node:crypto';
 import {
+  debug,
   detectLanguageFromExtension,
   extractMarkdownChunks,
   inferContextFromDocumentContent,
@@ -107,17 +108,6 @@ const progressTracker = {
 // ============================================================================
 // INTERNAL HELPER FUNCTIONS
 // ============================================================================
-
-/**
- * Debug function for logging
- * @private
- */
-function debug(message) {
-  const DEBUG = process.env.DEBUG || false;
-  if (DEBUG || process.env.VERBOSE === 'true' || process.argv.includes('--verbose')) {
-    console.log(chalk.cyan(`[DEBUG] ${message}`));
-  }
-}
 
 /**
  * Check if content has extensive comments
