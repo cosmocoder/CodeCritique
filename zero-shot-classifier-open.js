@@ -5,6 +5,7 @@
  * allowing it to detect any technology or framework mentioned in the text.
  */
 
+import * as linguistLanguages from 'linguist-languages';
 import { env, pipeline } from '@huggingface/transformers';
 import { fileURLToPath } from 'url';
 import { LRUCache } from 'lru-cache';
@@ -17,6 +18,10 @@ env.useBrowserCache = false;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Load technology keywords from JSON
+const techKeywordsPath = path.join(__dirname, 'src', 'technology-keywords.json');
+const techKeywords = JSON.parse(fs.readFileSync(techKeywordsPath, 'utf-8'));
 
 /**
  * OpenZeroShotClassifier for unrestricted technology detection
@@ -214,14 +219,11 @@ class OpenZeroShotClassifier {
       'graph',
     ]);
 
-    // Common technology patterns for extraction
-    this.techPatterns = [
-      /\b(\w+\.js)\b/gi, // Matches *.js frameworks
-      /\b(\w+\.py)\b/gi, // Matches *.py libraries
-      /\b([A-Z][a-zA-Z]+(?:[A-Z][a-zA-Z]+)*)\b/g, // CamelCase (React, FastAPI)
-      /\b([a-z]+(?:-[a-z]+)+)\b/gi, // kebab-case (scikit-learn, styled-components)
-      /\b(pandas|numpy|tensorflow|pytorch|keras|django|flask|fastapi|express|nestjs|react|angular|vue|svelte|next\.js|nuxt\.js|gatsby|webpack|babel|typescript|javascript|python|java|ruby|php|go|rust|kotlin|swift|dart|elixir|scala|clojure|haskell|erlang|julia|r|matlab|fortran|cobol|pascal|ada|lisp|scheme|prolog|sql|nosql|mongodb|postgresql|mysql|redis|elasticsearch|kafka|rabbitmq|docker|kubernetes|terraform|ansible|jenkins|gitlab|github|aws|azure|gcp|heroku|netlify|vercel)\b/gi,
-    ];
+    // Build technology patterns from loaded keywords
+    this.techPatterns = this.buildTechPatterns();
+
+    // Build a set of all known technologies for quick lookup
+    this.knownTechnologies = this.buildKnownTechnologies();
   }
 
   /**
@@ -255,20 +257,79 @@ class OpenZeroShotClassifier {
   }
 
   /**
+   * Build technology patterns from keywords JSON
+   */
+  buildTechPatterns() {
+    const patterns = [
+      /\b(\w+\.js)\b/gi, // Matches *.js frameworks
+      /\b(\w+\.py)\b/gi, // Matches *.py libraries
+      /\b([A-Z][a-zA-Z]+(?:[A-Z][a-zA-Z]+)*)\b/g, // CamelCase (React, FastAPI)
+      /\b([a-z]+(?:-[a-z]+)+)\b/gi, // kebab-case (scikit-learn, styled-components)
+    ];
+
+    // Add dynamic patterns from linguist languages
+    for (const [langName, langData] of Object.entries(linguistLanguages)) {
+      if (langData.aliases) {
+        langData.aliases.forEach((alias) => {
+          patterns.push(new RegExp(`\\b${this.escapeRegex(alias)}\\b`, 'gi'));
+        });
+      }
+    }
+
+    return patterns;
+  }
+
+  /**
+   * Build a set of all known technologies
+   */
+  buildKnownTechnologies() {
+    const techs = new Set();
+
+    // Add all technologies from JSON file
+    const addTechsFromObject = (obj) => {
+      for (const value of Object.values(obj)) {
+        if (Array.isArray(value)) {
+          value.forEach((tech) => techs.add(tech.toLowerCase()));
+        } else if (typeof value === 'object') {
+          addTechsFromObject(value);
+        }
+      }
+    };
+
+    addTechsFromObject(techKeywords);
+
+    // Add languages from linguist
+    for (const [langName, langData] of Object.entries(linguistLanguages)) {
+      techs.add(langName.toLowerCase());
+      if (langData.aliases) {
+        langData.aliases.forEach((alias) => techs.add(alias.toLowerCase()));
+      }
+    }
+
+    return techs;
+  }
+
+  /**
+   * Escape regex special characters
+   */
+  escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /**
    * Extract potential technology candidates from text
    */
   extractTechnologyCandidates(text) {
     const candidates = new Set();
+    const lowerText = text.toLowerCase();
 
-    // First, look for known technology patterns in the text
-    const knownTechRegex =
-      /\b(react|angular|vue|svelte|solid|qwik|alpine|ember|backbone|jquery|next\.?js|nuxt\.?js|gatsby|remix|astro|vite|webpack|rollup|parcel|babel|typescript|javascript|coffeescript|purescript|elm|reasonml|python|django|flask|fastapi|pyramid|tornado|bottle|java|spring|struts|hibernate|kotlin|scala|groovy|clojure|ruby|rails|sinatra|hanami|php|laravel|symfony|codeigniter|yii|csharp|c#|\.net|dotnet|aspnet|blazor|go|golang|gin|echo|fiber|beego|rust|actix|rocket|warp|tokio|swift|vapor|perfect|kitura|dart|flutter|elixir|phoenix|erlang|haskell|yesod|scotty|snap|ocaml|fsharp|f#|julia|nim|zig|crystal|d|dlang|perl|raku|lua|love2d|r|shiny|matlab|fortran|cobol|pascal|ada|lisp|clojure|scheme|racket|prolog|sql|nosql|postgresql|postgres|mysql|mariadb|sqlite|oracle|sqlserver|mongodb|couchdb|cassandra|redis|memcached|elasticsearch|solr|neo4j|graphql|rest|grpc|soap|rabbitmq|kafka|nats|zeromq|docker|kubernetes|k8s|openshift|swarm|podman|terraform|ansible|puppet|chef|saltstack|vagrant|packer|jenkins|gitlab|github|bitbucket|circleci|travisci|aws|azure|gcp|google cloud|heroku|netlify|vercel|railway|render|fly\.io|digitalocean|linode|vultr|nginx|apache|caddy|traefik|haproxy|tomcat|jetty|iis|express|koa|hapi|fastify|nestjs|adonisjs|sails|meteor|deno|bun|node\.?js|npm|yarn|pnpm|pip|poetry|cargo|maven|gradle|sbt|leiningen|mix|hex|composer|bundler|gem|nuget|cocoapods|homebrew|apt|yum|pacman|htmx|alpinejs|stimulus|turbo|hotwire|tailwind|bootstrap|bulma|material-ui|mui|ant design|chakra|semantic ui|foundation|uikit|primevue|vuetify|quasar|element|naive ui|arco|semi|mantine|nextui|daisyui|headlessui|radix|shadcn|pandas|numpy|scipy|matplotlib|seaborn|plotly|scikit-learn|sklearn|tensorflow|pytorch|keras|jax|mxnet|caffe|theano|opencv|nltk|spacy|gensim|transformers|huggingface|langchain|llamaindex|openai|anthropic|cohere|pinecone|weaviate|chroma|qdrant|milvus|faiss|annoy|scann|vertex|sagemaker|mlflow|kubeflow|airflow|prefect|dagster|dbt|spark|hadoop|hive|presto|trino|flink|storm|samza|beam|dataflow|bigquery|redshift|snowflake|databricks|tableau|powerbi|looker|metabase|superset|grafana|prometheus|datadog|newrelic|sentry|rollbar|bugsnag|logstash|fluentd|graylog|splunk|sumologic|auth0|okta|keycloak|firebase|supabase|appwrite|hasura|prisma|typeorm|sequelize|mongoose|mikro-orm|drizzle|knex|objection|waterline|bookshelf|massive|pg-promise|mysql2|mariadb|oracledb|tedious|mssql|sqlite3|better-sqlite3|mongodb|mongoose|redis|ioredis|bull|bullmq|celery|sidekiq|resque|delayed_job|hangfire|quartz|activemq|artemis|pulsar|eventbridge|kinesis|sqs|sns|pubsub|cloud tasks|cloud functions|lambda|vercel functions|netlify functions|cloudflare workers|durable objects|r2|s3|gcs|blob storage|spaces|minio|ceph|glusterfs|nfs|zfs|btrfs|ext4|xfs|apfs|ntfs|fat32|exfat|git|svn|mercurial|perforce|tfs|vscode|vim|neovim|emacs|sublime|atom|brackets|notepad\+\+|intellij|eclipse|netbeans|xcode|android studio|visual studio|rider|webstorm|phpstorm|pycharm|rubymine|goland|clion|datagrip|postman|insomnia|paw|httpie|curl|wget|axios|fetch|request|superagent|got|ky|swr|react-query|tanstack|apollo|relay|urql|graphql-request|prisma|nexus|typegraphql|graphql-yoga|graphql-tools|graphql-codegen|swagger|openapi|raml|asyncapi|json-schema|protobuf|avro|thrift|messagepack|cbor|bson|xml|yaml|toml|ini|env|json|csv|parquet|orc|arrow|hdf5|netcdf|geojson|shapefile|kml|gpx|osm|pbf|mbtiles|pmtiles|vector tiles|raster tiles|wms|wfs|wcs|wmts|tms|xyz|bing|google|mapbox|esri|here|tomtom|openstreetmap|leaflet|openlayers|maplibre|cesium|deck\.gl|kepler\.gl|uber|lyft|grab|ola|didi|bolt|freenow|cabify|beat|kapten|mytaxi|gett|juno|via|curb|flywheel|hailo|addison lee|blacklane|chauffeur|limousine|taxi|rideshare|carpool|vanpool|microtransit|paratransit|demand responsive|mobility|maas|transportation|transit|public transport|bus|tram|metro|subway|train|rail|light rail|commuter rail|high speed rail|maglev|hyperloop|monorail|cable car|gondola|funicular|ferry|water taxi|hovercraft|hydrofoil|catamaran|cruise|cargo|freight|logistics|supply chain|warehouse|distribution|fulfillment|last mile|delivery|courier|postal|parcel|package|shipping|trucking|rail freight|air cargo|ocean freight|intermodal|multimodal|transshipment|cross-docking|consolidation|deconsolidation|customs|clearance|brokerage|forwarding|3pl|4pl|5pl|lsp|tms|wms|erp|crm|scm|plm|mes|qms|eam|cmms|hrms|hris|hcm|ats|lms|cms|dms|ecm|dam|pim|mdm|cdp|dmp|crm|marketing automation|email marketing|social media|seo|sem|ppc|display advertising|programmatic|retargeting|remarketing|attribution|analytics|tag management|consent management|privacy|gdpr|ccpa|lgpd|pipeda|pecr|can-spam|casl|tcpa|coppa|ferpa|hipaa|sox|pci dss|iso 27001|soc 2|nist|cis|owasp|sans|mitre|att&ck|cyber kill chain|diamond model|stix|taxii|yara|sigma|snort|suricata|zeek|bro|wireshark|tcpdump|nmap|masscan|zmap|metasploit|burp suite|zap|nikto|sqlmap|hydra|john|hashcat|aircrack|kismet|wifi pineapple|rubber ducky|bash bunny|lan turtle|packet squirrel|shark jack|key croc|screen crab|omg cable|malduino|digispark|teensy|arduino|raspberry pi|esp8266|esp32|stm32|pic|avr|arm|risc-v|fpga|asic|soc|mcu|dsp|gpu|tpu|npu|quantum|blockchain|bitcoin|ethereum|solana|cardano|polkadot|cosmos|avalanche|near|algorand|tezos|eos|tron|binance|polygon|arbitrum|optimism|zksync|starknet|lightning|raiden|plasma|rollup|sidechain|bridge|oracle|chainlink|band|api3|uma|augur|gnosis|polymarket|uniswap|sushiswap|pancakeswap|curve|balancer|aave|compound|maker|synthetix|yearn|convex|lido|rocket pool|frax|olympus|wonderland|time|spell|mim|usdc|usdt|dai|ust|frax|fei|rai|lusd|susd|gusd|usdp|busd|tusd|husd|usdn|usdk|usdx|usd\+\+|nft|defi|dao|dex|cex|amm|yield|farming|staking|liquidity|mining|vault|lending|borrowing|margin|leverage|perpetual|futures|options|derivatives|synthetic|wrapped|pegged|stable|coin|token|altcoin|memecoin|shitcoin|rugpull|honeypot|ponzi|pyramid|mlm|scam|fraud|hack|exploit|vulnerability|bug|bounty|audit|security|pentesting|redteam|blueteam|purpleteam|soc|siem|soar|xdr|edr|ndr|mdr|dlp|casb|sase|ztna|sdwan|firewall|ids|ips|waf|ddos|cdn|load balancer|reverse proxy|api gateway|service mesh|istio|linkerd|consul|envoy|kong|tyk|apigee|mulesoft|boomi|zapier|ifttt|automate|flow|logic apps|power automate|workato|integromat|make|n8n|node-red|apache nifi|streamsets|talend|informatica|datastage|ssis|pentaho|kettle|airbyte|fivetran|stitch|singer|meltano|dbt|dataform|sqlmesh|cube|metricflow|lightdash|preset|redash|blazer|popsql|querybook|hue|zeppelin|jupyter|colab|kaggle|databricks|sagemaker|vertex|azure ml|watson|h2o|datarobot|c3\.ai|palantir|snowflake|databricks|confluent|elastic|splunk|datadog|new relic|dynatrace|appdynamics|instana|honeycomb|lightstep|jaeger|zipkin|tempo|loki|cortex|thanos|victoriametrics|influxdb|timescale|questdb|clickhouse|druid|pinot|rockset|materialize|ksqldb|flink sql|spark sql|presto sql|trino sql|dremio|starburst|ahana|varada|kylin|druid|superset|preset|looker|tableau|powerbi|qlik|sisense|domo|gooddata|thoughtspot|mode|periscope|chartio|metabase|redash|blazer|holistics|steep|grow|klipfolio|geckoboard|databox|cyfe|freeboard|smashing|dashing|grafana|kibana|chronograf|lens|k9s|octant|headlamp|portainer|rancher|openshift|tanzu|anthos|eks|aks|gke|doks|lke|vke|civo|k3s|k0s|microk8s|minikube|kind|k3d|tilt|skaffold|draft|forge|gitkube|flagger|argo|flux|spinnaker|harness|codefresh|circleci|travis|jenkins|bamboo|teamcity|octopus|azure devops|aws codepipeline|gcp cloud build|gitlab ci|github actions|bitbucket pipelines|drone|concourse|gocd|buddy|semaphore|buildkite|appveyor|shippable|codeship|wercker|magnum|solano|snap|distelli|electric cloud|xebialabs|cloudbees|urban code|puppet enterprise|chef automate|ansible tower|salt enterprise|terraform cloud|terraform enterprise|spacelift|env0|scalr|morpheus|cloudify|crossplane|pulumi|cdk|cdktf|troposphere|stacker|sceptre|rain|sam|serverless|chalice|zappa|claudia|apex|gordon|sparta|aegis|dawson|colly|scrapy|beautifulsoup|selenium|puppeteer|playwright|cypress|testcafe|nightwatch|webdriverio|protractor|casperjs|phantomjs|slimerjs|zombie|cheerio|jsdom|htmlparser|xmldom|xpath|css selectors|regex|glob|minimatch|micromatch|picomatch|nanomatch|extglob|braces|expand-brackets|snapdragon|anymatch|chokidar|gaze|watch|nodemon|pm2|forever|supervisor|systemd|upstart|init\.d|rc\.d|cron|at|anacron|fcron|dcron|cronie|vixie|quartz|hangfire|celery beat|apscheduler|schedule|crontab|cronjob|scheduled task|timer|alarm|reminder|notification|alert|email|sms|push|webhook|slack|discord|telegram|whatsapp|signal|matrix|irc|xmpp|jabber|rocketchat|mattermost|zulip|gitter|hipchat|stride|flock|twist|chanty|ryver|glip|workplace|yammer|chatter|jive|confluence|sharepoint|notion|coda|airtable|clickup|monday|asana|trello|jira|linear|shortcut|clubhouse|pivotal|targetprocess|rally|versionone|azure boards|github issues|gitlab issues|bitbucket issues|youtrack|redmine|trac|bugzilla|mantis|fogbugz|manuscript|phabricator|reviewboard|gerrit|crucible|collaborator|codestream|codescene|codefactor|codacy|codeclimate|sonarqube|sonarcloud|coverity|fortify|checkmarx|veracode|snyk|whitesource|black duck|synopsis|twistlock|aqua|sysdig|falco|anchore|clair|trivy|grype|syft|cosign|sigstore|notary|tuf|in-toto|slsa|sbom|spdx|cyclonedx|swid|cpe|cve|cwe|cvss|epss|kev|vex|csaf|oval|scap|stix|taxii|misp|yara|sigma|att&ck|d3fend|veris|kill chain|diamond model|pyramid of pain|cyber threat intelligence|threat hunting|threat modeling|stride|pasta|linddun|octave|fair|nist rmf|iso 27005|cobit|itil|togaf|zachman|dodaf|modaf|naf|uaf|archimate|bpmn|uml|sysml|sparx|magicdraw|rhapsody|visual paradigm|lucidchart|draw\.io|diagrams\.net|miro|mural|figma|sketch|adobe xd|invision|marvel|principle|flinto|origami|framer|protopie|axure|balsamiq|mockplus|justinmind|uxpin|webflow|bubble|adalo|glide|softr|retool|tooljet|budibase|appsmith|dronahq|mendix|outsystems|powerapps|appian|pega|salesforce|servicenow|workday|sap|oracle|microsoft|google|amazon|apple|meta|netflix|uber|airbnb|spotify|stripe|square|paypal|shopify|atlassian|slack|zoom|twilio|sendgrid|mailchimp|hubspot|zendesk|intercom|segment|amplitude|mixpanel|heap|fullstory|hotjar|crazy egg|optimizely|vwo|google optimize|adobe target|dynamic yield|monetate|evergage|sailthru|braze|iterable|klaviyo|customer\.io|urban airship|onesignal|pusher|pubnub|ably|socket\.io|signalr|mercure|centrifugo|soketi|laravel echo|phoenix channels|action cable|anycable|hotwire|turbo|stimulus|livewire|liveview|blazor server|vaadin|gwt|wicket|tapestry|struts|jsf|primefaces|richfaces|icefaces|myfaces|mojarra|spring mvc|spring boot|spring cloud|spring data|spring security|spring batch|spring integration|spring webflux|project reactor|rxjava|akka|vert\.x|quarkus|micronaut|helidon|dropwizard|ratpack|javalin|sparkjava|play|lagom|akka http|http4s|finch|scalatra|lift|skinny|rails api|grape|roda|hanami api|sinatra|padrino|cuba|roda|syro|hobbit|nancy|servicestack|carter|giraffe|saturn|falco|suave|freya|hopac|orleans|dapr|mass transit|nservicebus|rebus|brighter|mediatr|marten|eventstore|axon|eventuate|lagom|cloudstate|cloudflow|flink stateful|kafka streams|samza|storm trident|spark structured streaming|beam stateful|temporal|cadence|camunda|zeebe|activiti|flowable|jbpm|drools|optaplanner|kogito|serverless workflow|step functions|logic apps|power automate|zapier|ifttt|integromat|make|n8n|node-red|apache airflow|prefect|dagster|luigi|argo workflows|tekton|brigade|keptn|flagger|shipper|spinnaker|harness|launchdarkly|split|optimizely|unleash|flagsmith|flipper|rollout|cloudbees|configcat|statsig|growthbook|eppo|amplitude experiment|firebase remote config|aws appconfig|azure app configuration)\b/gi;
-
-    // Extract using known tech regex
-    const knownMatches = text.matchAll(knownTechRegex);
-    for (const match of knownMatches) {
-      const tech = match[0];
-      candidates.add(tech);
+    // Look for known technologies
+    for (const tech of this.knownTechnologies) {
+      // Create regex for exact word boundary matching
+      const regex = new RegExp(`\\b${this.escapeRegex(tech)}\\b`, 'i');
+      if (regex.test(text)) {
+        candidates.add(tech);
+      }
     }
 
     // Extract using patterns

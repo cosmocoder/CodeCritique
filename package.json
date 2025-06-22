@@ -50,6 +50,7 @@
     "dotenv": "16.5.0",
     "fastembed": "^1.14.4",
     "glob": "^10.3.0",
+    "linguist-languages": "8.0.0",
     "lru-cache": "11.1.0",
     "minimatch": "^9.0.3"
   },
