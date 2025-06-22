@@ -6,7 +6,15 @@
  * It identifies patterns, best practices, and generates review comments.
  */
 
-import { calculateCosineSimilarity, calculateEmbedding, calculateQueryEmbedding, findRelevantDocs, findSimilarCode } from './embeddings.js';
+import * as llm from './llm.js';
+import {
+  calculateCosineSimilarity,
+  calculateEmbedding,
+  calculateQueryEmbedding,
+  findRelevantDocs,
+  findSimilarCode,
+  initializeTables,
+} from './embeddings.js';
 import {
   debug,
   detectFileType,
@@ -16,6 +24,7 @@ import {
   isTestFile,
   shouldProcessFile,
 } from './utils.js';
+import { findRelevantPRComments } from './src/pr-history/database.js';
 import chalk from 'chalk';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -270,8 +279,6 @@ async function analyzeFile(filePath, options = {}) {
     // --- Stage 0: Initialize Tables (ONE-TIME SETUP) ---
     console.log(chalk.blue('--- Stage 0: Initializing Database Tables ---'));
     try {
-      // Import the initializeTables function
-      const { initializeTables } = await import('./embeddings.js');
       await initializeTables();
       console.log(chalk.green('✅ Database tables initialized successfully'));
     } catch (initError) {
@@ -938,8 +945,6 @@ async function callLLMForAnalysis(context, options = {}) {
 // LLM call function
 async function sendPromptToLLM(prompt, llmOptions) {
   try {
-    // Import the actual LLM module
-    const llm = await import('./llm.js');
     if (!llm || typeof llm.sendPromptToClaude !== 'function') {
       throw new Error('LLM module does not contain required function: sendPromptToClaude');
     }
@@ -1667,9 +1672,6 @@ async function getPRCommentContext(filePath, options = {}) {
     const directoryPath = path.dirname(normalizedPath);
 
     debug(`[getPRCommentContext] Getting context for ${normalizedPath}`);
-
-    // Import database functions
-    const { findRelevantPRComments } = await import('./src/pr-history/database.js');
 
     // Use pre-computed embedding if available, otherwise compute it
     let fileContent = '';

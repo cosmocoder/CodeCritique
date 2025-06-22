@@ -35,7 +35,7 @@ import {
 } from './cag-review.js';
 
 // Import PR history analyzer and CLI utilities
-import { cleanupClassifier } from './src/pr-history/database.js';
+import { cleanupClassifier, clearPRComments, getPRCommentsStats, hasPRComments } from './src/pr-history/database.js';
 import {
   displayAnalysisResults,
   displayDatabaseStats,
@@ -45,6 +45,7 @@ import {
   validateGitHubToken,
 } from './src/pr-history/cli-utils.js';
 import { PRHistoryAnalyzer } from './src/pr-history/analyzer.js';
+import readline from 'readline';
 
 // Get __dirname equivalent in ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -1213,7 +1214,6 @@ async function getPRHistoryStatus(options) {
     displayStatus(status);
 
     // Check database for stored comments
-    const { hasPRComments, getPRCommentsStats } = await import('./src/pr-history/database.js');
     const hasComments = await hasPRComments(repository, projectPath);
 
     if (hasComments) {
@@ -1242,7 +1242,6 @@ async function clearPRHistory(options) {
     console.log(chalk.cyan(`Repository: ${repository}`));
 
     // Check if data exists before confirmation
-    const { hasPRComments, getPRCommentsStats } = await import('./src/pr-history/database.js');
     const hasComments = await hasPRComments(repository, projectPath);
 
     if (!hasComments) {
@@ -1260,7 +1259,6 @@ async function clearPRHistory(options) {
 
     // Confirmation prompt (unless --force flag is used)
     if (!options.force) {
-      const readline = await import('readline');
       const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
@@ -1279,7 +1277,6 @@ async function clearPRHistory(options) {
     }
 
     // Clear the data
-    const { clearPRComments } = await import('./src/pr-history/database.js');
     console.log(chalk.blue('Clearing PR analysis data...'));
 
     const cleared = await clearPRComments(repository, projectPath);

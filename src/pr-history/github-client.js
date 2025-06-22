@@ -5,6 +5,7 @@
  * with intelligent pagination, filtering, and rate limiting for large repositories.
  */
 
+import { getLastAnalysisTimestamp } from './database.js';
 import { Octokit } from '@octokit/rest';
 import chalk from 'chalk';
 import fs from 'node:fs/promises';
@@ -83,7 +84,6 @@ export class GitHubAPIClient {
    */
   async getLastAnalysisDate(owner, repo, projectPath) {
     try {
-      const { getLastAnalysisTimestamp } = await import('./database.js');
       const lastTimestamp = await getLastAnalysisTimestamp(`${owner}/${repo}`, projectPath);
 
       if (lastTimestamp) {

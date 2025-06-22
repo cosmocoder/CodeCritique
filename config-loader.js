@@ -8,6 +8,7 @@
 
 import { detectFileType, detectLanguageFromExtension } from './utils.js';
 import { fileURLToPath } from 'url';
+import defaultConfigModule from './default-config.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -59,10 +60,7 @@ function loadLanguageConfig(language) {
 // Load default configuration once at module initialization
 let defaultConfig;
 try {
-  // Use a dynamic import with .then() to load the configuration synchronously
-  import(DEFAULT_CONFIG_PATH).then((config) => {
-    defaultConfig = config.default;
-  });
+  defaultConfig = defaultConfigModule;
 } catch (error) {
   console.error(`Error loading default configuration:`, error.message);
   defaultConfig = {

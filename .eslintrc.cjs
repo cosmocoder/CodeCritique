@@ -21,6 +21,13 @@ module.exports = {
       },
     ],
     'no-process-env': 0,
+    'no-restricted-syntax': [
+      'error',
+      {
+        selector: 'ImportExpression',
+        message: 'Dynamic imports are not allowed. Use static imports instead.',
+      },
+    ],
   },
   globals: {
     process: 'readable',
