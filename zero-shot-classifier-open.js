@@ -21,7 +21,7 @@ const __dirname = path.dirname(__filename);
 /**
  * OpenZeroShotClassifier for unrestricted technology detection
  */
-export class OpenZeroShotClassifier {
+class OpenZeroShotClassifier {
   constructor() {
     this.classifier = null;
     this.initializationPromise = null;
@@ -446,6 +446,3 @@ export class OpenZeroShotClassifier {
 
 // Export singleton instance
 export const openClassifier = new OpenZeroShotClassifier();
-
-// Export the class for testing
-export default OpenZeroShotClassifier;

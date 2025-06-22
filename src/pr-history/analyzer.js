@@ -583,7 +583,7 @@ export class PRHistoryAnalyzer {
  * @param {Object} options - Analysis options
  * @returns {Promise<Object>} Analysis results
  */
-export async function analyzePRHistory(repository, token, options = {}) {
+async function analyzePRHistory(repository, token, options = {}) {
   const analyzer = new PRHistoryAnalyzer(options);
   analyzer.initialize(token);
   return analyzer.analyzeRepository(repository, options);
@@ -594,7 +594,7 @@ export async function analyzePRHistory(repository, token, options = {}) {
  * @param {string} repository - Repository name
  * @returns {Promise<Object>} Status information
  */
-export async function getPRAnalysisStatus(repository) {
+async function getPRAnalysisStatus(repository) {
   const analyzer = new PRHistoryAnalyzer();
   return analyzer.getProgressStatus(repository);
 }

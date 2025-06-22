@@ -628,6 +628,6 @@ export class GitHubAPIClient {
 /**
  * Convenience function to create a GitHub client
  */
-export function createGitHubClient(options = {}) {
+function createGitHubClient(options = {}) {
   return new GitHubAPIClient(options);
 }

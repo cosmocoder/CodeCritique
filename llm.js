@@ -855,12 +855,4 @@ function extractPRHistoryInsights(prPatterns) {
   return insights;
 }
 
-export {
-  sendPromptToClaude,
-  analyzeCode,
-  analyzeDiff,
-  generateReviewSummary,
-  prioritizePatterns,
-  optimizeTokenUsage,
-  extractPRHistoryInsights,
-};
+export { sendPromptToClaude };

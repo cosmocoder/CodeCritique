@@ -2120,4 +2120,4 @@ async function performHolisticPRAnalysis(options) {
   }
 }
 
-export { analyzeFile, getPRCommentContext, generateHolisticPRAnalysisPrompt, parseAnalysisResponse };
+export { analyzeFile, getPRCommentContext };

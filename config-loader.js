@@ -256,4 +256,4 @@ function loadConfigForFile(filePath, content = '') {
   };
 }
 
-export { loadBlockDelimiters, loadBlockStarterPatterns, loadPatternConfig, getPromptForFileType, loadConfigForFile };
+export { getPromptForFileType };

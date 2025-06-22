@@ -357,7 +357,7 @@ export async function calculateEmbedding(text) {
  * @param {string[]} texts - An array of texts to embed.
  * @returns {Promise<Array<Array<number>>>} - A promise that resolves to an array of embedding vectors.
  */
-export async function calculateEmbeddingBatch(texts) {
+async function calculateEmbeddingBatch(texts) {
   // Ensure texts is a non-empty array of non-empty strings
   if (!Array.isArray(texts) || texts.length === 0 || texts.some((text) => typeof text !== 'string' || text.trim().length === 0)) {
     debug('Skipping batch embedding for empty or invalid texts array.');
@@ -544,7 +544,7 @@ async function getDB() {
  * @param {string} tableName - Name of the table
  * @returns {Promise<lancedb.Table | null>} Table object or null if not found/error
  */
-export async function getTableInstance(tableName) {
+async function getTableInstance(tableName) {
   try {
     const db = await getDBConnection();
     const tableNames = await db.tableNames();
@@ -563,7 +563,7 @@ export async function getTableInstance(tableName) {
  * Get file embeddings table
  * @returns {Promise<lancedb.Table | null>}
  */
-export async function getFileEmbeddingsTable() {
+async function getFileEmbeddingsTable() {
   return getTableInstance(FILE_EMBEDDINGS_TABLE);
 }
 
@@ -571,7 +571,7 @@ export async function getFileEmbeddingsTable() {
  * Get document chunk embeddings table
  * @returns {Promise<lancedb.Table | null>}
  */
-export async function getDocumentChunkTable() {
+async function getDocumentChunkTable() {
   return getTableInstance(DOCUMENT_CHUNK_TABLE);
 }
 
@@ -579,7 +579,7 @@ export async function getDocumentChunkTable() {
  * Get PR comments table
  * @returns {Promise<lancedb.Table | null>}
  */
-export async function getPRCommentsTableInstance() {
+async function getPRCommentsTableInstance() {
   return getTableInstance(PR_COMMENTS_TABLE);
 }
 
@@ -852,7 +852,7 @@ async function getTable(tableName) {
  * @param {string} baseDir - Base directory for relative path calculation
  * @returns {Promise<{path: string, success: boolean} | null>} Result or null on error
  */
-export async function generateFileEmbeddings(filePath, content, baseDir = process.cwd()) {
+async function generateFileEmbeddings(filePath, content, baseDir = process.cwd()) {
   // Ensure consistent path handling - use the same base directory as batch processing
   const absoluteFilePath = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(baseDir, filePath);
   const relativePath = path.relative(baseDir, absoluteFilePath);
@@ -945,7 +945,7 @@ export async function generateFileEmbeddings(filePath, content, baseDir = proces
  * @param {Object} options - Options for generating directory structure
  * @returns {string} Directory structure as a string
  */
-export const generateDirectoryStructure = (options = {}) => {
+const generateDirectoryStructure = (options = {}) => {
   const { rootDir = process.cwd(), maxDepth = 5, ignorePatterns = [], showFiles = true } = options;
   debug(`Generating directory structure: rootDir=${rootDir}, maxDepth=${maxDepth}, showFiles=${showFiles}`);
   // Use path.sep for platform compatibility
@@ -998,7 +998,7 @@ export const generateDirectoryStructure = (options = {}) => {
  * @param {Object} options - Options for generating the directory structure
  * @returns {Promise<boolean>} True if successful, false otherwise
  */
-export const generateDirectoryStructureEmbedding = async (options = {}) => {
+const generateDirectoryStructureEmbedding = async (options = {}) => {
   console.log(chalk.cyan('[generateDirEmb] Starting...')); // Log entry
   try {
     const db = await getDB();
@@ -1080,7 +1080,7 @@ export const generateDirectoryStructureEmbedding = async (options = {}) => {
  * @param {Object} options - Processing options
  * @returns {Promise<Object>} Processing results
  */
-export async function processBatchEmbeddings(filePaths, options = {}) {
+async function processBatchEmbeddings(filePaths, options = {}) {
   const {
     concurrency = 10, // Concurrency for pLimit if we reintroduce it for I/O
     verbose = false,
@@ -1841,7 +1841,7 @@ async function processFileWithRetries(filePath, verbose, options = {}) {
  * @param {string} path2 - Second file path (absolute or relative).
  * @returns {number} Similarity score between 0 and 1.
  */
-export function calculatePathSimilarity(path1, path2) {
+function calculatePathSimilarity(path1, path2) {
   if (!path1 || !path2) return 0;
 
   try {
@@ -2525,7 +2525,7 @@ export async function cleanup() {
  * - Document context analysis (area, technologies, document type)
  * - H1 title embeddings (not stored in database, calculated on-demand)
  */
-export function clearCaches() {
+function clearCaches() {
   const docCacheSize = documentContextCache.size;
   const h1CacheSize = h1EmbeddingCache.size;
   const embeddingCacheSize = embeddingCache.size;
@@ -2545,7 +2545,7 @@ export function clearCaches() {
  * Clear embeddings for the current project only
  * @param {string} projectPath - The base path of the current project (defaults to process.cwd())
  */
-export async function clearProjectEmbeddings(projectPath = process.cwd()) {
+async function clearProjectEmbeddings(projectPath = process.cwd()) {
   let db = null;
   try {
     const resolvedProjectPath = path.resolve(projectPath);

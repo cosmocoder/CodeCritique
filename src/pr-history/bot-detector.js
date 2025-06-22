@@ -76,7 +76,7 @@ const KNOWN_BOTS = new Set([
  * @param {string} username - GitHub username to check
  * @returns {boolean} True if username appears to be a bot
  */
-export function isBotUsername(username) {
+function isBotUsername(username) {
   if (!username || typeof username !== 'string') {
     return false;
   }
@@ -97,7 +97,7 @@ export function isBotUsername(username) {
  * @param {Object} comment - Comment object with user and body properties
  * @returns {boolean} True if comment appears to be from a bot
  */
-export function isBotComment(comment) {
+function isBotComment(comment) {
   if (!comment) {
     return false;
   }

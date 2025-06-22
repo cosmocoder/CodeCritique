@@ -15,7 +15,7 @@ import path from 'node:path';
  * @param {string} projectPath - Project directory path
  * @returns {string|null} Repository in format "owner/repo" or null if not found
  */
-export function detectGitHubRepository(projectPath) {
+function detectGitHubRepository(projectPath) {
   try {
     const gitDir = path.join(projectPath, '.git');
     if (!fs.existsSync(gitDir)) {
@@ -53,7 +53,7 @@ export function detectGitHubRepository(projectPath) {
  * @param {Object} options - CLI options
  * @returns {string|null} GitHub token or null if not found
  */
-export function getGitHubToken(options) {
+function getGitHubToken(options) {
   return options.token || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null;
 }
 
@@ -62,7 +62,7 @@ export function getGitHubToken(options) {
  * @param {string} directory - Directory option from CLI
  * @returns {string} Resolved project path
  */
-export function resolveProjectPath(directory) {
+function resolveProjectPath(directory) {
   return directory ? path.resolve(directory) : process.cwd();
 }
 
@@ -71,7 +71,7 @@ export function resolveProjectPath(directory) {
  * @param {string} repository - Repository string
  * @returns {boolean} True if valid format
  */
-export function isValidRepositoryFormat(repository) {
+function isValidRepositoryFormat(repository) {
   if (!repository || typeof repository !== 'string') {
     return false;
   }
