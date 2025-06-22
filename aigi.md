@@ -21,42 +21,49 @@ The AIGI Framework is structured as a modular system with specialized components
 ### Core Components
 
 1. **Orchestrator**
+
    - Coordinates the overall workflow
    - Manages communication between components
    - Tracks progress and maintains state
    - Implements adaptive scheduling based on task complexity
 
 2. **Prompt Generator**
+
    - Analyzes requirements and context
    - Constructs optimized prompts using proven patterns
    - Incorporates project-specific conventions and constraints
    - Applies dynamic prompt engineering techniques
 
 3. **Code Generator**
+
    - Interfaces with AI models (Claude, GPT-4, etc.)
    - Manages context windows and token limitations
    - Handles error recovery and retry logic
    - Implements streaming and chunking for large generations
 
 4. **Critic**
+
    - Performs static analysis on generated code
    - Identifies potential bugs, anti-patterns, and security issues
    - Evaluates adherence to project standards
    - Generates detailed feedback for refinement
 
 5. **Scorer**
+
    - Quantifies code quality across multiple dimensions
    - Applies weighted scoring algorithms
    - Tracks improvement across iterations
    - Determines when code meets quality thresholds
 
 6. **Reflection Engine**
+
    - Analyzes patterns in generation successes and failures
    - Identifies improvement opportunities
    - Formulates specific refinement strategies
    - Maintains a knowledge base of effective approaches
 
 7. **Memory Manager**
+
    - Preserves relevant context across sessions
    - Implements efficient storage and retrieval mechanisms
    - Manages context prioritization and pruning
@@ -95,12 +102,14 @@ The AIGI Framework employs several sophisticated algorithms across its component
 ### Prompt Engineering Algorithms
 
 1. **Context-Aware Prompt Construction**
+
    - Dynamically adjusts prompt structure based on task complexity
    - Incorporates relevant code snippets and documentation
    - Applies task-specific instruction patterns
    - Includes examples calibrated to desired output quality
 
 2. **Constraint Propagation**
+
    - Translates project requirements into explicit constraints
    - Ensures architectural patterns are preserved
    - Enforces naming conventions and coding standards
@@ -115,6 +124,7 @@ The AIGI Framework employs several sophisticated algorithms across its component
 ### Evaluation Algorithms
 
 1. **Multi-dimensional Quality Assessment**
+
    - Evaluates code across dimensions:
      - Correctness (functional accuracy)
      - Efficiency (time and space complexity)
@@ -123,6 +133,7 @@ The AIGI Framework employs several sophisticated algorithms across its component
      - Testability (ease of unit testing)
 
 2. **Pattern Recognition**
+
    - Identifies common anti-patterns
    - Detects potential edge cases
    - Recognizes security vulnerabilities
@@ -137,12 +148,14 @@ The AIGI Framework employs several sophisticated algorithms across its component
 ### Refinement Algorithms
 
 1. **Targeted Feedback Generation**
+
    - Prioritizes issues by severity and impact
    - Formulates specific, actionable feedback
    - Provides concrete examples of improvements
    - Explains rationale behind recommendations
 
 2. **Iterative Convergence**
+
    - Applies diminishing refinement strategy
    - Focuses on high-impact improvements first
    - Monitors convergence rate to optimal solution
@@ -161,12 +174,14 @@ The AIGI Framework incorporates advanced logical reasoning and code comprehensio
 ### Semantic Understanding
 
 1. **Code Semantics Analysis**
+
    - Extracts semantic meaning from code beyond syntax
    - Identifies functional intent and purpose
    - Recognizes design patterns and architectural elements
    - Maps relationships between components
 
 2. **Natural Language to Code Mapping**
+
    - Translates requirements expressed in natural language to code structures
    - Identifies entities, actions, and relationships
    - Infers implicit requirements and constraints
@@ -181,12 +196,14 @@ The AIGI Framework incorporates advanced logical reasoning and code comprehensio
 ### Reasoning Frameworks
 
 1. **Causal Reasoning**
+
    - Analyzes cause-effect relationships in code
    - Identifies potential side effects and unintended consequences
    - Traces data flow and state changes
    - Predicts runtime behavior
 
 2. **Analogical Reasoning**
+
    - Applies solutions from similar problems
    - Adapts patterns from one domain to another
    - Recognizes structural similarities between different implementations
@@ -201,12 +218,14 @@ The AIGI Framework incorporates advanced logical reasoning and code comprehensio
 ### Comprehension Techniques
 
 1. **Program Slicing**
+
    - Extracts relevant code segments for specific functionality
    - Identifies dependencies and relationships
    - Focuses analysis on pertinent components
    - Reduces cognitive load for complex systems
 
 2. **Abstract Interpretation**
+
    - Models code behavior at higher levels of abstraction
    - Infers invariants and properties
    - Predicts execution paths and outcomes
@@ -225,6 +244,7 @@ The AIGI Framework employs specialized algorithmic calculus techniques to optimi
 ### Optimization Calculus
 
 1. **Multi-objective Optimization**
+
    - Balances competing quality dimensions:
      - Performance vs. readability
      - Flexibility vs. simplicity
@@ -234,6 +254,7 @@ The AIGI Framework employs specialized algorithmic calculus techniques to optimi
    - Adapts to project-specific priorities
 
 2. **Constraint Satisfaction**
+
    - Formulates code generation as constraint satisfaction problem
    - Applies backtracking and forward checking algorithms
    - Implements arc consistency and constraint propagation
@@ -248,12 +269,14 @@ The AIGI Framework employs specialized algorithmic calculus techniques to optimi
 ### Complexity Calculus
 
 1. **Algorithmic Complexity Analysis**
+
    - Evaluates time and space complexity of generated code
    - Identifies opportunities for asymptotic improvements
    - Detects potential performance bottlenecks
    - Recommends algorithmic alternatives
 
 2. **Cognitive Complexity Assessment**
+
    - Measures code readability and maintainability
    - Evaluates cognitive load required for comprehension
    - Identifies overly complex structures and patterns
@@ -268,6 +291,7 @@ The AIGI Framework employs specialized algorithmic calculus techniques to optimi
 ### Transformation Calculus
 
 1. **Code Transformation Operators**
+
    - Defines formal operators for code modifications:
      - Refactoring transformations
      - Optimization transformations
@@ -284,10 +308,10 @@ The AIGI Framework employs specialized algorithmic calculus techniques to optimi
    - Combines top-down and bottom-up synthesis approaches
 
 | 3. **Differential Code Analysis**
-|    - Compares versions to identify meaningful changes
-|    - Quantifies improvement across iterations
-|    - Tracks evolution of code quality metrics
-|    - Provides targeted feedback on specific changes
+| - Compares versions to identify meaningful changes
+| - Quantifies improvement across iterations
+| - Tracks evolution of code quality metrics
+| - Provides targeted feedback on specific changes
 |
 | ## Test-Driven AI Development
 |
@@ -296,86 +320,90 @@ The AIGI Framework employs specialized algorithmic calculus techniques to optimi
 | ### Recursive Testing Methodology
 |
 | 1. **Function-Level Testing Loop**
-|    - Isolates individual functions and capabilities for focused testing
-|    - Generates comprehensive test cases covering normal paths, edge cases, and error conditions
-|    - Implements recursive feedback loops that test, identify issues, fix, and retest
-|    - Continues iteration until all tests for the function pass consistently
+| - Isolates individual functions and capabilities for focused testing
+| - Generates comprehensive test cases covering normal paths, edge cases, and error conditions
+| - Implements recursive feedback loops that test, identify issues, fix, and retest
+| - Continues iteration until all tests for the function pass consistently
 |
 | 2. **Progressive Integration Testing**
-|    - Gradually combines tested functions into larger components
-|    - Verifies interactions between previously isolated functions
-|    - Identifies integration issues that weren't apparent in isolation
-|    - Applies the same recursive fix-and-test approach at the component level
+| - Gradually combines tested functions into larger components
+| - Verifies interactions between previously isolated functions
+| - Identifies integration issues that weren't apparent in isolation
+| - Applies the same recursive fix-and-test approach at the component level
 |
 | 3. **Automated Test Generation**
-|    - Analyzes function signatures, docstrings, and implementation details
-|    - Automatically generates unit tests with high coverage
-|    - Creates property-based tests to verify invariants
-|    - Develops regression tests to prevent future regressions
+| - Analyzes function signatures, docstrings, and implementation details
+| - Automatically generates unit tests with high coverage
+| - Creates property-based tests to verify invariants
+| - Develops regression tests to prevent future regressions
 |
 | ### Feedback-Driven Refinement
 |
 | 1. **Error Categorization**
-|    - Classifies test failures into patterns (type errors, logic errors, edge cases)
-|    - Builds a knowledge base of common failure modes
-|    - Applies targeted fixing strategies based on error categories
-|    - Prioritizes fixes based on error severity and frequency
+| - Classifies test failures into patterns (type errors, logic errors, edge cases)
+| - Builds a knowledge base of common failure modes
+| - Applies targeted fixing strategies based on error categories
+| - Prioritizes fixes based on error severity and frequency
 |
 | 2. **Incremental Improvement**
-|    - Focuses on one failing test at a time
-|    - Makes minimal, targeted changes to address specific failures
-|    - Verifies that fixes don't break previously passing tests
-|    - Maintains a comprehensive test history to track progress
+| - Focuses on one failing test at a time
+| - Makes minimal, targeted changes to address specific failures
+| - Verifies that fixes don't break previously passing tests
+| - Maintains a comprehensive test history to track progress
 |
 | 3. **Convergence Monitoring**
-|    - Tracks the rate of test failures over iterations
-|    - Identifies diminishing returns in the testing process
-|    - Applies more sophisticated strategies for persistent failures
-|    - Determines when testing has reached sufficient coverage and reliability
+| - Tracks the rate of test failures over iterations
+| - Identifies diminishing returns in the testing process
+| - Applies more sophisticated strategies for persistent failures
+| - Determines when testing has reached sufficient coverage and reliability
 |
 | ### Test Quality Assurance
 |
 | 1. **Test Coverage Analysis**
-|    - Measures code coverage across multiple dimensions (line, branch, path)
-|    - Identifies untested or under-tested code regions
-|    - Generates additional tests to improve coverage
-|    - Ensures critical paths have comprehensive test coverage
+| - Measures code coverage across multiple dimensions (line, branch, path)
+| - Identifies untested or under-tested code regions
+| - Generates additional tests to improve coverage
+| - Ensures critical paths have comprehensive test coverage
 |
 | 2. **Test Effectiveness Evaluation**
-|    - Assesses tests for their ability to catch actual issues
-|    - Implements mutation testing to verify test sensitivity
-|    - Eliminates redundant or low-value tests
-|    - Optimizes the test suite for maximum effectiveness with minimum overhead
+| - Assesses tests for their ability to catch actual issues
+| - Implements mutation testing to verify test sensitivity
+| - Eliminates redundant or low-value tests
+| - Optimizes the test suite for maximum effectiveness with minimum overhead
 |
 | 3. **Continuous Validation**
-|    - Maintains test suites throughout the development lifecycle
-|    - Automatically updates tests when implementation changes
-|    - Ensures backward compatibility through regression testing
-|    - Provides confidence in the reliability of generated code
+| - Maintains test suites throughout the development lifecycle
+| - Automatically updates tests when implementation changes
+| - Ensures backward compatibility through regression testing
+| - Provides confidence in the reliability of generated code
 |
 | ## Practical Applications
 
 The AIGI Framework excels in various software development scenarios:
 
 1. **Rapid Prototyping**
+
    - Quickly generates functional prototypes from high-level specifications
    - Enables fast iteration and experimentation
    - Produces code that can evolve into production systems
    - Accelerates proof-of-concept development
 
 2. **Boilerplate Automation**
+
    - Generates repetitive code structures
    - Implements standard patterns and architectures
    - Creates consistent project scaffolding
    - Reduces manual effort for routine coding tasks
 
 3. **Complex Algorithm Implementation**
+
    - Translates algorithmic concepts into efficient code
    - Implements sophisticated data structures
    - Optimizes for performance and correctness
    - Provides detailed documentation and explanations
 
 4. **Cross-language Translation**
+
    - Converts code between programming languages
    - Preserves functionality and intent
    - Adapts to language-specific idioms and patterns
@@ -392,6 +420,7 @@ The AIGI Framework excels in various software development scenarios:
 To begin using the AIGI Framework:
 
 1. **Initialize an AIGI project**:
+
    ```bash
    npx create-sparc aigi init my-project
    ```

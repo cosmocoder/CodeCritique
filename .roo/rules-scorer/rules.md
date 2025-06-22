@@ -13,12 +13,14 @@ Evaluate code batches by performance, correctness, and maintainability.
 The Scorer follows this process:
 
 1. **Input Analysis**
+
    - Load `responses_LS{n}.md` files containing code outputs
    - Parse and extract code segments for evaluation
    - Identify the programming languages and frameworks used
    - Reference `reflection_LS{n}.md` for context on identified issues
 
 2. **Metric Computation**
+
    - Calculate complexity metrics (cyclomatic, cognitive, maintainability)
    - Assess code coverage potential
    - Evaluate performance characteristics
@@ -26,18 +28,21 @@ The Scorer follows this process:
    - Analyze security posture
 
 3. **Score Normalization**
+
    - Normalize raw metrics to standardized scales
    - Weight metrics based on project priorities
    - Compute aggregate scores for each dimension
    - Calculate overall quality score
 
 4. **Threshold Management**
+
    - Compare current scores with previous layer scores
    - Calculate delta improvement (Δ)
    - Adjust thresholds dynamically based on convergence patterns
    - Determine if improvement meets minimum threshold (ε)
 
 5. **Output Generation**
+
    - Save computed metrics to `scores_LS{n}.json` files
    - Include detailed breakdowns by category
    - Provide comparative analysis with previous layers
@@ -127,6 +132,7 @@ In the aiGI workflow flowchart:
 The Scorer evaluates code across multiple dimensions:
 
 1. **Complexity**
+
    - Cyclomatic complexity (control flow complexity)
    - Cognitive complexity (readability and understandability)
    - Maintainability index (ease of maintenance)
@@ -134,6 +140,7 @@ The Scorer evaluates code across multiple dimensions:
    - Dependency complexity
 
 2. **Coverage**
+
    - Estimated line coverage potential
    - Estimated branch coverage potential
    - Testability assessment
@@ -141,6 +148,7 @@ The Scorer evaluates code across multiple dimensions:
    - Exception handling coverage
 
 3. **Performance**
+
    - Algorithm efficiency analysis
    - Time complexity estimation
    - Space complexity estimation
@@ -148,6 +156,7 @@ The Scorer evaluates code across multiple dimensions:
    - Scalability assessment
 
 4. **Correctness**
+
    - Syntax validity
    - Logic consistency
    - Edge case handling
@@ -166,11 +175,13 @@ The Scorer evaluates code across multiple dimensions:
 The Scorer implements dynamic threshold management:
 
 1. **Delta Calculation**
+
    - Compute improvement between current and previous layer scores
    - Calculate deltas for overall and dimension-specific metrics
    - Weight deltas based on project priorities
 
 2. **Threshold Adjustment**
+
    - Start with baseline epsilon (ε) threshold
    - Adjust threshold based on:
      - Current layer number (higher layers may require smaller improvements)
@@ -204,6 +215,7 @@ This command triggers the Scorer mode, which will:
 The Scorer follows the aiGI file naming convention:
 
 - Input files:
+
   - `responses_LS{n}.md` - LLM responses for layer n
   - `reflection_LS{n}.md` - Critic analysis for layer n
 

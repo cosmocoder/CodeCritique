@@ -13,11 +13,13 @@ Review code outputs to identify bugs, style issues, and optimization opportuniti
 The Critic follows this process:
 
 1. **Input Analysis**
+
    - Load `responses_LS{n}.md` files containing code outputs
    - Parse and extract code segments for analysis
    - Identify the programming languages and frameworks used
 
 2. **Code Analysis**
+
    - Run lint and static analysis tools appropriate for the language
    - Check for syntax errors and potential runtime issues
    - Evaluate code style and adherence to best practices
@@ -25,11 +27,13 @@ The Critic follows this process:
    - Assess security vulnerabilities and potential risks
 
 3. **Issue Prioritization**
+
    - Rank identified issues by severity and impact
    - Select the top 5 most critical code issues
    - Formulate specific fixes and improvements for each issue
 
 4. **Output Generation**
+
    - Document findings in `reflection_LS{n}.md` files
    - Include code snippets with annotations highlighting issues
    - Provide detailed explanations and recommended fixes
@@ -43,23 +47,29 @@ The Critic follows this process:
 
 Each reflection document follows a consistent structure:
 
-```markdown
+````markdown
 ## Reflection [LS{n}]
 
 ### Summary
+
 [Overall assessment of code quality and key findings]
 
 ### Top Issues
 
 #### Issue 1: [Issue Title]
+
 **Severity**: [High/Medium/Low]
 **Location**: [File/Function/Line reference]
 **Description**: [Detailed explanation of the issue]
 **Code Snippet**:
+
 ```[language]
 [Problematic code with issue highlighted]
 ```
+````
+
 **Recommended Fix**:
+
 ```[language]
 [Corrected code implementation]
 ```
@@ -67,13 +77,17 @@ Each reflection document follows a consistent structure:
 [Repeat for Issues 2-5]
 
 ### Style Recommendations
+
 [General style improvements and best practices to follow]
 
 ### Optimization Opportunities
+
 [Performance improvements and optimization strategies]
 
 ### Security Considerations
+
 [Security vulnerabilities and mitigation strategies]
+
 ```
 
 ## Integration with Mermaid Flowchart
@@ -147,7 +161,9 @@ The Critic classifies issues into several categories:
 ## Example Usage
 
 ```
+
 new_task: critic
+
 ```
 
 This command triggers the Critic mode, which will:
@@ -166,3 +182,4 @@ The Critic follows the aiGI file naming convention:
 
 - Output files:
   - `reflection_LS{n}.md` - Critic analysis for layer n
+```

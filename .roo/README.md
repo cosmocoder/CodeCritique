@@ -27,7 +27,7 @@ flowchart TD
     JSdiv["Jensen-Shannon Divergence"]
     EmbedSim["Embedding Similarity"]
     MetadataIndex["Metadata Index"]
-    
+
     VectorStore <--> JSdiv
     VectorStore <--> EmbedSim
     VectorStore <--> MetadataIndex
@@ -53,7 +53,7 @@ flowchart TD
   Scores1 --> TDDTask1["new_task: tdd"]
   TDDTask1 --> TDDSpec1[/"tdd_spec_LS1.md"/]
   TDDSpec1 -.-> VectorStore
-  
+
   %% Enhanced decision point with embedding similarity
   TDDSpec1 --> MemoryTask1["new_task: memory-manager"]
   MemoryTask1 --> EmbedSim
@@ -75,7 +75,7 @@ flowchart TD
   Scores2 --> TDDTask2["new_task: tdd"]
   TDDTask2 --> TDDSpec2[/"tdd_spec_LS2.md"/]
   TDDSpec2 -.-> VectorStore
-  
+
   %% Enhanced decision point with JS divergence
   TDDSpec2 --> MemoryTask2["new_task: memory-manager"]
   MemoryTask2 --> JSdiv
@@ -147,16 +147,16 @@ The aiGI system is composed of several specialized modes, each with a specific r
 
 The aiGI system uses a consistent file naming convention to track artifacts across layers:
 
-| File Pattern | Description |
-|--------------|-------------|
-| `spec_phase{n}.md` | Specification documents for each phase |
-| `prompts_LS{n}.md` | Generated prompts for layer n |
-| `responses_LS{n}.md` | LLM responses for layer n |
-| `reflection_LS{n}.md` | Critic analysis for layer n |
-| `scores_LS{n}.json` | Metrics for layer n |
-| `tdd_spec_LS{n}.md` | TDD specifications for layer n |
-| `tdd_tests_LS{n}.ts` | TDD test implementations for layer n |
-| `final.md` | Consolidated final deliverable |
+| File Pattern          | Description                            |
+| --------------------- | -------------------------------------- |
+| `spec_phase{n}.md`    | Specification documents for each phase |
+| `prompts_LS{n}.md`    | Generated prompts for layer n          |
+| `responses_LS{n}.md`  | LLM responses for layer n              |
+| `reflection_LS{n}.md` | Critic analysis for layer n            |
+| `scores_LS{n}.json`   | Metrics for layer n                    |
+| `tdd_spec_LS{n}.md`   | TDD specifications for layer n         |
+| `tdd_tests_LS{n}.ts`  | TDD test implementations for layer n   |
+| `final.md`            | Consolidated final deliverable         |
 
 The "LS" prefix stands for "Layer Score" and is followed by a number indicating the iteration (LS1, LS2, etc.). Each layer builds upon the insights and improvements of previous layers, creating a recursive improvement process.
 
@@ -167,6 +167,7 @@ To start using the aiGI system:
 1. **Create a Specification**: Begin by creating a detailed specification document (`spec_phase1.md`) that outlines requirements, constraints, and acceptance criteria.
 
 2. **Initiate the Workflow**: Use the orchestrator mode to start the aiGI workflow:
+
    ```
    new_task: orchestrator
    ```
@@ -201,12 +202,14 @@ The aiGI system incorporates sophisticated vector memory capabilities through th
 The system uses a markdown-based vector memory approach:
 
 1. **Embedding Generation**
+
    - All artifacts (prompts, responses, reflections) are converted to vector embeddings
    - Embeddings capture semantic meaning and code structure
    - Consistent embedding dimensions maintained across all artifacts
    - Incremental embedding updates when files change
 
 2. **Metadata Tagging**
+
    - Each memory artifact is tagged with rich metadata:
      - `layer`: Identifies which reflection layer (LS1, LS2, LS3, etc.)
      - `prompt_id`: Unique identifier linking related artifacts
@@ -225,18 +228,21 @@ The system uses a markdown-based vector memory approach:
 The system uses embedding divergence to optimize the reflection process:
 
 1. **Jensen-Shannon Divergence**
+
    - Measures information gain between iterations
    - Quantifies semantic distance between related artifacts
    - Provides mathematical foundation for novelty detection
    - Enables data-driven decisions about reflection continuation
 
 2. **Novelty Detection**
+
    - `noveltyScore`: Numerical measure of information novelty (0-1)
    - `redundancyDetection`: Identification of duplicate information
    - `innovationRate`: Change in novelty across iterations
    - `saturationPoint`: Detection of diminishing returns
 
 3. **Reflection Pruning**
+
    - Terminates reflection loops when novelty falls below threshold
    - Prevents redundant processing of similar content
    - Optimizes computational resources

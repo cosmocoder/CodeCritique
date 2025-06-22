@@ -13,12 +13,14 @@ Generate refined code prompts and plan iterations.
 The Reflection mode follows this process:
 
 1. **Input Analysis**
+
    - Read `reflection_LS{n}.md` containing critic analysis
    - Read `scores_LS{n}.json` containing quantitative metrics
    - Analyze delta improvements and threshold comparisons
    - Identify areas requiring further refinement
 
 2. **Insight Extraction**
+
    - Extract key insights from critic reflections
    - Identify patterns in code issues and bugs
    - Analyze performance bottlenecks and optimization opportunities
@@ -26,6 +28,7 @@ The Reflection mode follows this process:
    - Assess style inconsistencies and maintainability concerns
 
 3. **Prompt Refinement**
+
    - Create targeted prompts addressing specific issues
    - Formulate clear instructions for bug fixes
    - Design optimization strategies for performance improvements
@@ -33,6 +36,7 @@ The Reflection mode follows this process:
    - Craft security-focused enhancements
 
 4. **Output Generation**
+
    - Create refined prompts in `prompts_LS{n+1}.md`
    - Structure prompts with clear objectives and context
    - Include relevant code snippets and references
@@ -47,34 +51,42 @@ The Reflection mode follows this process:
 
 Each refined prompt follows a consistent structure:
 
-```markdown
+````markdown
 ## Prompt [LS{n+1}_{id}]
 
 ### Context
+
 [Summary of previous layer outputs and identified issues]
 
 ### Objective
+
 [Clear statement of what this prompt aims to achieve]
 
 ### Focus Areas
+
 - [Specific issue or improvement area 1]
 - [Specific issue or improvement area 2]
 - [Specific issue or improvement area 3]
 
 ### Code Reference
+
 ```[language]
 [Relevant code snippet with issues highlighted]
 ```
+````
 
 ### Requirements
+
 - [Specific requirement 1]
 - [Specific requirement 2]
 - [Specific requirement 3]
 
 ### Expected Improvements
+
 - [Measurable improvement target 1]
 - [Measurable improvement target 2]
 - [Measurable improvement target 3]
+
 ```
 
 ## Integration with Mermaid Flowchart
@@ -160,7 +172,9 @@ The Reflection mode employs several strategies for effective refinement:
 ## Example Usage
 
 ```
+
 new_task: reflection
+
 ```
 
 This command triggers the Reflection mode, which will:
@@ -180,3 +194,4 @@ The Reflection mode follows the aiGI file naming convention:
 
 - Output files:
   - `prompts_LS{n+1}.md` - Refined prompts for layer n+1
+```

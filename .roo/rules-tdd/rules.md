@@ -14,6 +14,7 @@ TDD principles applied to aiGI:
 6. **Declarative Specifications**: Tests serve as executable specifications
 
 By integrating TDD into aiGI, we ensure:
+
 - Clear understanding of requirements before implementation
 - Higher quality code with fewer defects
 - Better design through test-driven thinking
@@ -72,6 +73,7 @@ By integrating TDD into aiGI, we ensure:
 The TDD mode interfaces with other aiGI modes at specific integration points:
 
 ### Code Mode Integration
+
 - **Pre-Implementation**: TDD provides test specifications before code implementation
 - **During Implementation**: Continuous test validation as code is developed
 - **Post-Implementation**: Final verification of all tests passing
@@ -87,6 +89,7 @@ TDD Mode ───────────────────────�
 ```
 
 ### Reflection Mode Integration
+
 - **Test Analysis**: Evaluate test coverage and effectiveness
 - **Improvement Identification**: Identify areas needing additional tests
 - **Test Refinement**: Update tests based on reflection insights
@@ -102,6 +105,7 @@ TDD Mode ───────────────────────�
 ```
 
 ### Final-Assembly Mode Integration
+
 - **Pre-Assembly Validation**: Ensure all components pass tests before assembly
 - **Integration Testing**: Verify assembled components work together
 - **System Testing**: Validate the complete system meets requirements
@@ -123,17 +127,20 @@ When tests fail consistently (more than twice), the TDD mode employs a structure
 ### Error Resolution Workflow
 
 1. **Error Analysis**
+
    - Capture detailed error information
    - Categorize error type (syntax, logic, integration, etc.)
    - Identify affected components
 
 2. **MCP Tool Selection**
+
    - Based on error category, select appropriate MCP tools:
      - `analyze_code`: For code structure and logic issues
      - `modify_code`: For implementing fixes
      - `search_code`: For finding similar patterns or related issues
 
 3. **Resolution Implementation**
+
    - Apply targeted fixes using selected MCP tools
    - Document resolution approach
    - Create regression tests to prevent recurrence
@@ -145,24 +152,26 @@ When tests fail consistently (more than twice), the TDD mode employs a structure
 
 ### MCP Tool Usage for Common Error Types
 
-| Error Type | MCP Tool | Usage Pattern |
-|------------|----------|---------------|
-| Syntax Errors | `analyze_code` | `<analyze_code><path>file_path</path><query>syntax validation</query></analyze_code>` |
-| Logic Errors | `analyze_code` | `<analyze_code><path>file_path</path><query>logic flow analysis</query></analyze_code>` |
-| Integration Issues | `search_code` | `<search_code><path>src/</path><pattern>interface pattern</pattern></search_code>` |
-| Performance Issues | `analyze_code` | `<analyze_code><path>file_path</path><query>performance optimization</query></analyze_code>` |
-| Implementation Fixes | `modify_code` | `<modify_code><path>file_path</path><changes>specific changes</changes></modify_code>` |
+| Error Type           | MCP Tool       | Usage Pattern                                                                                |
+| -------------------- | -------------- | -------------------------------------------------------------------------------------------- |
+| Syntax Errors        | `analyze_code` | `<analyze_code><path>file_path</path><query>syntax validation</query></analyze_code>`        |
+| Logic Errors         | `analyze_code` | `<analyze_code><path>file_path</path><query>logic flow analysis</query></analyze_code>`      |
+| Integration Issues   | `search_code`  | `<search_code><path>src/</path><pattern>interface pattern</pattern></search_code>`           |
+| Performance Issues   | `analyze_code` | `<analyze_code><path>file_path</path><query>performance optimization</query></analyze_code>` |
+| Implementation Fixes | `modify_code`  | `<modify_code><path>file_path</path><changes>specific changes</changes></modify_code>`       |
 
 ### Escalation Protocol
 
 For persistent errors that resist resolution after multiple attempts:
 
 1. **Deep Analysis Mode**
+
    - Engage specialized analysis using advanced MCP capabilities
    - Generate comprehensive diagnostic report
    - Identify root cause through pattern analysis
 
 2. **Alternative Implementation**
+
    - Propose alternative implementation approaches
    - Create parallel test implementations
    - Evaluate effectiveness of alternatives
@@ -213,7 +222,7 @@ test_patterns:
       - min_value_test
       - max_value_test
       - empty_string_test
-  
+
   - pattern: exception_handling
     effectiveness: medium
     applicable_to:
@@ -229,16 +238,19 @@ test_patterns:
 ### Continuous Improvement Cycle
 
 1. **Test Execution Data Collection**
+
    - Gather metrics on test performance
    - Track test execution time
    - Monitor test stability
 
 2. **Pattern Analysis**
+
    - Identify effective test patterns
    - Recognize ineffective approaches
    - Correlate test patterns with defect detection
 
 3. **Knowledge Application**
+
    - Apply learned patterns to new tests
    - Refine existing tests based on effectiveness data
    - Generate test recommendations
@@ -254,23 +266,23 @@ The TDD mode employs comprehensive metrics to measure test coverage and quality:
 
 ### Coverage Metrics
 
-| Metric | Description | Target |
-|--------|-------------|--------|
-| Line Coverage | Percentage of code lines executed by tests | ≥90% |
-| Branch Coverage | Percentage of code branches executed by tests | ≥85% |
-| Function Coverage | Percentage of functions called during tests | 100% |
-| Statement Coverage | Percentage of statements executed by tests | ≥90% |
-| Condition Coverage | Percentage of boolean conditions tested | ≥85% |
+| Metric             | Description                                   | Target |
+| ------------------ | --------------------------------------------- | ------ |
+| Line Coverage      | Percentage of code lines executed by tests    | ≥90%   |
+| Branch Coverage    | Percentage of code branches executed by tests | ≥85%   |
+| Function Coverage  | Percentage of functions called during tests   | 100%   |
+| Statement Coverage | Percentage of statements executed by tests    | ≥90%   |
+| Condition Coverage | Percentage of boolean conditions tested       | ≥85%   |
 
 ### Quality Metrics
 
-| Metric | Description | Target |
-|--------|-------------|--------|
-| Test Reliability | Percentage of tests that consistently pass/fail | ≥98% |
-| Test Isolation | Degree to which tests are independent of each other | High |
-| Test Specificity | How precisely tests identify the source of failures | High |
-| Test Maintainability | Ease of updating tests when requirements change | Medium-High |
-| Test Performance | Execution time of the test suite | Reasonable |
+| Metric               | Description                                         | Target      |
+| -------------------- | --------------------------------------------------- | ----------- |
+| Test Reliability     | Percentage of tests that consistently pass/fail     | ≥98%        |
+| Test Isolation       | Degree to which tests are independent of each other | High        |
+| Test Specificity     | How precisely tests identify the source of failures | High        |
+| Test Maintainability | Ease of updating tests when requirements change     | Medium-High |
+| Test Performance     | Execution time of the test suite                    | Reasonable  |
 
 ### Visualization and Reporting
 

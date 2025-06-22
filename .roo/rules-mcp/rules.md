@@ -13,12 +13,14 @@ Integrate external services via MCP for code deployment and management.
 The MCP Integration mode follows this process:
 
 1. **Input Analysis**
+
    - Read code files and test results from the Auto-Coder phase
    - Identify integration points for external services
    - Analyze requirements for MCP connections
    - Determine authentication and security needs
 
 2. **MCP SDK Implementation**
+
    - Connect to required external services
    - Configure authentication mechanisms
    - Set up secure token handling
@@ -26,6 +28,7 @@ The MCP Integration mode follows this process:
    - Ensure proper error handling for API calls
 
 3. **Security Implementation**
+
    - Store credentials securely using environment variables
    - Implement token refresh mechanisms
    - Add request validation and sanitization
@@ -33,6 +36,7 @@ The MCP Integration mode follows this process:
    - Prevent exposure of sensitive information
 
 4. **Integration Testing**
+
    - Verify connections to external services
    - Test data transformation accuracy
    - Validate error handling for API failures
@@ -40,12 +44,14 @@ The MCP Integration mode follows this process:
    - Check performance and reliability
 
 5. **Code Updates**
+
    - Use `apply_diff` for MCP-related code changes
    - Integrate MCP modules with existing codebase
    - Update configuration files as needed
    - Add necessary dependencies
 
 6. **Documentation**
+
    - Document API integrations
    - Provide usage examples
    - Explain authentication requirements
@@ -61,6 +67,7 @@ The MCP Integration mode follows this process:
 The MCP Integration mode follows these guidelines:
 
 1. **Service Connection**
+
    - Use the MCP SDK for all external service connections
    - Implement proper connection pooling
    - Handle connection timeouts gracefully
@@ -68,6 +75,7 @@ The MCP Integration mode follows these guidelines:
    - Provide reconnection strategies
 
 2. **Authentication**
+
    - Support multiple authentication methods (API keys, OAuth, JWT)
    - Implement secure token storage
    - Handle token expiration and renewal
@@ -75,6 +83,7 @@ The MCP Integration mode follows these guidelines:
    - Follow the principle of least privilege
 
 3. **Data Transformation**
+
    - Create modular transformation functions
    - Validate data before and after transformation
    - Handle edge cases and unexpected formats
@@ -93,10 +102,12 @@ The MCP Integration mode follows these guidelines:
 In the aiGI workflow flowchart:
 
 1. The MCP Integration mode is an optional step after successful testing:
+
    - It occurs after the Auto-Coder phase when tests pass
    - It's represented in the "MCPOpt" subgraph
 
 2. The MCP Integration creates integration code:
+
    - Implements MCP connections based on project requirements
    - Develops secure authentication and data transformation
    - Outputs `mcp_integration.ts` file
@@ -110,12 +121,14 @@ In the aiGI workflow flowchart:
 The MCP Integration mode employs several strategies for effective implementation:
 
 1. **Modular Integration**
+
    - Create separate modules for each service integration
    - Use adapter patterns for service interfaces
    - Implement factory methods for connection creation
    - Ensure loose coupling between services
 
 2. **Security-First Approach**
+
    - Validate all API inputs and outputs
    - Implement proper authentication flows
    - Use secure communication channels (HTTPS)
@@ -123,6 +136,7 @@ The MCP Integration mode employs several strategies for effective implementation
    - Regularly update dependencies to address vulnerabilities
 
 3. **Resilient Design**
+
    - Implement circuit breakers for unreliable services
    - Add timeout mechanisms for API calls
    - Create fallback strategies for service failures
@@ -155,6 +169,7 @@ This command triggers the MCP Integration mode, which will:
 The MCP Integration mode follows the aiGI file naming convention:
 
 - Input files:
+
   - Source code files from Auto-Coder phase
   - Test result files
 
@@ -168,11 +183,13 @@ The MCP Integration mode follows the aiGI file naming convention:
 The MCP Integration uses specific tools for file operations:
 
 1. **For code changes:**
+
    - Uses `apply_diff` for MCP-related code changes
    - Makes targeted modifications to integrate MCP functionality
    - Preserves existing code structure and formatting
 
 2. **For configuration:**
+
    - Creates or updates configuration files for external services
    - Sets up authentication parameters
    - Configures connection settings

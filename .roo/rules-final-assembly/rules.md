@@ -13,18 +13,21 @@ Compile code, docs, and metrics into the final deliverable.
 The Final Assembly process follows these key steps:
 
 1. **Artifact Collection**
+
    - Gather all code modules generated during the implementation phase
    - Collect all `responses_LS*.md` files containing LLM-generated code and solutions
    - Retrieve all `reflection_LS*.md` files with critic analyses and insights
    - Import all `scores_LS*.json` files containing performance and quality metrics
 
 2. **Consolidation**
+
    - Merge all collected artifacts into a single comprehensive `final.md` document
    - Organize content in a logical structure that facilitates understanding and navigation
    - Ensure traceability between specifications, implementations, and evaluations
    - Preserve the history of iterations and improvements across layers
 
 3. **Quality Assurance & TDD Validation**
+
    - Run the full test suite against the consolidated codebase
    - Verify that all components work together as expected
    - Ensure all quality standards are met (no files > 500 lines, no hard-coded secrets)
@@ -34,6 +37,7 @@ The Final Assembly process follows these key steps:
    - Review test quality metrics (reliability, isolation, specificity)
 
 4. **Decision Annotation**
+
    - Document key architectural and implementation decisions
    - Explain trade-offs and their rationales
    - Highlight optimization strategies and their impacts
@@ -48,11 +52,13 @@ The Final Assembly process follows these key steps:
 ## Integration with Workflow
 
 The Final Assembly mode is triggered after:
+
 - Successful completion of the Code phase with passing tests, or
 - Completion of the optional MCP Integration phase
 - Verification by the TDD mode that all tests meet coverage and quality standards
 
 The Final Assembly mode works closely with the TDD mode to ensure:
+
 - Pre-Assembly Validation: All components pass unit tests before assembly
 - Integration Testing: Assembled components work together correctly
 - System Testing: The complete system meets all requirements
@@ -64,6 +70,7 @@ As the final step in the aiGI workflow, it represents the transition from develo
 The Final Assembly mode produces and manages the following artifacts:
 
 1. **Input Artifacts**
+
    - `spec_phase*.md` - Original specifications and requirements
    - `prompts_LS*.md` - Generated prompts across all layers
    - `responses_LS*.md` - LLM-generated code and solutions
@@ -83,11 +90,13 @@ The Final Assembly mode produces and manages the following artifacts:
 The Final Assembly mode enforces the following quality standards:
 
 1. **Completeness**
+
    - All requirements from the original specification must be addressed
    - All critical components must be included and properly integrated
    - Documentation must cover all aspects of the solution
 
 2. **Correctness**
+
    - All tests must pass successfully
    - The solution must function as specified
    - No known bugs or issues should remain unaddressed
@@ -101,6 +110,7 @@ The Final Assembly mode enforces the following quality standards:
      - Test Specificity: High
 
 3. **Usability**
+
    - Clear structure and organization of the final deliverable
    - Comprehensive documentation for users and developers
    - Easy-to-follow deployment and usage instructions
@@ -113,6 +123,7 @@ The Final Assembly mode enforces the following quality standards:
 ## Vector Store Integration
 
 The Final Assembly mode integrates with the Vector Store by:
+
 - Storing the `final.md` document for future reference and retrieval
 - Maintaining connections to all related artifacts for traceability
 - Enabling semantic search across the entire solution
@@ -122,6 +133,7 @@ The Final Assembly mode integrates with the Vector Store by:
 The Final Assembly mode operates through:
 
 1. **Task Creation**
+
    - Initiated via `new_task: final-assembly` by the Orchestrator
    - Receives context about all previous phases and artifacts
 
@@ -132,6 +144,7 @@ The Final Assembly mode operates through:
 ## Relationship to Mermaid Flowchart
 
 In the aiGI workflow flowchart, the Final Assembly represents the "FinalPhase" subgraph:
+
 - It follows either the CodePhase or the optional MCPOpt phase
 - It creates the `final.md` document as its primary output
 - It connects to the Vector Store for knowledge persistence
@@ -146,11 +159,13 @@ The Final Assembly mode integrates closely with the TDD mode to ensure comprehen
 ### Final Test Verification Procedures
 
 1. **Pre-Assembly Test Verification**
+
    - Verify all unit tests pass before beginning assembly
    - Confirm test coverage meets minimum thresholds
    - Validate test quality metrics (reliability, isolation, specificity)
 
 2. **Integration Testing Requirements**
+
    - Execute integration tests to verify component interactions
    - Validate data flow between assembled components
    - Verify error handling across component boundaries
@@ -188,11 +203,13 @@ These metrics are included in the final deliverable to demonstrate the quality a
 When validation issues are identified during final assembly, the mode leverages MCP tools for resolution:
 
 1. **Issue Analysis**
+
    - Use `analyze_code` to identify structural or logical issues
    - Apply pattern analysis to detect inconsistencies
    - Generate detailed diagnostic reports
 
 2. **Resolution Implementation**
+
    - Employ `modify_code` to implement necessary fixes
    - Use `search_code` to find similar patterns requiring correction
    - Document all changes and their rationale

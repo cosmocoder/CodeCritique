@@ -44,9 +44,11 @@ The first step in the aiGI workflow is creating a clear, detailed specification 
 # Project Specification
 
 ## Overview
+
 A REST API service for managing user authentication and profile management.
 
 ## Requirements
+
 - User registration with email verification
 - Secure login with JWT authentication
 - Password reset functionality
@@ -54,18 +56,21 @@ A REST API service for managing user authentication and profile management.
 - Role-based access control
 
 ## Constraints
+
 - Must use Node.js and Express
 - Must follow RESTful API design principles
 - Database must be MongoDB
 - Response time < 200ms for all operations
 
 ## Acceptance Criteria
+
 - All API endpoints pass security testing
 - 95% test coverage
 - Documentation for all endpoints
 - Successful load testing with 1000 concurrent users
 
 ## Edge Cases
+
 - Handle expired tokens gracefully
 - Prevent brute force attacks
 - Manage duplicate registration attempts
@@ -78,6 +83,7 @@ Once you have a specification, the next step is to generate code-focused prompts
 #### How to Generate Prompts:
 
 1. Use the Prompt Generator mode by creating a new task:
+
    ```
    new_task: prompt-generator
    ```
@@ -95,17 +101,21 @@ Each prompt follows a consistent format:
 ## Prompt [LS1_1]
 
 ### Context
+
 [Summary of relevant specifications]
 
 ### Task
+
 [Clear description of the coding task]
 
 ### Requirements
+
 - [Specific requirement 1]
 - [Specific requirement 2]
 - ...
 
 ### Expected Output
+
 [Description of the expected code output format]
 ```
 
@@ -116,6 +126,7 @@ After code is generated based on the prompts, the Critic mode analyzes the code 
 #### How to Run Critic Checks:
 
 1. Use the Critic mode by creating a new task:
+
    ```
    new_task: critic
    ```
@@ -128,23 +139,29 @@ After code is generated based on the prompts, the Critic mode analyzes the code 
 
 #### Critic Output Example:
 
-```markdown
+````markdown
 ## Reflection [LS1]
 
 ### Summary
+
 The code implementation meets most requirements but has several issues that need addressing.
 
 ### Top Issues
 
 #### Issue 1: Insecure Password Storage
+
 **Severity**: High
 **Location**: auth.js, line 45
 **Description**: Passwords are being stored as plain text instead of being hashed.
 **Code Snippet**:
+
 ```javascript
 user.password = password; // Storing plain text password
 ```
+````
+
 **Recommended Fix**:
+
 ```javascript
 const bcrypt = require('bcrypt');
 const saltRounds = 10;
@@ -152,6 +169,7 @@ user.password = await bcrypt.hash(password, saltRounds);
 ```
 
 [Additional issues would follow...]
+
 ```
 
 ### 4. Scoring with Metrics
@@ -161,77 +179,79 @@ The Scorer mode evaluates code quality using quantitative metrics, providing obj
 #### How to Score Code:
 
 1. Use the Scorer mode by creating a new task:
-   ```
-   new_task: scorer
-   ```
+```
+
+new_task: scorer
+
+````
 
 2. The Scorer will:
-   - Analyze code in `responses_LS1.md`
-   - Compute metrics for complexity, coverage, performance, etc.
-   - Save results to `scores_LS1.json`
-   - Determine if improvement meets thresholds
+- Analyze code in `responses_LS1.md`
+- Compute metrics for complexity, coverage, performance, etc.
+- Save results to `scores_LS1.json`
+- Determine if improvement meets thresholds
 
 #### Scoring Metrics Example:
 
 ```json
 {
-  "layer": "LS1",
-  "timestamp": "2025-05-03T14:30:00Z",
-  "aggregate_scores": {
-    "overall": 78.5,
-    "complexity": 75.0,
-    "coverage": 82.3,
-    "performance": 76.8,
-    "correctness": 85.2,
-    "security": 73.4
-  },
-  "delta": {
-    "overall": 0,
-    "complexity": 0,
-    "coverage": 0,
-    "performance": 0,
-    "correctness": 0,
-    "security": 0
-  },
-  "thresholds": {
-    "epsilon": 3.0,
-    "complexity_max": 15,
-    "coverage_min": 80,
-    "performance_target": 85
-  },
-  "decision": "continue_reflection",
-  "detailed_metrics": {
-    "response_1": {
-      "id": "LS1_1",
-      "complexity": {
-        "cyclomatic": 12,
-        "cognitive": 8,
-        "maintainability_index": 75
-      },
-      "coverage": {
-        "estimated_line": 85,
-        "estimated_branch": 78,
-        "testability_score": 82
-      },
-      "performance": {
-        "algorithm_efficiency": 80,
-        "resource_usage": 75,
-        "scalability": 83
-      },
-      "correctness": {
-        "syntax_validity": 100,
-        "logic_consistency": 85,
-        "edge_case_handling": 80
-      },
-      "security": {
-        "vulnerability_score": 90,
-        "input_validation": 85,
-        "secure_coding_practices": 88
-      }
-    }
-  }
+"layer": "LS1",
+"timestamp": "2025-05-03T14:30:00Z",
+"aggregate_scores": {
+ "overall": 78.5,
+ "complexity": 75.0,
+ "coverage": 82.3,
+ "performance": 76.8,
+ "correctness": 85.2,
+ "security": 73.4
+},
+"delta": {
+ "overall": 0,
+ "complexity": 0,
+ "coverage": 0,
+ "performance": 0,
+ "correctness": 0,
+ "security": 0
+},
+"thresholds": {
+ "epsilon": 3.0,
+ "complexity_max": 15,
+ "coverage_min": 80,
+ "performance_target": 85
+},
+"decision": "continue_reflection",
+"detailed_metrics": {
+ "response_1": {
+   "id": "LS1_1",
+   "complexity": {
+     "cyclomatic": 12,
+     "cognitive": 8,
+     "maintainability_index": 75
+   },
+   "coverage": {
+     "estimated_line": 85,
+     "estimated_branch": 78,
+     "testability_score": 82
+   },
+   "performance": {
+     "algorithm_efficiency": 80,
+     "resource_usage": 75,
+     "scalability": 83
+   },
+   "correctness": {
+     "syntax_validity": 100,
+     "logic_consistency": 85,
+     "edge_case_handling": 80
+   },
+   "security": {
+     "vulnerability_score": 90,
+     "input_validation": 85,
+     "secure_coding_practices": 88
+   }
+ }
 }
-```
+}
+````
 
 ### 5. Refining via Reflection
 
@@ -240,6 +260,7 @@ The Reflection mode analyzes critic feedback and scoring metrics to generate ref
 #### How to Refine Code:
 
 1. Use the Reflection mode by creating a new task:
+
    ```
    new_task: reflection
    ```
@@ -256,23 +277,28 @@ The Reflection mode analyzes critic feedback and scoring metrics to generate ref
 ## Refined Prompt [LS2_1]
 
 ### Context
+
 The initial implementation of the authentication system has security issues, particularly with password storage.
 
 ### Task
+
 Refactor the user authentication system to implement secure password hashing and storage.
 
 ### Requirements
+
 - Use bcrypt for password hashing with appropriate salt rounds
 - Implement password comparison for login verification
 - Ensure all password-related operations are asynchronous
 - Add password strength validation
 
 ### Previous Issues
+
 - Passwords were stored as plain text
 - No validation for password strength
 - Synchronous password operations blocking the event loop
 
 ### Expected Output
+
 Updated authentication module with secure password handling.
 ```
 
@@ -283,6 +309,7 @@ The Code mode implements, refactors, and tests code based on specifications and 
 #### How to Implement Code:
 
 1. Use the Code mode by creating a new task:
+
    ```
    new_task: code
    ```
@@ -309,17 +336,17 @@ async function registerUser(email, password, userData) {
   if (!validationResult.isValid) {
     throw new Error(`Password validation failed: ${validationResult.message}`);
   }
-  
+
   // Hash password securely
   const hashedPassword = await bcrypt.hash(password, saltRounds);
-  
+
   // Create user with hashed password
   const user = new User({
     email,
     password: hashedPassword,
-    ...userData
+    ...userData,
   });
-  
+
   await user.save();
   return user;
 }
@@ -329,26 +356,22 @@ async function loginUser(email, password) {
   if (!user) {
     throw new Error('User not found');
   }
-  
+
   // Compare password with stored hash
   const isMatch = await bcrypt.compare(password, user.password);
   if (!isMatch) {
     throw new Error('Invalid credentials');
   }
-  
+
   // Generate JWT token
-  const token = jwt.sign(
-    { userId: user._id },
-    process.env.JWT_SECRET,
-    { expiresIn: '1h' }
-  );
-  
+  const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
   return { user, token };
 }
 
 module.exports = {
   registerUser,
-  loginUser
+  loginUser,
 };
 ```
 
@@ -359,6 +382,7 @@ The MCP (Model Context Protocol) Integration mode connects external services and
 #### How to Integrate MCP:
 
 1. Use the MCP mode by creating a new task:
+
    ```
    new_task: mcp
    ```
@@ -380,9 +404,9 @@ async function initializeMCPServices(config) {
   const mcpClient = createMCPClient({
     apiKey: process.env.MCP_API_KEY,
     endpoint: config.endpoint,
-    services: config.enabledServices
+    services: config.enabledServices,
   });
-  
+
   // Register authentication hooks
   mcpClient.registerAuthHook({
     onTokenRefresh: (newToken) => {
@@ -392,17 +416,17 @@ async function initializeMCPServices(config) {
     onAuthError: (error) => {
       logger.error('MCP authentication error', error);
       notificationService.alert('Authentication error with external service');
-    }
+    },
   });
-  
+
   // Initialize connections to enabled services
   await mcpClient.connect();
-  
+
   return mcpClient;
 }
 
 module.exports = {
-  initializeMCPServices
+  initializeMCPServices,
 };
 ```
 
@@ -413,6 +437,7 @@ The Final Assembly mode compiles all code, documentation, and metrics into a com
 #### How to Assemble the Final Deliverable:
 
 1. Use the Final Assembly mode by creating a new task:
+
    ```
    new_task: final-assembly
    ```
@@ -426,6 +451,7 @@ The Final Assembly mode compiles all code, documentation, and metrics into a com
 #### Final Assembly Output:
 
 The `final.md` document will include:
+
 - Executive summary of the project
 - Complete code implementation with annotations
 - Test results and quality metrics
@@ -451,6 +477,7 @@ The aiGI workflow uses a consistent file naming convention to track artifacts ac
 The aiGI workflow implements two types of recursion loops:
 
 1. **Layer Recursion Loop**:
+
    - Each layer (LS1, LS2, etc.) builds upon previous layers
    - The workflow progresses through Prompt Generator → LLM API → Critic → Scorer → Reflection
    - If improvement (Δ) is below threshold (ε), another layer is initiated
@@ -541,36 +568,43 @@ new_task: mode-name
 ### Mode-Specific Task Examples
 
 1. **Prompt Generator**:
+
    ```
    new_task: prompt-generator
    ```
 
 2. **Critic**:
+
    ```
    new_task: critic
    ```
 
 3. **Scorer**:
+
    ```
    new_task: scorer
    ```
 
 4. **Reflection**:
+
    ```
    new_task: reflection
    ```
 
 5. **Code**:
+
    ```
    new_task: code
    ```
 
 6. **MCP Integration**:
+
    ```
    new_task: mcp
    ```
 
 7. **Final Assembly**:
+
    ```
    new_task: final-assembly
    ```

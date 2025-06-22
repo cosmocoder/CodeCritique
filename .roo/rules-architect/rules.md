@@ -74,6 +74,7 @@ Step | Action
 ⸻
 
 7 · Response Protocol
+
 1. analysis: In ≤ 50 words outline the architectural approach.
 2. Execute one tool call that advances the architectural design.
 3. Wait for user confirmation or new data before the next tool.
@@ -83,94 +84,85 @@ Step | Action
 
 8 · Tool Usage
 
-
 14 · Available Tools
 
 <details><summary>File Operations</summary>
 
-
 <read_file>
-  <path>File path here</path>
+<path>File path here</path>
 </read_file>
 
 <write_to_file>
-  <path>File path here</path>
-  <content>Your file content here</content>
-  <line_count>Total number of lines</line_count>
+<path>File path here</path>
+<content>Your file content here</content>
+<line_count>Total number of lines</line_count>
 </write_to_file>
 
 <list_files>
-  <path>Directory path here</path>
-  <recursive>true/false</recursive>
+<path>Directory path here</path>
+<recursive>true/false</recursive>
 </list_files>
 
 </details>
 
-
 <details><summary>Code Editing</summary>
 
-
 <apply_diff>
-  <path>File path here</path>
-  <diff>
-    <<<<<<< SEARCH
-    Original code
-    =======
-    Updated code
-    >>>>>>> REPLACE
-  </diff>
-  <start_line>Start</start_line>
-  <end_line>End_line</end_line>
+<path>File path here</path>
+<diff>
+<<<<<<< SEARCH
+Original code
+=======
+Updated code >>>>>>> REPLACE
+</diff>
+<start_line>Start</start_line>
+<end_line>End_line</end_line>
 </apply_diff>
 
 <insert_content>
-  <path>File path here</path>
-  <operations>
-    [{"start_line":10,"content":"New code"}]
-  </operations>
+<path>File path here</path>
+<operations>
+[{"start_line":10,"content":"New code"}]
+</operations>
 </insert_content>
 
 <search_and_replace>
-  <path>File path here</path>
-  <operations>
-    [{"search":"old_text","replace":"new_text","use_regex":true}]
-  </operations>
+<path>File path here</path>
+<operations>
+[{"search":"old_text","replace":"new_text","use_regex":true}]
+</operations>
 </search_and_replace>
 
 </details>
 
-
 <details><summary>Project Management</summary>
 
-
 <execute_command>
-  <command>Your command here</command>
+<command>Your command here</command>
 </execute_command>
 
 <attempt_completion>
-  <result>Final output</result>
-  <command>Optional CLI command</command>
+<result>Final output</result>
+<command>Optional CLI command</command>
 </attempt_completion>
 
 <ask_followup_question>
-  <question>Clarification needed</question>
+<question>Clarification needed</question>
 </ask_followup_question>
 
 </details>
 
-
 <details><summary>MCP Integration</summary>
 
-
 <use_mcp_tool>
-  <server_name>Server</server_name>
-  <tool_name>Tool</tool_name>
-  <arguments>{"param":"value"}</arguments>
+<server_name>Server</server_name>
+<tool_name>Tool</tool_name>
+<arguments>{"param":"value"}</arguments>
 </use_mcp_tool>
 
 <access_mcp_resource>
-  <server_name>Server</server_name>
-  <uri>resource://path</uri>
+<server_name>Server</server_name>
+<uri>resource://path</uri>
 </access_mcp_resource>
 
 </details>
