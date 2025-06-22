@@ -2379,14 +2379,18 @@ export const findSimilarCode = async (queryText, options = {}) => {
       let similarity;
       if (result._distance !== undefined) {
         // Vector search distance (0 = perfect match, higher = less similar)
-        similarity = Math.max(0, Math.min(1, 1 - result._distance));
+        // Apply more precise normalization to avoid all scores being 1.000
+        similarity = Math.max(0, Math.min(1, Math.exp(-result._distance * 2)));
       } else if (result._score !== undefined) {
-        // FTS or hybrid score - normalize to 0-1 range
-        similarity = Math.max(0, Math.min(1, result._score));
+        // FTS or hybrid score - normalize to 0-1 range with better scaling
+        similarity = Math.max(0, Math.min(1, result._score / Math.max(result._score, 1)));
       } else {
         // Fallback
         similarity = 0.5;
       }
+
+      // Determine if this is a documentation file using the utility function
+      const isDocumentation = isDocumentationFile(result.path, result.language);
 
       return {
         similarity,
@@ -2396,6 +2400,7 @@ export const findSimilarCode = async (queryText, options = {}) => {
         file_path: result.path,
         language: result.language,
         reranked: false,
+        isDocumentation, // Add the missing flag that cag-analyzer expects
       };
     });
 

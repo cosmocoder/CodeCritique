@@ -226,6 +226,12 @@ function createTestGuidelineQueryForLLMRetrieval(codeSnippet, reviewedSnippetCon
  */
 async function analyzeFile(filePath, options = {}) {
   try {
+    // Check if this is a holistic PR review
+    if (options.isHolisticPRReview && filePath === 'PR_HOLISTIC_REVIEW') {
+      console.log(chalk.blue(`Performing holistic PR review for ${options.prFiles?.length || 0} files`));
+      return await performHolisticPRAnalysis(options);
+    }
+
     console.log(chalk.blue(`Analyzing file: ${filePath}`));
 
     // Check if file exists
@@ -245,8 +251,19 @@ async function analyzeFile(filePath, options = {}) {
       console.log(chalk.yellow(`If embeddings were generated for a parent directory, specify it with: --directory <path>`));
     }
 
-    // Read file content
-    const content = fs.readFileSync(filePath, 'utf8');
+    // Read file content - use diff content if this is a diff-only review
+    let content;
+    let reviewContext = 'full_file';
+
+    if (options.diffOnly && options.diffContent) {
+      content = options.diffContent;
+      reviewContext = 'diff_only';
+      console.log(chalk.blue(`Analyzing diff only for ${path.basename(filePath)}`));
+    } else {
+      content = fs.readFileSync(filePath, 'utf8');
+      console.log(chalk.blue(`Analyzing full file ${path.basename(filePath)}`));
+    }
+
     const language = detectLanguageFromExtension(path.extname(filePath).toLowerCase()); // Get language early for context inference
 
     // Detect file type to check if it's a test file
@@ -601,6 +618,46 @@ async function analyzeFile(filePath, options = {}) {
       )
     );
 
+    // Check if this is context-only mode (for PR holistic review)
+    if (options.contextOnly) {
+      console.log(chalk.blue('--- Context-Only Mode: Returning processed context ---'));
+
+      // Process code examples quickly for context
+      const uniqueCandidates = [];
+      const seenPaths = new Set();
+      const normalizedReviewPath = path.resolve(filePath);
+
+      for (const candidate of codeExampleCandidates) {
+        const normalizedCandidatePath = path.resolve(candidate.path);
+        const isSameFile = normalizedCandidatePath === normalizedReviewPath;
+        const isDocumentation = candidate.isDocumentation;
+        const alreadySeen = seenPaths.has(candidate.path);
+
+        if (!isSameFile && !isDocumentation && !alreadySeen) {
+          uniqueCandidates.push(candidate);
+          seenPaths.add(candidate.path);
+        }
+      }
+
+      uniqueCandidates.sort((a, b) => b.similarity - a.similarity);
+      const finalCodeExamples = uniqueCandidates.slice(0, 40);
+
+      return {
+        success: true,
+        filePath,
+        language,
+        processedContext: {
+          codeExamples: finalCodeExamples,
+          guidelines: finalGuidelineSnippets,
+          prComments: prCommentContext,
+        },
+        metadata: {
+          analysisTimestamp: new Date().toISOString(),
+          contextOnly: true,
+        },
+      };
+    }
+
     // --- Stage 3: PROCESS CODE EXAMPLES ---
     console.log(chalk.blue('--- Stage 3: Processing Code Examples ---'));
 
@@ -763,6 +820,10 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
   const dirPath = path.dirname(filePath);
   const dirName = path.basename(dirPath);
 
+  // Determine if this is a diff-only review
+  const isDiffReview = options.diffOnly && options.diffContent;
+  const reviewType = isDiffReview ? 'DIFF REVIEW' : 'FULL FILE REVIEW';
+
   // Format similar code examples and guideline snippets
   const codeExamples = formatContextItems(finalCodeExamples, 'code');
   const guidelineSnippets = formatContextItems(finalGuidelineSnippets, 'guideline');
@@ -812,6 +873,27 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
       directoryName: dirName,
       language,
       content,
+      reviewType: reviewType,
+      isDiffReview: isDiffReview,
+      // Add PR context if available
+      ...(options.prContext && {
+        prContext: {
+          totalFiles: options.prContext.totalFiles,
+          testFiles: options.prContext.testFiles,
+          sourceFiles: options.prContext.sourceFiles,
+          allFiles: options.prContext.allFiles,
+        },
+      }),
+      // Add diff-specific info if this is a diff review
+      ...(isDiffReview &&
+        options.diffInfo && {
+          diffInfo: {
+            addedLines: options.diffInfo.addedLines.length,
+            removedLines: options.diffInfo.removedLines.length,
+            baseBranch: options.baseBranch,
+            targetBranch: options.targetBranch,
+          },
+        }),
     },
     context: contextSections,
     codeExamples,
@@ -821,6 +903,8 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
       hasGuidelines: finalGuidelineSnippets.length > 0,
       hasPRHistory: prCommentContext.length > 0,
       analysisTimestamp: new Date().toISOString(),
+      reviewType: reviewType,
+      isPRReview: options.isPRReview || false,
     },
     options,
   };
@@ -970,18 +1054,39 @@ Similar code patterns and issues identified by human reviewers in past PRs
     console.log(chalk.yellow(`❌ No context sections available for PR comments`));
   }
 
-  // Corrected prompt with full two-stage analysis + combined output stage
-  return `
-You are an expert code reviewer acting as a senior developer on this specific project.
-Your task is to review the following code file by performing a two-stage analysis based **only** on the provided context, prioritizing documented guidelines and historical review patterns.
+  // Detect if this is a diff review
+  const isDiffReview = file.reviewType === 'DIFF REVIEW';
+  const reviewInstructions = isDiffReview
+    ? 'Your task is to review ONLY the changed lines in the following git diff by performing a two-stage analysis based **only** on the provided context, prioritizing documented guidelines and historical review patterns.'
+    : 'Your task is to review the following code file by performing a two-stage analysis based **only** on the provided context, prioritizing documented guidelines and historical review patterns.';
 
-FILE TO REVIEW:
+  const fileSection = isDiffReview
+    ? `GIT DIFF TO REVIEW (FOCUS ONLY ON CHANGED LINES):
+Path: ${file.path}
+Language: ${file.language}
+Base Branch: ${file.diffInfo?.baseBranch || 'master'}
+Target Branch: ${file.diffInfo?.targetBranch || 'HEAD'}
+
+IMPORTANT: The content below is a git diff. Review ONLY the lines that are added (+) or modified.
+Do NOT comment on unchanged context lines or the entire file structure.
+
+\`\`\`diff
+${file.content}
+\`\`\``
+    : `FILE TO REVIEW:
 Path: ${file.path}
 Language: ${file.language}
 
 \`\`\`${file.language}
 ${file.content}
-\`\`\`
+\`\`\``;
+
+  // Corrected prompt with full two-stage analysis + combined output stage
+  return `
+You are an expert code reviewer acting as a senior developer on this specific project.
+${reviewInstructions}
+
+${fileSection}
 
 CONTEXT FROM PROJECT:
 
@@ -995,7 +1100,21 @@ ${prHistorySection}
 
 INSTRUCTIONS:
 
-**Perform the following analysis stages sequentially:**
+${
+  isDiffReview
+    ? `**DIFF REVIEW MODE - FOCUS ONLY ON CHANGED LINES**
+You are reviewing a git diff. ONLY analyze the lines that are:
+- Added (marked with +)
+- Modified (changed from previous version)
+DO NOT comment on:
+- Unchanged context lines
+- Overall file structure
+- Existing code that wasn't modified
+- Missing imports unless they're directly related to the changed lines
+
+`
+    : ''
+}**Perform the following analysis stages sequentially:**
 
 **STAGE 1: Guideline-Based Review**
 1.  Analyze the 'FILE TO REVIEW' strictly against the standards, rules, and explanations provided in 'CONTEXT A: EXPLICIT GUIDELINES'.
@@ -1112,18 +1231,39 @@ ${ex.content}
       })
       .join('\n') || 'No specific testing guideline snippets found.';
 
-  // Test-specific prompt
-  return `
-You are an expert test code reviewer acting as a senior developer on this specific project.
-Your task is to review the following test file by performing a comprehensive analysis focused on testing best practices and patterns.
+  // Detect if this is a diff review
+  const isDiffReview = file.reviewType === 'DIFF REVIEW';
+  const reviewInstructions = isDiffReview
+    ? 'Your task is to review ONLY the changed lines in the following test file git diff by performing a comprehensive analysis focused on testing best practices and patterns.'
+    : 'Your task is to review the following test file by performing a comprehensive analysis focused on testing best practices and patterns.';
 
-TEST FILE TO REVIEW:
+  const fileSection = isDiffReview
+    ? `TEST FILE GIT DIFF TO REVIEW (FOCUS ONLY ON CHANGED LINES):
+Path: ${file.path}
+Language: ${file.language}
+Base Branch: ${file.diffInfo?.baseBranch || 'master'}
+Target Branch: ${file.diffInfo?.targetBranch || 'HEAD'}
+
+IMPORTANT: The content below is a git diff. Review ONLY the lines that are added (+) or modified in the test file.
+Do NOT comment on unchanged context lines or the entire test file structure.
+
+\`\`\`diff
+${file.content}
+\`\`\``
+    : `TEST FILE TO REVIEW:
 Path: ${file.path}
 Language: ${file.language}
 
 \`\`\`${file.language}
 ${file.content}
-\`\`\`
+\`\`\``;
+
+  // Test-specific prompt
+  return `
+You are an expert test code reviewer acting as a senior developer on this specific project.
+${reviewInstructions}
+
+${fileSection}
 
 CONTEXT FROM PROJECT:
 
@@ -1135,7 +1275,21 @@ ${formattedCodeExamples}
 
 INSTRUCTIONS:
 
-**Perform the following test-specific analysis:**
+${
+  isDiffReview
+    ? `**DIFF REVIEW MODE - FOCUS ONLY ON CHANGED LINES**
+You are reviewing a git diff of a test file. ONLY analyze the lines that are:
+- Added (marked with +)
+- Modified (changed from previous version)
+DO NOT comment on:
+- Unchanged context lines
+- Overall test file structure
+- Existing tests that weren't modified
+- Missing test cases unless they're directly related to the changed lines
+
+`
+    : ''
+}**Perform the following test-specific analysis:**
 
 **STAGE 1: Test Coverage and Completeness**
 1. Analyze if the test file provides adequate coverage for the functionality it's testing.
@@ -1187,6 +1341,246 @@ JSON Output Structure:
   ]
 }
 
+Respond **only** with the valid JSON object. Do not include any other text before or after the JSON.
+`;
+}
+
+/**
+ * Generate holistic PR analysis prompt for LLM
+ *
+ * @param {Object} context - Holistic context for LLM
+ * @returns {string} Holistic PR analysis prompt
+ */
+function generateHolisticPRAnalysisPrompt(context) {
+  const { file, context: contextSections } = context;
+
+  // Format unified context sections
+  const formattedCodeExamples =
+    contextSections
+      .find((s) => s.title === 'Similar Code Examples')
+      ?.items?.slice(0, 10)
+      .map((ex, idx) => {
+        return `
+CODE EXAMPLE ${idx + 1} (Similarity: ${ex.similarity?.toFixed(3) || 'N/A'})
+Path: ${ex.path}
+Language: ${ex.language}
+
+\`\`\`${ex.language || ''}
+${ex.content}
+\`\`\`
+`;
+      })
+      .join('\n') || 'No relevant code examples found.';
+
+  const formattedGuidelines =
+    contextSections
+      .find((s) => s.title === 'Project Guidelines')
+      ?.items?.slice(0, 8)
+      .map((g, idx) => {
+        return `
+GUIDELINE ${idx + 1} (Source: ${g.path})
+${g.headingText ? `Heading: "${g.headingText}"` : ''}
+
+\`\`\`
+${g.content}
+\`\`\`
+`;
+      })
+      .join('\n') || 'No specific guidelines found.';
+
+  const formattedPRComments =
+    contextSections
+      .find((s) => s.title === 'Historical Review Comments')
+      ?.items?.slice(0, 10)
+      .map((comment, idx) => {
+        return `### Historical Comment ${idx + 1}
+- **PR**: #${comment.pr_number} by ${comment.author}
+- **File**: ${comment.file_path}
+- **Type**: ${comment.comment_type}
+- **Relevance**: ${(comment.similarity_score * 100).toFixed(1)}%
+- **Review**: ${comment.comment_text}
+
+`;
+      })
+      .join('\n') || 'No historical PR comments found.';
+
+  // Format PR files with their diffs
+  const prFiles = file.prFiles || [];
+  const formattedPRFiles = prFiles
+    .map((prFile, idx) => {
+      return `
+## FILE ${idx + 1}: ${prFile.path}
+**Language**: ${prFile.language}
+**Type**: ${prFile.isTest ? 'Test' : 'Source'} file
+**Summary**: ${prFile.summary}
+
+### Changes (Git Diff):
+\`\`\`diff
+${prFile.diff}
+\`\`\`
+`;
+    })
+    .join('\n');
+
+  return `
+You are an expert code reviewer performing a holistic review of a Pull Request with ${prFiles.length} files.
+Analyze ALL files together to identify cross-file issues, consistency problems, and overall code quality.
+
+## PULL REQUEST OVERVIEW
+- **Total Files**: ${prFiles.length}
+- **Source Files**: ${prFiles.filter((f) => !f.isTest).length}
+- **Test Files**: ${prFiles.filter((f) => f.isTest).length}
+
+## UNIFIED CONTEXT FROM PROJECT
+
+### PROJECT CODE EXAMPLES
+${formattedCodeExamples}
+
+### PROJECT GUIDELINES
+${formattedGuidelines}
+
+### HISTORICAL REVIEW COMMENTS
+${formattedPRComments}
+
+## PR FILES WITH CHANGES
+${formattedPRFiles}
+
+## ANALYSIS INSTRUCTIONS
+
+**Perform the following holistic analysis stages sequentially for all PR files:**
+
+### **STAGE 1: Project Pattern Analysis (CRITICAL FOR CONSISTENCY)**
+
+1. **CRITICAL FIRST STEP**: Scan ALL code examples in PROJECT CODE EXAMPLES and create a comprehensive list of:
+   - Common import statements (especially those containing 'helper', 'util', 'shared', 'common', 'test')
+   - Frequently used function calls that appear across multiple examples
+   - Project-specific wrappers or utilities (e.g., \`renderWithTestHelpers\` instead of direct \`render\`)
+   - Consistent patterns in how operations are performed
+   - Testing patterns and helper functions
+   - Component patterns and architectural approaches
+
+2. **IMPORTANT**: For each common utility or pattern you identify, note:
+   - Which example files demonstrate it (cite specific examples)
+   - What the pattern appears to do
+   - Whether ALL PR files are using this pattern consistently
+
+3. **HIGH PRIORITY CROSS-FILE CHECKS**: Flag any instances where:
+   - Files use direct library calls when multiple examples use project wrappers
+   - Common utility functions available in the project are not being imported/used consistently
+   - Files deviate from patterns that appear in 3+ examples
+   - Test files don't follow established test helper patterns
+   - Import statements are inconsistent across similar files
+
+### **STAGE 2: Guideline Compliance Analysis**
+
+1. Analyze ALL PR files strictly against the standards, rules, and explanations in PROJECT GUIDELINES
+2. Identify specific deviations where any file violates explicit guidelines
+3. Check for consistency of guideline application across all files
+4. Note guideline source (path or index) for each deviation found
+5. Ensure architectural decisions are consistent across the PR
+
+### **STAGE 3: Historical Pattern Recognition**
+
+1. **CRITICAL**: Analyze HISTORICAL REVIEW COMMENTS to identify patterns:
+   - Types of issues human reviewers frequently flag in similar code
+   - Recurring themes across multiple historical comments
+   - High-relevance issues (>70% relevance score) that apply to current PR
+
+2. **Apply Historical Insights to Each File**:
+   - Check if similar issues exist in any PR file
+   - Apply reviewer suggestions that are relevant to current changes
+   - Look for patterns that span multiple files in the PR
+
+### **STAGE 4: Cross-File Integration Analysis**
+
+1. **Naming and Import Consistency**:
+   - Verify consistent naming conventions across all files
+   - Check import/export consistency and completeness
+   - Identify duplicated logic that could be shared
+
+2. **Test Coverage and Quality**:
+   - For each source file change, verify corresponding test updates
+   - Ensure test files follow established patterns from code examples
+   - Check if test coverage is adequate for new functionality
+
+3. **Architectural Integration**:
+   - Look for potential breaking changes across files
+   - Check API consistency between related files
+   - Verify proper separation of concerns across the PR
+   - Identify missing error handling or edge cases
+
+### **STAGE 5: Consolidate and Prioritize Issues**
+
+1. **Apply Conflict Resolution Rules**:
+   - **Guideline Precedence**: If pattern-based or historical insights contradict explicit guidelines, guidelines take precedence
+   - **Cross-File Priority**: Issues affecting multiple files get higher priority
+   - **Pattern Consistency**: Missing project-specific utilities/helpers are high priority if pattern appears in 3+ examples
+
+2. **Citation Rules**:
+   - For guideline violations: cite the specific guideline document
+   - For pattern deviations: cite specific code examples that demonstrate the correct pattern
+   - For historical issues: report as standard findings without referencing historical source
+   - For cross-file issues: specify all affected files
+
+3. **Special Attention Areas**:
+   - **Project-specific patterns**: Issues where files don't use established project utilities/helpers
+   - **Historical patterns**: Issues previously flagged by human reviewers in similar contexts
+   - **Cross-file consistency**: Ensure similar changes follow the same patterns across all files
+   - **Test patterns**: Verify test files follow established testing conventions from examples
+
+## OUTPUT FORMAT
+
+**CRITICAL**: Use the EXACT file paths shown in the "PR FILES WITH CHANGES" section as keys in the JSON response.
+
+Respond with a JSON object:
+
+{
+  "summary": "Brief summary of the PR quality and main findings",
+  "crossFileIssues": [
+    {
+      "type": "consistency | testing | architecture | integration",
+      "severity": "critical | high | medium | low",
+      "description": "Description of the cross-file issue",
+      "affectedFiles": ["frontend/src/apps/listing/file1.tsx", "frontend/src/apps/listing/file2.tsx"],
+      "suggestion": "How to resolve this issue"
+    }
+  ],
+  "fileSpecificIssues": {
+    "frontend/src/apps/listing/containers/ListingGateKeeper/ListingGateKeeper.tsx": [
+      {
+        "type": "bug | improvement | convention | performance | security",
+        "severity": "critical | high | medium | low",
+        "description": "Issue description",
+        "lineNumbers": [],
+        "suggestion": "How to fix this issue"
+      }
+    ],
+    "frontend/src/apps/listing/containers/ListingGateKeeper/ListingGateKeeper.graphql": [
+      {
+        "type": "bug | improvement | convention | performance | security",
+        "severity": "critical | high | medium | low",
+        "description": "Issue description",
+        "lineNumbers": [],
+        "suggestion": "How to fix this issue"
+      }
+    ]
+  },
+  "recommendations": [
+    {
+      "priority": "high | medium | low",
+      "category": "testing | architecture | consistency | performance",
+      "description": "Recommendation description",
+      "impact": "Expected impact of implementing this recommendation"
+    }
+  ]
+}
+
+**IMPORTANT**:
+- Use the FULL relative paths (e.g., "frontend/src/apps/listing/containers/ListingGateKeeper/ListingGateKeeper.tsx") as shown in the PR FILES section
+- Do NOT use just filenames (e.g., "ListingGateKeeper.tsx")
+- Each key in "fileSpecificIssues" must match exactly the path shown above
+
+Focus on actionable feedback that will improve code quality and maintainability.
 Respond **only** with the valid JSON object. Do not include any other text before or after the JSON.
 `;
 }
@@ -1590,4 +1984,145 @@ function formatCommentForContext(comment) {
   };
 }
 
-export { analyzeFile, getPRCommentContext };
+/**
+ * Perform holistic PR analysis using unified context
+ * @param {Object} options - Analysis options including prFiles and unifiedContext
+ * @returns {Promise<Object>} Holistic analysis results
+ */
+async function performHolisticPRAnalysis(options) {
+  try {
+    const { prFiles, unifiedContext, prContext } = options;
+
+    console.log(chalk.blue(`🔍 Performing holistic analysis of ${prFiles.length} files with unified context...`));
+
+    // Create a synthetic file context for holistic analysis
+    const holisticContext = {
+      file: {
+        path: 'PR_HOLISTIC_REVIEW',
+        name: 'Pull Request',
+        directory: '.',
+        directoryName: '.',
+        language: 'diff',
+        content: prFiles.map((f) => f.diff).join('\n\n'),
+        reviewType: 'PR HOLISTIC REVIEW',
+        isDiffReview: true,
+        prFiles: prFiles, // Add all PR files for context
+      },
+      context: [
+        {
+          title: 'Similar Code Examples',
+          description: 'Code patterns from the project that are similar to the files being reviewed',
+          items: unifiedContext.codeExamples.slice(0, 10),
+        },
+        {
+          title: 'Project Guidelines',
+          description: 'Documentation and guidelines relevant to this code',
+          items: unifiedContext.guidelines.slice(0, 8),
+        },
+        {
+          title: 'Historical Review Comments',
+          description: 'Similar code patterns and issues identified by human reviewers in past PRs',
+          items: unifiedContext.prComments.slice(0, 10),
+        },
+      ],
+      metadata: {
+        hasCodeExamples: unifiedContext.codeExamples.length > 0,
+        hasGuidelines: unifiedContext.guidelines.length > 0,
+        hasPRHistory: unifiedContext.prComments.length > 0,
+        analysisTimestamp: new Date().toISOString(),
+        reviewType: 'PR HOLISTIC REVIEW',
+        isPRReview: true,
+        isHolisticReview: true,
+      },
+      options: options,
+    };
+
+    // Add verbose debug logging similar to individual file reviews
+    debug('--- Holistic PR Review: Guidelines Sent to LLM ---');
+    if (unifiedContext.guidelines.length > 0) {
+      unifiedContext.guidelines.slice(0, 10).forEach((g, i) => {
+        debug(`  [${i + 1}] Path: ${g.path} ${g.headingText || g.heading_text ? `(Heading: "${g.headingText || g.heading_text}")` : ''}`);
+        debug(`      Content: ${g.content.substring(0, 100).replace(/\n/g, ' ')}...`);
+      });
+    } else {
+      debug('  (None)');
+    }
+
+    debug('--- Holistic PR Review: Code Examples Sent to LLM ---');
+    if (unifiedContext.codeExamples.length > 0) {
+      unifiedContext.codeExamples.slice(0, 10).forEach((ex, i) => {
+        debug(`  [${i + 1}] Path: ${ex.path} (Similarity: ${ex.similarity?.toFixed(3) || 'N/A'})`);
+        debug(`      Content: ${ex.content.substring(0, 100).replace(/\n/g, ' ')}...`);
+      });
+    } else {
+      debug('  (None)');
+    }
+
+    debug('--- Holistic PR Review: Top Historic Comments Sent to LLM ---');
+    if (unifiedContext.prComments.length > 0) {
+      unifiedContext.prComments.slice(0, 5).forEach((comment, i) => {
+        debug(`  [${i + 1}] PR #${comment.prNumber} by ${comment.author} (Relevance: ${(comment.relevanceScore * 100).toFixed(1)}%)`);
+        debug(`      File: ${comment.filePath}`);
+        debug(`      Comment: ${comment.body.substring(0, 100).replace(/\n/g, ' ')}...`);
+      });
+    } else {
+      debug('  (None)');
+    }
+    debug('--- Sending Holistic PR Analysis Prompt to LLM ---');
+
+    // Generate prompt using the holistic PR analysis prompt
+    const prompt = generateHolisticPRAnalysisPrompt(holisticContext);
+
+    // Call LLM with the comprehensive prompt
+    const llmResponse = await sendPromptToLLM(prompt, {
+      temperature: 0,
+      maxTokens: options.maxTokens || 8192,
+      model: options.model || 'claude-3-5-sonnet-20241022',
+      isJsonMode: true,
+    });
+
+    // Parse the response using existing parser
+    const parsedResponse = parseAnalysisResponse(llmResponse);
+
+    // Debug logging
+    console.log(chalk.blue(`🐛 Holistic analysis parsed response:`));
+    console.log(chalk.gray(`Summary: ${parsedResponse.summary?.substring(0, 100)}...`));
+    console.log(chalk.gray(`Cross-file issues: ${parsedResponse.crossFileIssues?.length || 0}`));
+    console.log(chalk.gray(`File-specific issues keys: ${Object.keys(parsedResponse.fileSpecificIssues || {}).join(', ')}`));
+    console.log(chalk.gray(`Recommendations: ${parsedResponse.recommendations?.length || 0}`));
+
+    return {
+      success: true,
+      filePath: 'PR_HOLISTIC_REVIEW',
+      language: 'diff',
+      results: {
+        summary: parsedResponse.summary || 'Holistic PR review completed',
+        crossFileIssues: parsedResponse.crossFileIssues || [],
+        fileSpecificIssues: parsedResponse.fileSpecificIssues || {},
+        recommendations: parsedResponse.recommendations || [],
+      },
+      context: {
+        codeExamples: unifiedContext.codeExamples.length,
+        guidelines: unifiedContext.guidelines.length,
+        prComments: unifiedContext.prComments.length,
+      },
+      metadata: {
+        analysisTimestamp: new Date().toISOString(),
+        featuresUsed: {
+          codeExamples: unifiedContext.codeExamples.length > 0,
+          guidelines: unifiedContext.guidelines.length > 0,
+          prHistory: unifiedContext.prComments.length > 0,
+        },
+      },
+    };
+  } catch (error) {
+    console.error(chalk.red(`Error in holistic PR analysis: ${error.message}`));
+    return {
+      success: false,
+      error: error.message,
+      filePath: 'PR_HOLISTIC_REVIEW',
+    };
+  }
+}
+
+export { analyzeFile, getPRCommentContext, generateHolisticPRAnalysisPrompt, parseAnalysisResponse };

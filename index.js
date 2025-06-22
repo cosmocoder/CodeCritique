@@ -16,7 +16,15 @@ import fs from 'fs';
 import path from 'path';
 
 import * as embeddings from './embeddings.js';
-import { detectFileType, detectLanguageFromExtension, getSupportedFileExtensions, shouldProcessFile } from './utils.js';
+import {
+  checkBranchExists,
+  detectFileType,
+  detectLanguageFromExtension,
+  ensureBranchExists,
+  findBaseBranch,
+  getSupportedFileExtensions,
+  shouldProcessFile,
+} from './utils.js';
 
 // Import the refactored CAG review functions
 import {
@@ -53,10 +61,10 @@ program.name('ai-code-review').description('CLI tool for AI-powered code review 
 program
   .command('analyze')
   .description('Analyze code using dynamic context (CAG approach)')
-  .option('-d, --diff-with <branch>', 'Analyze files changed compared to a branch (triggers PR review mode)')
+  .option('-b, --diff-with <branch>', 'Analyze files changed compared to a branch (triggers PR review mode)')
   .option('-f, --files <files...>', 'Specific files or glob patterns to review')
   .option('--file <file>', 'Analyze a single file')
-  .option('--directory <dir>', 'Analyze all supported files in a directory')
+  .option('-d, --directory <dir>', 'Working directory for git operations (use with --diff-with)')
   .option('-o, --output <format>', 'Output format (text, json, markdown)', 'text')
   .option('--no-color', 'Disable colored output')
   .option('--verbose', 'Show verbose output')
@@ -154,7 +162,8 @@ Examples:
   $ ai-code-review analyze --directory src/components
   $ ai-code-review analyze --file src/utils/validation.ts
   $ ai-code-review analyze --files "src/**/*.tsx" "lib/*.js"
-  $ ai-code-review analyze --diff-with main
+  $ ai-code-review analyze -b main
+  $ ai-code-review analyze --diff-with feature-branch -d /path/to/repo
   $ ai-code-review analyze --output json > review-results.json
   $ ai-code-review embeddings:generate --directory src
   $ ai-code-review embeddings:generate --exclude "**/*.test.js" "**/*.spec.js"
@@ -286,15 +295,29 @@ async function runCodeReview(options) {
     console.log(chalk.bold.blue('AI Code Review (CAG Approach) - Starting analysis...'));
 
     // Determine the review mode based on options
-    if (options.file) {
+    // Only support: single file, specific files, or diff with branch
+    if (options.diffWith) {
+      // Use directory option as working directory for git commands if specified
+      const gitWorkingDir = options.directory ? path.resolve(options.directory) : process.cwd();
+      const changedFiles = getChangedFiles(options.diffWith, gitWorkingDir);
+      if (changedFiles.length === 0) {
+        console.log(chalk.yellow(`No changed files found compared to branch '${options.diffWith}'. Exiting.`));
+        return;
+      }
+      operationDescription = `${changedFiles.length} files changed vs ${options.diffWith}`;
+      // Add the actual branch name to reviewOptions
+      const enhancedReviewOptions = {
+        ...reviewOptions,
+        actualBranch: options.diffWith,
+        diffWith: options.diffWith,
+      };
+      reviewTask = cagReviewPullRequest(changedFiles, enhancedReviewOptions);
+    } else if (options.file) {
       operationDescription = `single file: ${options.file}`;
       if (!fs.existsSync(options.file)) {
         throw new Error(`File not found: ${options.file}`);
       }
       reviewTask = cagReviewFile(options.file, reviewOptions);
-    } else if (options.directory) {
-      operationDescription = `directory: ${options.directory}`;
-      reviewTask = cagReviewDirectory(options.directory, reviewOptions);
     } else if (options.files && options.files.length > 0) {
       const filesToAnalyze = await expandFilePatterns(options.files);
       if (filesToAnalyze.length === 0) {
@@ -303,40 +326,20 @@ async function runCodeReview(options) {
       }
       operationDescription = `${filesToAnalyze.length} specific files/patterns`;
       reviewTask = cagReviewFiles(filesToAnalyze, reviewOptions);
-    } else if (options.diffWith) {
-      const changedFiles = getChangedFiles(options.diffWith);
-      if (changedFiles.length === 0) {
-        console.log(chalk.yellow(`No changed files found compared to branch '${options.diffWith}'. Exiting.`));
-        return;
-      }
-      operationDescription = `${changedFiles.length} files changed vs ${options.diffWith}`;
-      reviewTask = cagReviewPullRequest(changedFiles, reviewOptions);
     } else {
-      // Default: Diff against common base branches if none specified
-      const defaultBranches = ['main', 'master', 'develop'];
-      let baseBranch = null;
-      for (const branch of defaultBranches) {
-        if (checkBranchExists(branch)) {
-          baseBranch = branch;
-          break;
-        }
-      }
-      if (!baseBranch) {
-        console.warn(
-          chalk.yellow(
-            'No specific file, directory, or diff branch provided, and default branches (main, master, develop) not found. Attempting diff with HEAD~1.'
-          )
-        );
-        baseBranch = 'HEAD~1'; // Fallback to last commit
-      }
-      console.log(chalk.cyan(`No target specified, analyzing files changed compared to '${baseBranch}'...`));
-      const changedFiles = getChangedFiles(baseBranch);
-      if (changedFiles.length === 0) {
-        console.log(chalk.yellow(`No changed files found compared to branch '${baseBranch}'. Exiting.`));
-        return;
-      }
-      operationDescription = `${changedFiles.length} files changed vs ${baseBranch}`;
-      reviewTask = cagReviewPullRequest(changedFiles, reviewOptions);
+      // No valid options provided - show error and exit
+      console.error(chalk.red('Error: You must specify one of the following:'));
+      console.error(chalk.yellow('  --file <file>                    Analyze a single file'));
+      console.error(chalk.yellow('  --files <files...>               Analyze specific files or glob patterns'));
+      console.error(chalk.yellow('  -b, --diff-with <branch>         Analyze files changed in a branch'));
+      console.error(chalk.gray('\nOptional:'));
+      console.error(chalk.gray('  -d, --directory <dir>            Working directory (for git operations with --diff-with)'));
+      console.error(chalk.gray('\nExamples:'));
+      console.error(chalk.gray('  ai-code-review analyze --file src/component.tsx'));
+      console.error(chalk.gray('  ai-code-review analyze --files "src/**/*.ts"'));
+      console.error(chalk.gray('  ai-code-review analyze -b feature-branch'));
+      console.error(chalk.gray('  ai-code-review analyze -b feature-branch -d /path/to/repo'));
+      process.exit(1);
     }
 
     console.log(chalk.cyan(`Starting review for ${operationDescription}...`));
@@ -846,46 +849,51 @@ async function expandFilePatterns(patterns, baseDir = process.cwd()) {
 }
 
 /**
- * Get changed files using git diff
+ * Get list of files changed in a branch compared to the base branch (main/master).
+ * This shows what changes the specified branch has compared to the base.
  *
- * @param {string} branch - Branch/commit/ref to diff against
+ * @param {string} branch - Branch to analyze (the feature/target branch)
+ * @param {string} workingDir - Directory to run git commands in (optional, defaults to cwd)
  * @returns {Array<string>} Array of changed file paths relative to git root
  */
-function getChangedFiles(branch) {
+function getChangedFiles(branch, workingDir = process.cwd()) {
   try {
     // Get git root directory
-    const gitRoot = execSync('git rev-parse --show-toplevel').toString().trim();
-    // Run diff command
-    const gitOutput = execSync(`git diff --name-only ${branch}`, { cwd: gitRoot }).toString();
+    const gitRoot = execSync('git rev-parse --show-toplevel', { cwd: workingDir }).toString().trim();
+    console.log(chalk.gray(`Git repository: ${gitRoot}`));
+
+    // Ensure the branch exists locally (fetch if needed)
+    ensureBranchExists(branch, workingDir);
+
+    // Find the base branch (main/master)
+    const baseBranch = findBaseBranch(workingDir);
+
+    console.log(chalk.gray(`Comparing ${branch} against ${baseBranch}...`));
+
+    // Use three-dot notation to get changes in branch compared to base
+    // This shows commits that are in 'branch' but not in 'baseBranch'
+    const gitOutput = execSync(`git diff --name-only ${baseBranch}...${branch}`, { cwd: gitRoot }).toString();
+
     // Split, filter empty lines, resolve paths, and check existence
-    return gitOutput
+    const changedFiles = gitOutput
       .split('\n')
       .filter((file) => file)
       .map((file) => path.resolve(gitRoot, file)) // Get absolute path
       .filter((file) => fs.existsSync(file) && fs.statSync(file).isFile()); // Ensure it exists and is a file
+
+    if (changedFiles.length > 0) {
+      console.log(chalk.gray(`Found ${changedFiles.length} changed files in ${branch} vs ${baseBranch}`));
+    }
+
+    return changedFiles;
   } catch (err) {
     console.error(chalk.red('Error getting git diff:'), err.message);
     return [];
   }
 }
 
-/**
- * Check if a git branch exists locally.
- *
- * @param {string} branchName - The name of the branch to check.
- * @returns {boolean} True if the branch exists, false otherwise.
- */
-function checkBranchExists(branchName) {
-  try {
-    execSync(`git show-ref --verify --quiet refs/heads/${branchName}`);
-    return true;
-  } catch (error) {
-    // Command returns non-zero exit code if branch doesn't exist
-    return false;
-  }
-}
-
 // REMOVED: getFileDiff function - Diffing handled within LLM or specific review modes if needed.
+// REMOVED: checkBranchExists function - Moved to utils.js
 
 // --- Output Formatting Functions --- //
 // These need to be adapted to the structure returned by cag-review.js functions

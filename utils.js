@@ -9,6 +9,7 @@
 import { execSync } from 'child_process';
 import { minimatch } from 'minimatch';
 import { openClassifier } from './zero-shot-classifier-open.js';
+import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
 
@@ -1160,6 +1161,174 @@ async function inferContextFromDocumentContent(docPath, h1Content, chunksSample 
 
 // --- END Context Inference Helpers ---
 
+// --- Git Helper Functions ---
+
+/**
+ * Check if a git branch exists locally.
+ *
+ * @param {string} branchName - The name of the branch to check.
+ * @param {string} workingDir - Directory to run git commands in (optional, defaults to cwd)
+ * @returns {boolean} True if the branch exists, false otherwise.
+ */
+function checkBranchExists(branchName, workingDir = process.cwd()) {
+  try {
+    execSync(`git show-ref --verify --quiet refs/heads/${branchName}`, { cwd: workingDir });
+    return true;
+  } catch (error) {
+    // Command returns non-zero exit code if branch doesn't exist
+    return false;
+  }
+}
+
+/**
+ * Ensure a branch exists locally, fetching from remote if necessary.
+ *
+ * @param {string} branchName - The name of the branch to ensure exists.
+ * @param {string} workingDir - Directory to run git commands in (optional, defaults to cwd)
+ */
+function ensureBranchExists(branchName, workingDir = process.cwd()) {
+  try {
+    // Check if branch exists locally
+    if (checkBranchExists(branchName, workingDir)) {
+      console.log(chalk.gray(`Branch '${branchName}' exists locally`));
+      return;
+    }
+
+    console.log(chalk.yellow(`Branch '${branchName}' not found locally, attempting to fetch...`));
+
+    // Try to fetch the branch from origin
+    try {
+      execSync(`git fetch origin ${branchName}:${branchName}`, { stdio: 'pipe', cwd: workingDir });
+      console.log(chalk.green(`Successfully fetched branch '${branchName}' from origin`));
+    } catch (fetchError) {
+      // If direct fetch fails, try fetching all branches and then checking
+      console.log(chalk.yellow(`Direct fetch failed, trying to fetch all branches...`));
+      execSync('git fetch origin', { stdio: 'pipe', cwd: workingDir });
+
+      // Check if branch exists on remote
+      try {
+        execSync(`git show-ref --verify --quiet refs/remotes/origin/${branchName}`, { cwd: workingDir });
+        // Create local tracking branch
+        execSync(`git checkout -b ${branchName} origin/${branchName}`, { stdio: 'pipe', cwd: workingDir });
+        console.log(chalk.green(`Successfully created local branch '${branchName}' tracking origin/${branchName}`));
+      } catch (remoteError) {
+        throw new Error(`Branch '${branchName}' not found locally or on remote origin`);
+      }
+    }
+  } catch (error) {
+    console.error(chalk.red(`Error ensuring branch '${branchName}' exists:`), error.message);
+    throw error;
+  }
+}
+
+/**
+ * Find the base branch (main or master) that exists in the repository.
+ *
+ * @param {string} workingDir - Directory to run git commands in (optional, defaults to cwd)
+ * @returns {string} The name of the base branch (main, master, or develop)
+ */
+function findBaseBranch(workingDir = process.cwd()) {
+  const candidateBranches = ['main', 'master', 'develop'];
+
+  for (const branch of candidateBranches) {
+    if (checkBranchExists(branch, workingDir)) {
+      return branch;
+    }
+
+    // Also check if it exists on remote
+    try {
+      execSync(`git show-ref --verify --quiet refs/remotes/origin/${branch}`, { cwd: workingDir });
+      return branch;
+    } catch (error) {
+      // Branch doesn't exist on remote either, continue to next candidate
+    }
+  }
+
+  // Fallback to HEAD~1 if no standard base branch found
+  console.warn(chalk.yellow('No standard base branch (main/master/develop) found, using HEAD~1 as fallback'));
+  return 'HEAD~1';
+}
+
+/**
+ * Get git diff content for a specific file between two branches/commits
+ *
+ * @param {string} filePath - Path to the file
+ * @param {string} baseBranch - Base branch (e.g., 'main', 'master')
+ * @param {string} targetBranch - Target branch (e.g., 'feature-branch')
+ * @param {string} workingDir - Working directory for git commands
+ * @returns {string} Git diff content for the file
+ */
+function getFileDiff(filePath, baseBranch, targetBranch, workingDir = process.cwd()) {
+  try {
+    // Use git diff to get changes for the specific file
+    // Format: git diff base...target -- filepath
+    const gitCommand = `git diff ${baseBranch}...${targetBranch} -- "${filePath}"`;
+    const diffOutput = execSync(gitCommand, { cwd: workingDir, encoding: 'utf8' });
+
+    return diffOutput;
+  } catch (error) {
+    console.error(chalk.red(`Error getting git diff for ${filePath}: ${error.message}`));
+    return '';
+  }
+}
+
+/**
+ * Get changed lines info for a file between two branches
+ *
+ * @param {string} filePath - Path to the file
+ * @param {string} baseBranch - Base branch
+ * @param {string} targetBranch - Target branch
+ * @param {string} workingDir - Working directory for git commands
+ * @returns {Object} Object with added/removed lines info
+ */
+function getChangedLinesInfo(filePath, baseBranch, targetBranch, workingDir = process.cwd()) {
+  try {
+    const diffOutput = getFileDiff(filePath, baseBranch, targetBranch, workingDir);
+
+    if (!diffOutput) {
+      return { hasChanges: false, addedLines: [], removedLines: [], contextLines: [] };
+    }
+
+    const lines = diffOutput.split('\n');
+    const addedLines = [];
+    const removedLines = [];
+    const contextLines = [];
+
+    let currentLineNumber = 0;
+
+    for (const line of lines) {
+      if (line.startsWith('@@')) {
+        // Parse line numbers from diff header like "@@ -10,7 +10,8 @@"
+        const match = line.match(/@@ -(\d+),?\d* \+(\d+),?\d* @@/);
+        if (match) {
+          currentLineNumber = parseInt(match[2]);
+        }
+      } else if (line.startsWith('+') && !line.startsWith('+++')) {
+        addedLines.push({ lineNumber: currentLineNumber, content: line.substring(1) });
+        currentLineNumber++;
+      } else if (line.startsWith('-') && !line.startsWith('---')) {
+        removedLines.push({ content: line.substring(1) });
+      } else if (line.startsWith(' ')) {
+        contextLines.push({ lineNumber: currentLineNumber, content: line.substring(1) });
+        currentLineNumber++;
+      }
+    }
+
+    return {
+      hasChanges: addedLines.length > 0 || removedLines.length > 0,
+      addedLines,
+      removedLines,
+      contextLines,
+      fullDiff: diffOutput,
+    };
+  } catch (error) {
+    console.error(chalk.red(`Error parsing diff for ${filePath}: ${error.message}`));
+    return { hasChanges: false, addedLines: [], removedLines: [], contextLines: [] };
+  }
+}
+
+// --- END Git Helper Functions ---
+
 export {
   detectLanguageFromExtension,
   detectFileType,
@@ -1175,4 +1344,9 @@ export {
   extractMarkdownChunks,
   inferContextFromCodeContent,
   inferContextFromDocumentContent,
+  checkBranchExists,
+  ensureBranchExists,
+  findBaseBranch,
+  getFileDiff,
+  getChangedLinesInfo,
 };
