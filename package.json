@@ -52,7 +52,8 @@
     "glob": "^10.3.0",
     "linguist-languages": "8.0.0",
     "lru-cache": "11.1.0",
-    "minimatch": "^9.0.3"
+    "minimatch": "^9.0.3",
+    "stopwords-iso": "1.1.0"
   },
   "devDependencies": {
     "@types/node": "24.0.3",
