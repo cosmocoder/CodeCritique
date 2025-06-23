@@ -11,9 +11,9 @@
     "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "prepublishOnly": "chmod +x index.js",
-    "lint": "eslint . --ext .js,.ts,.tsx, --cache",
-    "lint:ci": "npm run lint -- --cache-strategy content",
-    "lint:fix": "npm run lint -- --fix",
+    "lint": "eslint . --cache",
+    "lint:ci": "eslint . --cache --cache-strategy content",
+    "lint:fix": "eslint . --cache --fix",
     "prettier": "prettier --write . --cache --cache-location ./.prettier-cache",
     "prettier:ci": "prettier --check . --cache --cache-location ./.prettier-cache --cache-strategy content",
     "knip": "knip"
@@ -56,10 +56,11 @@
     "stopwords-iso": "1.1.0"
   },
   "devDependencies": {
+    "@eslint/js": "9.29.0",
     "@types/node": "24.0.3",
-    "eslint": "8.57.1",
-    "eslint-plugin-sort-imports-es6-autofix": "0.6.0",
+    "eslint": "9.29.0",
     "eslint-plugin-vitest": "0.5.4",
+    "globals": "16.2.0",
     "knip": "5.61.2",
     "prettier": "3.5.3",
     "typescript": "5.8.3"
