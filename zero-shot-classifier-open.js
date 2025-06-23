@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import { LRUCache } from 'lru-cache';
 import fs from 'fs';
 import path from 'path';
+import stopwords from 'stopwords-iso/stopwords-iso.json' with { type: 'json' };
 
 // Configure Transformers.js environment
 env.allowLocalModels = false;
@@ -22,10 +23,6 @@ const __dirname = path.dirname(__filename);
 // Load technology keywords from JSON
 const techKeywordsPath = path.join(__dirname, 'src', 'technology-keywords.json');
 const techKeywords = JSON.parse(fs.readFileSync(techKeywordsPath, 'utf-8'));
-
-// Load stopwords from stopwords-iso
-const stopwordsPath = path.join(__dirname, 'node_modules', 'stopwords-iso', 'stopwords-iso.json');
-const stopwordsData = JSON.parse(fs.readFileSync(stopwordsPath, 'utf-8'));
 
 /**
  * OpenZeroShotClassifier for unrestricted technology detection
@@ -42,7 +39,7 @@ class OpenZeroShotClassifier {
 
     // Common words to exclude from technology detection
     // Use English stopwords from stopwords-iso
-    this.commonWords = new Set(stopwordsData.en || []);
+    this.commonWords = new Set(stopwords.en || []);
 
     // Add additional technical context words that are too generic
     const additionalCommonWords = [

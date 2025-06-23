@@ -13,14 +13,7 @@ import { pipeline } from '@huggingface/transformers';
 import chalk from 'chalk';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-
-// Get __dirname for ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Load stopwords from stopwords-iso
-const stopwordsPath = path.join(__dirname, '..', '..', 'node_modules', 'stopwords-iso', 'stopwords-iso.json');
-const stopwordsData = JSON.parse(await fs.readFile(stopwordsPath, 'utf-8'));
+import stopwords from 'stopwords-iso/stopwords-iso.json' with { type: 'json' };
 
 // Import constants from embeddings.js to avoid duplication
 const { EMBEDDING_DIMENSIONS, PR_COMMENTS_TABLE } = CONSTANTS;
@@ -606,7 +599,7 @@ async function verifyLocally(candidates) {
 
 // NEW: A fast pre-filtering step to reduce candidates before hitting the LLM.
 // Use English stopwords from stopwords-iso
-const stopWords = new Set(stopwordsData.en || []);
+const stopWords = new Set(stopwords.en || []);
 function preFilterWithKeywords(candidate) {
   const commentText = (candidate.comment_text || '').toLowerCase();
   const codeText = (candidate.matchedChunk.code || '').toLowerCase();
