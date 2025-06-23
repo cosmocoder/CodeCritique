@@ -12,17 +12,11 @@ import { LRUCache } from 'lru-cache';
 import fs from 'fs';
 import path from 'path';
 import stopwords from 'stopwords-iso/stopwords-iso.json' with { type: 'json' };
+import techKeywords from './src/technology-keywords.json' with { type: 'json' };
 
 // Configure Transformers.js environment
 env.allowLocalModels = false;
 env.useBrowserCache = false;
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Load technology keywords from JSON
-const techKeywordsPath = path.join(__dirname, 'src', 'technology-keywords.json');
-const techKeywords = JSON.parse(fs.readFileSync(techKeywordsPath, 'utf-8'));
 
 /**
  * OpenZeroShotClassifier for unrestricted technology detection
