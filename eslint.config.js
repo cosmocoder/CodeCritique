@@ -1,6 +1,7 @@
 import js from '@eslint/js';
-import globals from 'globals';
 import vitest from '@vitest/eslint-plugin';
+import importPlugin from 'eslint-plugin-import';
+import globals from 'globals';
 
 export default [
   // Base configuration for all files
@@ -15,19 +16,30 @@ export default [
         process: 'readable',
       },
     },
-    plugins: {},
+    plugins: {
+      import: importPlugin,
+    },
     rules: {
       ...js.configs.recommended.rules,
       'import/no-named-as-default': 'off',
       'no-unused-vars': ['warn', { vars: 'all', args: 'after-used', ignoreRestSiblings: true }],
-      'sort-imports': [
-        'error',
+      'sort-imports': 'off',
+      'import/order': [
+        'warn',
         {
-          ignoreCase: true,
-          ignoreMemberSort: false,
-          memberSyntaxSortOrder: ['none', 'all', 'multiple', 'single'],
-          ignoreDeclarationSort: false,
-          allowSeparatedGroups: false,
+          groups: [
+            'builtin', // Node.js built-in modules
+            'external', // npm packages
+            'internal', // Internal modules
+            'parent', // Parent directories
+            'sibling', // Same directory
+            'index', // Index files
+          ],
+          'newlines-between': 'never',
+          alphabetize: {
+            order: 'asc',
+            caseInsensitive: true,
+          },
         },
       ],
       'no-process-env': 0,
