@@ -6,8 +6,13 @@
  * relying on dynamic context retrieval via embeddings.
  */
 
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import chalk from 'chalk';
 import * as glob from 'glob';
 import { analyzeFile, getPRCommentContext } from './cag-analyzer.js';
+import { findRelevantDocs, findSimilarCode } from './embeddings.js';
 import {
   detectFileType,
   detectLanguageFromExtension,
@@ -16,11 +21,6 @@ import {
   getFileDiff,
   shouldProcessFile,
 } from './utils.js';
-import { fileURLToPath } from 'url';
-import { findRelevantDocs, findSimilarCode } from './embeddings.js';
-import chalk from 'chalk';
-import fs from 'fs';
-import path from 'path';
 
 // Get __dirname equivalent in ESM
 const __filename = fileURLToPath(import.meta.url);

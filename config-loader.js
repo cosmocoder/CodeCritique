@@ -6,11 +6,11 @@
  * technology-agnostic by loading appropriate configurations dynamically.
  */
 
-import { detectFileType, detectLanguageFromExtension } from './utils.js';
-import { fileURLToPath } from 'url';
-import defaultConfigModule from './default-config.js';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import defaultConfigModule from './default-config.js';
+import { detectFileType, detectLanguageFromExtension } from './utils.js';
 
 // Get __dirname equivalent in ESM
 const __filename = fileURLToPath(import.meta.url);

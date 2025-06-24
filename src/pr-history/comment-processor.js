@@ -5,10 +5,10 @@
  * and classifies comments for storage in the embeddings database.
  */
 
-import { calculateEmbedding, calculateQueryEmbedding } from '../../embeddings.js';
 import { createHash } from 'node:crypto';
-import { filterBotComments, getBotFilterStats } from './bot-detector.js';
 import chalk from 'chalk';
+import { calculateEmbedding, calculateQueryEmbedding } from '../../embeddings.js';
+import { filterBotComments, getBotFilterStats } from './bot-detector.js';
 
 export class PRCommentProcessor {
   constructor() {

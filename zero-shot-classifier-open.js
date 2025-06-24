@@ -5,12 +5,12 @@
  * allowing it to detect any technology or framework mentioned in the text.
  */
 
-import * as linguistLanguages from 'linguist-languages';
-import { env, pipeline } from '@huggingface/transformers';
-import { fileURLToPath } from 'url';
-import { LRUCache } from 'lru-cache';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { env, pipeline } from '@huggingface/transformers';
+import * as linguistLanguages from 'linguist-languages';
+import { LRUCache } from 'lru-cache';
 import stopwords from 'stopwords-iso/stopwords-iso.json' with { type: 'json' };
 import techKeywords from './src/technology-keywords.json' with { type: 'json' };
 

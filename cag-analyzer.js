@@ -6,7 +6,9 @@
  * It identifies patterns, best practices, and generates review comments.
  */
 
-import * as llm from './llm.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import chalk from 'chalk';
 import {
   calculateCosineSimilarity,
   calculateEmbedding,
@@ -15,6 +17,8 @@ import {
   findSimilarCode,
   initializeTables,
 } from './embeddings.js';
+import * as llm from './llm.js';
+import { findRelevantPRComments } from './src/pr-history/database.js';
 import {
   debug,
   detectFileType,
@@ -24,10 +28,6 @@ import {
   isTestFile,
   shouldProcessFile,
 } from './utils.js';
-import { findRelevantPRComments } from './src/pr-history/database.js';
-import chalk from 'chalk';
-import fs from 'node:fs';
-import path from 'node:path';
 
 // Constants for content processing
 const MAX_QUERY_CONTEXT_LENGTH = 1500;

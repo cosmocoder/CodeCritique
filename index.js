@@ -7,15 +7,32 @@
  */
 
 import { execSync } from 'child_process';
-import { fileURLToPath } from 'url';
-import { glob } from 'glob';
-import { program } from 'commander';
-import { Spinner } from 'cli-spinner';
-import chalk from 'chalk';
 import fs from 'fs';
+import { readFileSync } from 'fs';
 import path from 'path';
-
+import readline from 'readline';
+import { fileURLToPath } from 'url';
+import chalk from 'chalk';
+import { Spinner } from 'cli-spinner';
+import { program } from 'commander';
+import { glob } from 'glob';
+import {
+  reviewDirectory as cagReviewDirectory,
+  reviewFile as cagReviewFile,
+  reviewFiles as cagReviewFiles,
+  reviewPullRequest as cagReviewPullRequest,
+} from './cag-review.js';
 import * as embeddings from './embeddings.js';
+import { PRHistoryAnalyzer } from './src/pr-history/analyzer.js';
+import {
+  displayAnalysisResults,
+  displayDatabaseStats,
+  displayProgress,
+  displayStatus,
+  getRepositoryAndProjectPath,
+  validateGitHubToken,
+} from './src/pr-history/cli-utils.js';
+import { cleanupClassifier, clearPRComments, getPRCommentsStats, hasPRComments } from './src/pr-history/database.js';
 import {
   checkBranchExists,
   detectFileType,
@@ -27,32 +44,14 @@ import {
 } from './utils.js';
 
 // Import the refactored CAG review functions
-import {
-  reviewDirectory as cagReviewDirectory,
-  reviewFile as cagReviewFile,
-  reviewFiles as cagReviewFiles,
-  reviewPullRequest as cagReviewPullRequest,
-} from './cag-review.js';
 
 // Import PR history analyzer and CLI utilities
-import { cleanupClassifier, clearPRComments, getPRCommentsStats, hasPRComments } from './src/pr-history/database.js';
-import {
-  displayAnalysisResults,
-  displayDatabaseStats,
-  displayProgress,
-  displayStatus,
-  getRepositoryAndProjectPath,
-  validateGitHubToken,
-} from './src/pr-history/cli-utils.js';
-import { PRHistoryAnalyzer } from './src/pr-history/analyzer.js';
-import readline from 'readline';
 
 // Get __dirname equivalent in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Package info
-import { readFileSync } from 'fs';
 const packageJson = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
 // Configure command-line interface

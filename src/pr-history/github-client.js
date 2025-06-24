@@ -5,11 +5,11 @@
  * with intelligent pagination, filtering, and rate limiting for large repositories.
  */
 
-import { getLastAnalysisTimestamp } from './database.js';
-import { Octokit } from '@octokit/rest';
-import chalk from 'chalk';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { Octokit } from '@octokit/rest';
+import chalk from 'chalk';
+import { getLastAnalysisTimestamp } from './database.js';
 
 // Configuration constants
 const DEFAULT_PER_PAGE = 100;

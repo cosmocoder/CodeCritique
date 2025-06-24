@@ -5,10 +5,10 @@
  * GitHub API client, comment processor, and database storage.
  */
 
+import chalk from 'chalk';
+import { PRCommentProcessor } from './comment-processor.js';
 import { clearPRComments, getPRCommentsStats, getProcessedPRDateRange, shouldSkipPR, storePRCommentsBatch } from './database.js';
 import { GitHubAPIClient } from './github-client.js';
-import { PRCommentProcessor } from './comment-processor.js';
-import chalk from 'chalk';
 
 /**
  * Progress tracking for PR analysis

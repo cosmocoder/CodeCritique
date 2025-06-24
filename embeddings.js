@@ -15,8 +15,15 @@
  * - Public API Functions
  */
 
-import * as lancedb from '@lancedb/lancedb';
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'url';
+import * as lancedb from '@lancedb/lancedb';
+import { Field, FixedSizeList, Float32, Int32, Schema, Utf8 } from 'apache-arrow';
+import chalk from 'chalk';
+import dotenv from 'dotenv';
+import { EmbeddingModel, FlagEmbedding } from 'fastembed';
 import {
   debug,
   detectLanguageFromExtension,
@@ -26,13 +33,6 @@ import {
   slugify,
   shouldProcessFile as utilsShouldProcessFile,
 } from './utils.js';
-import { EmbeddingModel, FlagEmbedding } from 'fastembed';
-import { Field, FixedSizeList, Float32, Int32, Schema, Utf8 } from 'apache-arrow';
-import { fileURLToPath } from 'url';
-import chalk from 'chalk';
-import dotenv from 'dotenv';
-import fs from 'node:fs';
-import path from 'node:path';
 
 // Load environment variables from .env file in current working directory
 dotenv.config();

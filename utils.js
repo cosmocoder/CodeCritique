@@ -7,11 +7,11 @@
  */
 
 import { execSync } from 'child_process';
-import { minimatch } from 'minimatch';
-import { openClassifier } from './zero-shot-classifier-open.js';
-import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
+import chalk from 'chalk';
+import { minimatch } from 'minimatch';
+import { openClassifier } from './zero-shot-classifier-open.js';
 
 /**
  * Debug function for logging

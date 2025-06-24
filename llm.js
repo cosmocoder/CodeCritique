@@ -7,12 +7,12 @@
  * Currently supports Anthropic's Claude Sonnet 3.7.
  */
 
+import path from 'path';
 import { Anthropic } from '@anthropic-ai/sdk';
-import { detectFileType } from './utils.js';
-import { getPromptForFileType } from './config-loader.js';
 import chalk from 'chalk';
 import dotenv from 'dotenv';
-import path from 'path';
+import { getPromptForFileType } from './config-loader.js';
+import { detectFileType } from './utils.js';
 
 // dotenv will automatically load .env from the current working directory
 dotenv.config();
