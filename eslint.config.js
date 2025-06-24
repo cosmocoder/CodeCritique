@@ -1,6 +1,6 @@
 import js from '@eslint/js';
 import globals from 'globals';
-import vitestPlugin from 'eslint-plugin-vitest';
+import vitest from '@vitest/eslint-plugin';
 
 export default [
   // Base configuration for all files
@@ -56,10 +56,10 @@ export default [
   {
     files: ['**/*.test.tsx', '**/*.test.ts'],
     plugins: {
-      vitest: vitestPlugin,
+      vitest,
     },
     rules: {
-      ...vitestPlugin.configs['legacy-recommended'].rules,
+      ...vitest.configs.recommended.rules,
       'no-extend-native': 0,
       'require-atomic-updates': 0,
     },
