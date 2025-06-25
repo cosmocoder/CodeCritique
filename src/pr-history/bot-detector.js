@@ -118,31 +118,6 @@ export function filterBotComments(comments) {
   }
 
   const filtered = comments.filter((comment) => !isBotComment(comment));
-  const botCount = comments.length - filtered.length;
 
   return filtered;
-}
-
-/**
- * Get statistics about bot vs human comments
- * @param {Array<Object>} comments - Array of comment objects
- * @returns {Object} Statistics object with counts and percentages
- */
-export function getBotFilterStats(comments) {
-  if (!Array.isArray(comments)) {
-    return { total: 0, human: 0, bot: 0, botPercentage: 0 };
-  }
-
-  const total = comments.length;
-  const humanComments = comments.filter((comment) => !isBotComment(comment));
-  const human = humanComments.length;
-  const bot = total - human;
-  const botPercentage = total > 0 ? ((bot / total) * 100).toFixed(1) : 0;
-
-  return {
-    total,
-    human,
-    bot,
-    botPercentage: parseFloat(botPercentage),
-  };
 }

@@ -106,117 +106,6 @@ const progressTracker = {
 };
 
 // ============================================================================
-// INTERNAL HELPER FUNCTIONS
-// ============================================================================
-
-/**
- * Check if content has extensive comments
- * @private
- */
-function hasExtensiveComments(content) {
-  if (!content || typeof content !== 'string') {
-    return false;
-  }
-
-  // Calculate approximate comment density
-  const contentLength = content.length;
-  if (contentLength === 0) return false;
-
-  let commentLines = 0;
-  let codeLines = 0;
-
-  // Count lines that appear to be comments
-  const lines = content.split('\n');
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    // Skip empty lines
-    if (trimmed === '') continue;
-
-    // Check for common comment patterns across many languages
-    if (
-      // C-style comments
-      trimmed.startsWith('//') ||
-      trimmed.startsWith('/*') ||
-      trimmed.startsWith('*') ||
-      // Script-style comments
-      trimmed.startsWith('#') ||
-      // HTML/XML comments
-      trimmed.startsWith('<!--') ||
-      // Python doc comments
-      trimmed.startsWith('"""') ||
-      trimmed.startsWith("'''") ||
-      // JavaDoc style
-      trimmed.startsWith('///') ||
-      trimmed.startsWith('//!') ||
-      // Lisp/Clojure style
-      trimmed.startsWith(';;') ||
-      // Haskell style
-      trimmed.startsWith('--') ||
-      // Documentation-specific formats
-      trimmed.startsWith('@param') ||
-      trimmed.startsWith('@return') ||
-      trimmed.startsWith('@example') ||
-      // Plain English with minimal symbols likely indicates comments/docs
-      (line.length > 30 && !/[;{}=()<>[\]]/.test(line) && /^[A-Z]/.test(trimmed))
-    ) {
-      commentLines++;
-    } else {
-      codeLines++;
-    }
-  }
-
-  // More flexible criteria - recognize even modest commenting
-  const totalLines = commentLines + codeLines;
-
-  // Low threshold for small snippets, higher for larger ones
-  if (totalLines < 10) {
-    return commentLines >= 2; // For very small snippets, even a couple of comments is good
-  } else if (totalLines < 30) {
-    return commentLines >= 3; // For medium-sized snippets
-  } else {
-    // For larger files, use a percentage but with a reasonable minimum
-    return commentLines >= 5 && commentLines / totalLines >= 0.15; // At least 15% comments
-  }
-}
-
-/**
- * Check if two languages are similar
- * @private
- */
-function isSimilarLanguage(lang1, lang2) {
-  if (!lang1 || !lang2) return false;
-
-  // Normalize languages
-  lang1 = lang1.toLowerCase();
-  lang2 = lang2.toLowerCase();
-
-  // Don't penalize unknown languages
-  if (lang1 === 'unknown' || lang2 === 'unknown') return true;
-
-  // Define groups of similar languages
-  const languageGroups = [
-    // JavaScript ecosystem
-    ['javascript', 'typescript', 'jsx', 'tsx'],
-    // Web technologies
-    ['html', 'css', 'scss', 'less', 'sass'],
-    // JVM languages
-    ['java', 'kotlin', 'scala', 'groovy'],
-    // .NET languages
-    ['csharp', 'fsharp', 'vb'],
-    // C-like languages
-    ['c', 'cpp', 'c++', 'cxx', 'h', 'hpp'],
-    // Shell scripting
-    ['bash', 'sh', 'zsh', 'shell'],
-    // Python-like
-    ['python', 'jupyter'],
-  ];
-
-  // Check if languages are in the same group
-  return languageGroups.some((group) => group.includes(lang1) && group.includes(lang2));
-}
-
-// ============================================================================
 // EMBEDDING MODEL MANAGEMENT
 // ============================================================================
 
@@ -516,18 +405,7 @@ export async function initializeTables() {
 }
 
 /**
- * Get database connection and ensure tables exist (LEGACY - for backward compatibility)
- * @private
- * @returns {Promise<lancedb.Connection>} Initialized database object
- */
-async function initializeDB() {
-  const db = await getDBConnection();
-  // The logic to ensure tables exist is now centralized in getDB -> initializeTables
-  return db;
-}
-
-/**
- * Get database connection (alias for initializeDB - LEGACY)
+ * Get database connection
  * @private
  * @returns {Promise<lancedb.Connection>} Database connection
  */
@@ -537,50 +415,6 @@ async function getDB() {
     await initializeTables();
   }
   return db;
-}
-
-/**
- * Get a specific table instance (LIGHTWEIGHT OPERATION)
- * @param {string} tableName - Name of the table
- * @returns {Promise<lancedb.Table | null>} Table object or null if not found/error
- */
-async function getTableInstance(tableName) {
-  try {
-    const db = await getDBConnection();
-    const tableNames = await db.tableNames();
-    if (tableNames.includes(tableName)) {
-      return await db.openTable(tableName);
-    }
-    console.warn(chalk.yellow(`Table ${tableName} does not exist. Call initializeTables() first.`));
-    return null;
-  } catch (error) {
-    console.error(chalk.red(`Error opening table ${tableName}: ${error.message}`), error);
-    return null;
-  }
-}
-
-/**
- * Get file embeddings table
- * @returns {Promise<lancedb.Table | null>}
- */
-async function getFileEmbeddingsTable() {
-  return getTableInstance(FILE_EMBEDDINGS_TABLE);
-}
-
-/**
- * Get document chunk embeddings table
- * @returns {Promise<lancedb.Table | null>}
- */
-async function getDocumentChunkTable() {
-  return getTableInstance(DOCUMENT_CHUNK_TABLE);
-}
-
-/**
- * Get PR comments table
- * @returns {Promise<lancedb.Table | null>}
- */
-async function getPRCommentsTableInstance() {
-  return getTableInstance(PR_COMMENTS_TABLE);
 }
 
 /**
@@ -846,101 +680,6 @@ async function getTable(tableName) {
 // ============================================================================
 
 /**
- * Generate embeddings for a specific file using fastembed and store them in LanceDB
- * @param {string} filePath - Path to the file
- * @param {string} content - Content of the file
- * @param {string} baseDir - Base directory for relative path calculation
- * @returns {Promise<{path: string, success: boolean} | null>} Result or null on error
- */
-async function generateFileEmbeddings(filePath, content, baseDir = process.cwd()) {
-  // Ensure consistent path handling - use the same base directory as batch processing
-  const absoluteFilePath = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(baseDir, filePath);
-  const relativePath = path.relative(baseDir, absoluteFilePath);
-  console.log(chalk.blue(`[generateFileEmbeddings] Starting for: ${relativePath}`)); // Log entry
-
-  try {
-    const truncatedContent = content; // No truncation - use full content for embeddings
-
-    if (content.length > 50000) {
-      console.log(chalk.blue(`[INFO] Processing large file ${relativePath} with ${content.length} characters (no truncation)`));
-    }
-
-    // *** 1. Calculate embedding explicitly ***
-    const embedding = await calculateEmbedding(truncatedContent);
-
-    if (!embedding) {
-      console.error(chalk.red(`[generateFileEmbeddings] Failed to calculate embedding for: ${relativePath}. Skipping add.`));
-      return null; // Indicate failure if embedding is null
-    }
-    debug(`[generateFileEmbeddings] Embedding calculated for ${relativePath}, length: ${embedding.length}`);
-
-    const db = await getDB();
-    const table = await getTable(FILE_EMBEDDINGS_TABLE);
-    if (!table) {
-      // This might happen if ensureTablesExist failed earlier
-      console.error(chalk.red(`[generateFileEmbeddings] Table ${FILE_EMBEDDINGS_TABLE} not found!`));
-      throw new Error(`Table ${FILE_EMBEDDINGS_TABLE} not found during embedding generation.`);
-    }
-
-    const contentHash = createHash('md5').update(truncatedContent).digest('hex').substring(0, 8);
-    const fileId = `${relativePath}#${contentHash}`; // Use relative path in ID for consistency
-
-    // Get file stats for modification time
-    const stats = fs.statSync(absoluteFilePath);
-
-    const record = {
-      vector: embedding, // Include calculated embedding (should be Array<number>)
-      id: fileId,
-      content: truncatedContent,
-      type: 'file',
-      name: path.basename(absoluteFilePath),
-      path: relativePath, // Store consistent relative path
-      project_path: path.resolve(baseDir), // Add project path for proper isolation
-      language: detectLanguageFromExtension(path.extname(absoluteFilePath)),
-      content_hash: contentHash, // Add the missing content_hash field
-      last_modified: stats.mtime.toISOString(), // Add modification time
-    };
-
-    debug(`[generateFileEmbeddings] Prepared record for ${relativePath}: ID=${record.id}, Vector length=${record.vector?.length}`);
-    if (record.vector?.length !== EMBEDDING_DIMENSIONS) {
-      console.error(chalk.red(`[generateFileEmbeddings] !!! Vector dimension mismatch before add for ${relativePath} !!!`));
-      return null; // Don't add invalid record
-    }
-
-    // Delete existing before adding (keep existing logic)
-    try {
-      await table.delete(`id = '${fileId.replace(/'/g, "''")}'`);
-    } catch (deleteError) {
-      if (!deleteError.message.includes('Record not found') && !deleteError.message.includes('cannot find')) {
-        debug(`[generateFileEmbeddings] Error deleting existing record for id ${fileId}: ${deleteError.message}`);
-      } else {
-        debug(`[generateFileEmbeddings] No existing record to delete for id ${fileId}`);
-      }
-    }
-
-    // *** 2. Add record with specific try/catch ***
-    debug(`[generateFileEmbeddings] Attempting table.add for: ${record.path}`);
-    try {
-      await table.add([record]);
-      console.log(chalk.green(`[generateFileEmbeddings] Successfully added record for: ${record.path}`)); // Log success
-      return { path: absoluteFilePath, success: true };
-    } catch (addError) {
-      console.error(
-        chalk.red(`[generateFileEmbeddings] !!! Error during table.add for ${record.path}: ${addError.message}`),
-        addError.stack
-      );
-      // Rethrow or return null depending on how processFileWithRetries handles it
-      // Let's return null to indicate failure for this specific file
-      return null;
-    }
-  } catch (error) {
-    // Catch errors from getDB, getTable, calculateEmbedding etc.
-    console.error(chalk.red(`[generateFileEmbeddings] Overall error for ${relativePath}: ${error.message}`), error.stack);
-    return null; // Indicate failure
-  }
-}
-
-/**
  * Generate directory structure string
  * @param {Object} options - Options for generating directory structure
  * @returns {string} Directory structure as a string
@@ -1001,7 +740,7 @@ const generateDirectoryStructure = (options = {}) => {
 const generateDirectoryStructureEmbedding = async (options = {}) => {
   console.log(chalk.cyan('[generateDirEmb] Starting...')); // Log entry
   try {
-    const db = await getDB();
+    await getDB();
     const table = await getTable(FILE_EMBEDDINGS_TABLE);
     if (!table) {
       throw new Error(`[generateDirEmb] Table ${FILE_EMBEDDINGS_TABLE} not found.`);
@@ -1082,7 +821,6 @@ const generateDirectoryStructureEmbedding = async (options = {}) => {
  */
 async function processBatchEmbeddings(filePaths, options = {}) {
   const {
-    concurrency = 10, // Concurrency for pLimit if we reintroduce it for I/O
     verbose = false,
     excludePatterns = [],
     respectGitignore = true,
@@ -1094,15 +832,13 @@ async function processBatchEmbeddings(filePaths, options = {}) {
 
   try {
     await initEmbeddingModel(); // Ensure model is ready
-  } catch (modelError) {
+  } catch {
     console.error(chalk.red('Failed to initialize embedding model. Aborting batch process.'));
     return { processed: 0, failed: filePaths.length, skipped: 0, excluded: 0, files: [], failedFiles: [...filePaths], excludedFiles: [] };
   }
 
   console.log(chalk.blue('Ensuring database tables exist before batch processing...'));
-  let db;
   try {
-    db = await getDB(); // This calls ensureTablesExist internally
     console.log(chalk.green('Database table check complete.'));
   } catch (dbError) {
     console.error(chalk.red(`Failed to initialize database or tables: ${dbError.message}. Aborting batch process.`));
@@ -1162,7 +898,7 @@ async function processBatchEmbeddings(filePaths, options = {}) {
         try {
           const absolutePath = path.resolve(resolvedCanonicalBaseDir, record.path);
           return absolutePath.startsWith(resolvedCanonicalBaseDir);
-        } catch (error) {
+        } catch {
           return false;
         }
       });
@@ -1225,7 +961,7 @@ async function processBatchEmbeddings(filePaths, options = {}) {
       // Store for further processing
       fileStatsMap.set(filePath, { absoluteFilePath, consistentRelativePath, stats });
       validFiles.push(filePath);
-    } catch (statError) {
+    } catch {
       results.skipped++;
       progressTracker.update('skipped');
       if (typeof onProgress === 'function') onProgress('skipped', filePath);
@@ -1529,7 +1265,6 @@ async function processBatchEmbeddings(filePaths, options = {}) {
   if (documentChunkTable) {
     const allDocChunksToEmbed = [];
     const allDocChunkRecordsToAdd = [];
-    const allDocChunkIdsToDelete = new Set(); // For specific chunk IDs if needed for granular updates
     const processedDocPathsForDeletion = new Set(); // Track parent doc paths whose chunks need deletion
 
     for (const filePath of filePaths) {
@@ -1758,80 +1493,6 @@ async function processBatchEmbeddings(filePaths, options = {}) {
   return results;
 }
 
-// processFileWithRetries - Modified slightly for clarity and error handling
-// THIS FUNCTION IS NO LONGER CALLED BY processBatchEmbeddings for file/block generation.
-// It might be kept for other single-file processing scenarios if any exist,
-// or removed if processBatchEmbeddings is the sole entry point for bulk processing.
-// For now, its content is largely absorbed/replaced.
-/**
- * Process a file with retries on failure
- * @private
- * @param {string} filePath - Path to the file
- * @param {boolean} verbose - Whether to log verbose output
- * @param {Object} options - Processing options
- * @returns {Promise<Object|null>} Processing result or null on failure
- */
-async function processFileWithRetries(filePath, verbose, options = {}) {
-  console.warn(
-    chalk.magenta(
-      `[WARN] processFileWithRetries was called for ${filePath}, but batch processing is now preferred. This path might be deprecated.`
-    )
-  );
-  let retries = 0;
-  let lastError = null;
-  const baseDir = options.baseDir || process.cwd();
-  const absoluteFilePath = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(baseDir, filePath);
-  const relativePath = path.relative(baseDir, absoluteFilePath); // Use consistent relative path for logging
-
-  while (retries < MAX_RETRIES) {
-    try {
-      const stats = fs.statSync(absoluteFilePath);
-      if (stats.size > 1024 * 1024) {
-        // 1MB limit
-        if (verbose) console.log(chalk.yellow(`Skipping large file (>1MB): ${relativePath}`));
-        // Need to update tracker here if skipped
-        // progressTracker.update('skipped'); // Add if skipped files aren't counted elsewhere
-        return; // Consider this skipped, not failed
-      }
-
-      let content = '';
-      try {
-        content = await fs.promises.readFile(absoluteFilePath, 'utf8');
-      } catch (readError) {
-        if (verbose) console.warn(chalk.yellow(`Skipping unreadable file: ${relativePath} - ${readError.message}`));
-        // progressTracker.update('skipped'); // Add if skipped files aren't counted elsewhere
-        return; // Consider this skipped, not failed
-      }
-
-      if (content.trim().length === 0) {
-        if (verbose) console.log(chalk.yellow(`Skipping empty file: ${relativePath}`));
-        // progressTracker.update('skipped'); // Add if skipped files aren't counted elsewhere
-        return; // Consider this skipped, not failed
-      }
-
-      // Generate file-level embedding and add to DB
-      const fileResult = await generateFileEmbeddings(absoluteFilePath, content, baseDir);
-      // generateFileEmbeddings now returns null on failure
-      if (fileResult === null) {
-        throw new Error(`generateFileEmbeddings failed for ${relativePath}`); // Throw to trigger retry
-      }
-
-      return; // Successfully processed file and blocks
-    } catch (error) {
-      lastError = error;
-      retries++;
-      console.error(chalk.yellow(`Retry ${retries}/${MAX_RETRIES} for ${relativePath}: ${error.message}`));
-      if (retries < MAX_RETRIES) {
-        await new Promise((resolve) => setTimeout(resolve, 1000 * Math.pow(2, retries - 1))); // Exponential backoff
-      }
-    }
-  }
-
-  // If loop finishes, all retries failed
-  console.error(chalk.red(`Failed processing ${relativePath} after ${MAX_RETRIES} retries: ${lastError?.message || 'Unknown error'}`));
-  throw lastError || new Error(`Failed processing ${relativePath} after ${MAX_RETRIES} retries.`); // Ensure an error is thrown
-}
-
 // --- Search and Similarity (Using Vector Search + Cosine) ---
 
 // +++ NEW HELPER FUNCTION +++
@@ -1909,7 +1570,7 @@ export const findRelevantDocs = async (queryText, options = {}) => {
       return [];
     }
 
-    const db = await getDB();
+    await getDB();
     const tableName = DOCUMENT_CHUNK_TABLE;
     const table = await getTable(tableName);
 
@@ -1976,7 +1637,7 @@ export const findRelevantDocs = async (queryText, options = {}) => {
     // Batch check file existence for better performance
     if (docsToCheck.length > 0) {
       debug(`[OPTIMIZATION] Batch checking existence of ${docsToCheck.length} documentation files`);
-      const existencePromises = docsToCheck.map(async ({ result, index, absolutePath, filePath }) => {
+      const existencePromises = docsToCheck.map(async ({ index, absolutePath, filePath }) => {
         try {
           await fs.promises.access(absolutePath, fs.constants.F_OK);
           return { index, exists: true };
@@ -2216,7 +1877,7 @@ export const findSimilarCode = async (queryText, options = {}) => {
       return [];
     }
 
-    const db = await getDB();
+    await getDB();
     const tableName = FILE_EMBEDDINGS_TABLE;
     const table = await getTable(tableName);
 
@@ -2581,7 +2242,7 @@ async function clearProjectEmbeddings(projectPath = process.cwd()) {
         try {
           const absolutePath = path.resolve(resolvedProjectPath, record.path);
           return absolutePath.startsWith(resolvedProjectPath);
-        } catch (error) {
+        } catch {
           return false;
         }
       });
@@ -2617,7 +2278,7 @@ async function clearProjectEmbeddings(projectPath = process.cwd()) {
         try {
           const absolutePath = path.resolve(resolvedProjectPath, record.original_document_path);
           return absolutePath.startsWith(resolvedProjectPath);
-        } catch (error) {
+        } catch {
           return false;
         }
       });
@@ -2787,9 +2448,9 @@ export function getProjectEmbeddings(projectPath = process.cwd()) {
  * @param {string} projectPath - Project path for context
  * @returns {Promise<lancedb.Table|null>} PR comments table or null
  */
-export async function getPRCommentsTable(projectPath = process.cwd()) {
+export async function getPRCommentsTable() {
   try {
-    const db = await getDB();
+    await getDB();
     return await getTable(PR_COMMENTS_TABLE);
   } catch (error) {
     console.error(chalk.red(`Error getting PR comments table: ${error.message}`));

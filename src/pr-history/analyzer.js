@@ -402,13 +402,11 @@ export class PRHistoryAnalyzer {
       const [owner, repo] = this.progress.repository.split('/');
 
       // Fetch all types of comments for this PR
-      const fetchStartTime = Date.now();
       const [reviewComments, issueComments, prFiles] = await Promise.all([
         this.githubClient.getPRReviewComments(owner, repo, pr.number),
         this.githubClient.getPRIssueComments(owner, repo, pr.number),
         this.githubClient.getPRFiles(owner, repo, pr.number),
       ]);
-      const fetchDuration = (Date.now() - fetchStartTime) / 1000;
 
       // Combine all comments
       const allComments = [
@@ -574,27 +572,4 @@ export class PRHistoryAnalyzer {
 
     return progress.getProgressSummary();
   }
-}
-
-/**
- * Convenience function to analyze a repository
- * @param {string} repository - Repository in format "owner/repo"
- * @param {string} token - GitHub API token
- * @param {Object} options - Analysis options
- * @returns {Promise<Object>} Analysis results
- */
-async function analyzePRHistory(repository, token, options = {}) {
-  const analyzer = new PRHistoryAnalyzer(options);
-  analyzer.initialize(token);
-  return analyzer.analyzeRepository(repository, options);
-}
-
-/**
- * Get status of PR analysis for repository
- * @param {string} repository - Repository name
- * @returns {Promise<Object>} Status information
- */
-async function getPRAnalysisStatus(repository) {
-  const analyzer = new PRHistoryAnalyzer();
-  return analyzer.getProgressStatus(repository);
 }

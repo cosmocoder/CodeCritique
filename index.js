@@ -11,17 +11,11 @@ import fs from 'fs';
 import { readFileSync } from 'fs';
 import path from 'path';
 import readline from 'readline';
-import { fileURLToPath } from 'url';
 import chalk from 'chalk';
 import { Spinner } from 'cli-spinner';
 import { program } from 'commander';
 import { glob } from 'glob';
-import {
-  reviewDirectory as cagReviewDirectory,
-  reviewFile as cagReviewFile,
-  reviewFiles as cagReviewFiles,
-  reviewPullRequest as cagReviewPullRequest,
-} from './cag-review.js';
+import { reviewFile as cagReviewFile, reviewFiles as cagReviewFiles, reviewPullRequest as cagReviewPullRequest } from './cag-review.js';
 import * as embeddings from './embeddings.js';
 import { PRHistoryAnalyzer } from './src/pr-history/analyzer.js';
 import {
@@ -33,25 +27,8 @@ import {
   validateGitHubToken,
 } from './src/pr-history/cli-utils.js';
 import { cleanupClassifier, clearPRComments, getPRCommentsStats, hasPRComments } from './src/pr-history/database.js';
-import {
-  checkBranchExists,
-  detectFileType,
-  detectLanguageFromExtension,
-  ensureBranchExists,
-  findBaseBranch,
-  getSupportedFileExtensions,
-  shouldProcessFile,
-} from './utils.js';
+import { ensureBranchExists, findBaseBranch } from './utils.js';
 
-// Import the refactored CAG review functions
-
-// Import PR history analyzer and CLI utilities
-
-// Get __dirname equivalent in ESM
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Package info
 const packageJson = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
 // Configure command-line interface
@@ -396,8 +373,6 @@ async function runCodeReview(options) {
       process.exit(1);
     }
   } catch (err) {
-    const endTime = Date.now();
-    const duration = ((endTime - startTime) / 1000).toFixed(2);
     console.error(chalk.red(`\nError during code review (${operationDescription}):`), err.message);
     console.error(err.stack);
     // Clean up resources even on error
@@ -536,7 +511,7 @@ async function generateEmbeddings(options) {
       respectGitignore: options.gitignore !== false,
       baseDir: baseDir,
       batchSize: 100, // Set a reasonable batch size
-      onProgress: (status, file) => {
+      onProgress: (status) => {
         // Update counters based on status
         if (status === 'processed') {
           processedCount++;
@@ -904,7 +879,7 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
  * @param {Array<Object>} reviewResults - Array of individual file review results from cag-review
  * @param {Object} cliOptions - Command line options
  */
-function outputJson(reviewResults, cliOptions) {
+function outputJson(reviewResults) {
   // Structure the output to be informative
   const output = {
     summary: {
@@ -941,7 +916,7 @@ function outputJson(reviewResults, cliOptions) {
  * @param {Array<Object>} reviewResults - Array of individual file review results
  * @param {Object} cliOptions - Command line options
  */
-function outputMarkdown(reviewResults, cliOptions) {
+function outputMarkdown(reviewResults) {
   console.log('# AI Code Review Results (CAG Approach)\n');
 
   const totalFiles = reviewResults.length;

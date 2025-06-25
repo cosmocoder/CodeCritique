@@ -392,132 +392,6 @@ function detectFileType(filePath, content = '') {
 }
 
 /**
- * Get list of supported file extensions
- *
- * @returns {Array<string>} Array of supported file extensions (with dots)
- */
-function getSupportedFileExtensions() {
-  // Return the constant list, ensuring uniqueness just in case
-  return [...new Set(ALL_SUPPORTED_EXTENSIONS)];
-}
-
-/**
- * Parse a .gitignore file and return an array of patterns
- *
- * @param {string} gitignorePath - Path to the .gitignore file
- * @returns {Array<string>} Array of gitignore patterns
- */
-function parseGitignoreFile(gitignorePath) {
-  try {
-    if (!fs.existsSync(gitignorePath)) {
-      return [];
-    }
-
-    const content = fs.readFileSync(gitignorePath, 'utf8');
-    return content
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith('#'))
-      .map((pattern) => {
-        // Convert gitignore patterns to minimatch patterns
-        if (pattern.startsWith('!')) {
-          // Negated pattern
-          return `!${pattern.substring(1)}`;
-        }
-
-        // Handle directory patterns (ending with /)
-        if (pattern.endsWith('/')) {
-          return `${pattern}**`;
-        }
-
-        return pattern;
-      });
-  } catch (error) {
-    console.error(`Error parsing gitignore file ${gitignorePath}:`, error.message);
-    return [];
-  }
-}
-
-/**
- * Find all .gitignore files in a directory and its parent directories
- *
- * @param {string} startDir - Directory to start searching from
- * @returns {Array<string>} Array of .gitignore file paths
- */
-function findGitignoreFiles(startDir) {
-  const gitignoreFiles = [];
-  let currentDir = startDir;
-
-  // Check the current directory and all parent directories
-  while (currentDir) {
-    const gitignorePath = path.join(currentDir, '.gitignore');
-    if (fs.existsSync(gitignorePath)) {
-      gitignoreFiles.push(gitignorePath);
-    }
-
-    // Move to parent directory
-    const parentDir = path.dirname(currentDir);
-    if (parentDir === currentDir) {
-      // We've reached the root directory
-      break;
-    }
-    currentDir = parentDir;
-  }
-
-  return gitignoreFiles;
-}
-
-/**
- * Find all .gitignore files that could affect a given file path
- * This includes .gitignore files in the file's directory, parent directories,
- * and any relevant subdirectories
- *
- * @param {string} filePath - Path to the file
- * @returns {Array<string>} Array of paths to relevant .gitignore files
- */
-function findRelevantGitignoreFiles(filePath) {
-  const fileDir = path.dirname(filePath);
-  const gitignoreFiles = findGitignoreFiles(fileDir);
-
-  // Sort gitignore files by directory depth (deepest first)
-  // This ensures that more specific (nested) .gitignore files take precedence
-  gitignoreFiles.sort((a, b) => {
-    const depthA = a.split(path.sep).length;
-    const depthB = b.split(path.sep).length;
-    return depthB - depthA; // Sort descending (deepest first)
-  });
-
-  return gitignoreFiles;
-}
-
-/**
- * Check if a file should be excluded based on gitignore patterns
- *
- * @param {string} filePath - Path to the file
- * @param {Array<string>} patterns - Array of gitignore patterns
- * @param {string} baseDir - Base directory for relative paths
- * @returns {boolean} Whether the file should be excluded
- */
-function isExcludedByGitignore(filePath, patterns, baseDir) {
-  // Convert absolute path to relative path from baseDir
-  const relativePath = path.relative(baseDir, filePath);
-
-  // Check each pattern
-  let excluded = false;
-
-  for (const pattern of patterns) {
-    const isNegated = pattern.startsWith('!');
-    const actualPattern = isNegated ? pattern.substring(1) : pattern;
-
-    if (minimatch(relativePath, actualPattern, { dot: true })) {
-      excluded = !isNegated; // If negated, this file is explicitly included
-    }
-  }
-
-  return excluded;
-}
-
-/**
  * Checks if a file path looks like a test file based on common patterns.
  * Tries to be relatively language/framework agnostic.
  * @param {string} filePath - Path to the file.
@@ -534,7 +408,7 @@ function isTestFile(filePath) {
 }
 
 // +++ Add isDocumentationFile helper from embeddings.js +++
-function isDocumentationFile(filePath, language) {
+function isDocumentationFile(filePath) {
   const lowerPath = filePath.toLowerCase();
   const filename = lowerPath.split('/').pop();
   const extension = path.extname(lowerPath);
@@ -592,7 +466,7 @@ function isDocumentationFile(filePath, language) {
  * @param {string} options.baseDir - Base directory for relative paths
  * @returns {boolean} Whether the file should be processed
  */
-function shouldProcessFile(filePath, content = '', options = {}) {
+function shouldProcessFile(filePath, _, options = {}) {
   const { excludePatterns = [], respectGitignore = true, baseDir = process.cwd() } = options;
 
   // Skip files that are too large (>1MB)
@@ -601,7 +475,7 @@ function shouldProcessFile(filePath, content = '', options = {}) {
     if (stats.size > 1024 * 1024) {
       return false;
     }
-  } catch (error) {
+  } catch {
     // If we can't get file stats, assume it's processable
   }
 
@@ -684,7 +558,7 @@ function shouldProcessFile(filePath, content = '', options = {}) {
 
       // If we get here, the file is ignored by git
       return false;
-    } catch (error) {
+    } catch {
       // If git check-ignore exits with non-zero status, the file is not ignored
       // This is expected behavior, so we continue processing
     }
@@ -893,7 +767,7 @@ function inferContextFromCodeContent(codeContent, language) {
 }
 
 // Full, corrected, and enhanced inferContextFromDocumentContent:
-async function inferContextFromDocumentContent(docPath, h1Content, chunksSample = [], languageOfCodeSnippet = 'typescript') {
+async function inferContextFromDocumentContent(docPath, h1Content, chunksSample = []) {
   const context = {
     area: 'Unknown',
     keywords: [],
@@ -1185,7 +1059,7 @@ function checkBranchExists(branchName, workingDir = process.cwd()) {
   try {
     execSync(`git show-ref --verify --quiet refs/heads/${branchName}`, { cwd: workingDir });
     return true;
-  } catch (error) {
+  } catch {
     // Command returns non-zero exit code if branch doesn't exist
     return false;
   }
@@ -1211,7 +1085,7 @@ function ensureBranchExists(branchName, workingDir = process.cwd()) {
     try {
       execSync(`git fetch origin ${branchName}:${branchName}`, { stdio: 'pipe', cwd: workingDir });
       console.log(chalk.green(`Successfully fetched branch '${branchName}' from origin`));
-    } catch (fetchError) {
+    } catch {
       // If direct fetch fails, try fetching all branches and then checking
       console.log(chalk.yellow(`Direct fetch failed, trying to fetch all branches...`));
       execSync('git fetch origin', { stdio: 'pipe', cwd: workingDir });
@@ -1222,7 +1096,7 @@ function ensureBranchExists(branchName, workingDir = process.cwd()) {
         // Create local tracking branch
         execSync(`git checkout -b ${branchName} origin/${branchName}`, { stdio: 'pipe', cwd: workingDir });
         console.log(chalk.green(`Successfully created local branch '${branchName}' tracking origin/${branchName}`));
-      } catch (remoteError) {
+      } catch {
         throw new Error(`Branch '${branchName}' not found locally or on remote origin`);
       }
     }
@@ -1250,7 +1124,7 @@ function findBaseBranch(workingDir = process.cwd()) {
     try {
       execSync(`git show-ref --verify --quiet refs/remotes/origin/${branch}`, { cwd: workingDir });
       return branch;
-    } catch (error) {
+    } catch {
       // Branch doesn't exist on remote either, continue to next candidate
     }
   }
@@ -1344,7 +1218,6 @@ export {
   debug,
   detectLanguageFromExtension,
   detectFileType,
-  getSupportedFileExtensions,
   shouldProcessFile,
   isTestFile,
   isDocumentationFile,
@@ -1352,9 +1225,7 @@ export {
   extractMarkdownChunks,
   inferContextFromCodeContent,
   inferContextFromDocumentContent,
-  checkBranchExists,
   ensureBranchExists,
   findBaseBranch,
-  getFileDiff,
   getChangedLinesInfo,
 };

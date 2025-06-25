@@ -5,10 +5,9 @@
  * and classifies comments for storage in the embeddings database.
  */
 
-import { createHash } from 'node:crypto';
 import chalk from 'chalk';
-import { calculateEmbedding, calculateQueryEmbedding } from '../../embeddings.js';
-import { filterBotComments, getBotFilterStats } from './bot-detector.js';
+import { calculateEmbedding } from '../../embeddings.js';
+import { filterBotComments } from './bot-detector.js';
 
 export class PRCommentProcessor {
   constructor() {
@@ -132,7 +131,7 @@ export class PRCommentProcessor {
       let classification;
       try {
         classification = await this.classifyComment(comment.body, codeContext);
-      } catch (classificationError) {
+      } catch {
         // Graceful degradation on classification failure
         classification = {
           issue_category: 'unknown',

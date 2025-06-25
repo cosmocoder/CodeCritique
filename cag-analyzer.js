@@ -34,8 +34,6 @@ const MAX_QUERY_CONTEXT_LENGTH = 1500;
 const MAX_EMBEDDING_CONTENT_LENGTH = 10000;
 const DEFAULT_TRUNCATE_LINES = 300;
 const GUIDELINE_TRUNCATE_LINES = 400;
-const CONTENT_LENGTH_BONUS_THRESHOLD = 300;
-const CONTENT_LENGTH_PENALTY_THRESHOLD = 150;
 const DEBUG_PREVIEW_LENGTH = 300;
 const RESPONSE_TRUNCATE_LENGTH = 1000;
 const MAX_PR_COMMENTS = 50;
@@ -83,72 +81,6 @@ function formatContextItems(items, type = 'code') {
 
     return baseFormatted;
   });
-}
-
-// Helper function for content scoring (project-agnostic)
-function calculateContentScore(content) {
-  let score = 0;
-  if (!content) return 0;
-
-  const lines = content.split('\n');
-  const lineCount = lines.length;
-  const contentLength = content.length;
-
-  // Basic length heuristic
-  if (contentLength > CONTENT_LENGTH_BONUS_THRESHOLD) score += 0.05; // Bonus for non-trivial content
-  if (contentLength < CONTENT_LENGTH_PENALTY_THRESHOLD) score -= 0.1; // Penalty for very short
-
-  // Code block presence (simple check)
-  if (content.includes('```')) score += 0.15;
-
-  // Technical keywords (generic list, case-insensitive)
-  const techKeywords = [
-    'component',
-    'module',
-    'class',
-    'function',
-    'method',
-    'api',
-    'props',
-    'state',
-    'hook',
-    'service',
-    'endpoint',
-    'request',
-    'response',
-    'error handling',
-    'testing',
-    'style guide',
-    'architecture',
-    'pattern',
-    'schema',
-    'database',
-    'query',
-    'mutation',
-    'event',
-    'callback',
-    'async',
-    'await',
-    'promise',
-  ];
-  const lowerContent = content.toLowerCase();
-  let keywordCount = 0;
-  techKeywords.forEach((kw) => {
-    if (lowerContent.includes(kw)) {
-      keywordCount++;
-    }
-  });
-  score += Math.min(0.25, keywordCount * 0.02); // Bonus for keywords, capped slightly higher
-
-  // Penalize README-like structure (heuristic: many '#' headers relative to length)
-  const topLevelHeaders = content.match(/^# .*$/gm); // Count lines starting with '# '
-  if (topLevelHeaders && lineCount > 0 && topLevelHeaders.length / lineCount > 0.1) {
-    // If > 10% of lines are top-level headers
-    score -= 0.2; // Stronger penalty
-  }
-
-  // Clamp score to prevent extreme values
-  return Math.max(-0.3, Math.min(0.3, score));
 }
 
 // --- Helper: createGuidelineQueryForLLMRetrieval ---
@@ -255,11 +187,9 @@ async function analyzeFile(filePath, options = {}) {
 
     // Read file content - use diff content if this is a diff-only review
     let content;
-    let reviewContext = 'full_file';
 
     if (options.diffOnly && options.diffContent) {
       content = options.diffContent;
-      reviewContext = 'diff_only';
       console.log(chalk.blue(`Analyzing diff only for ${path.basename(filePath)}`));
     } else {
       content = fs.readFileSync(filePath, 'utf8');
@@ -572,7 +502,6 @@ async function analyzeFile(filePath, options = {}) {
     // --- Stage 4 (was PHASE 5): SELECT FINAL SNIPPETS FOR LLM ---
     console.log(chalk.blue('--- Stage 4: Selecting Final Snippets for LLM ---'));
     const MAX_FINAL_DOCUMENTS = 4;
-    const MAX_CHUNKS_PER_DOCUMENT = 1; // <<< Changed to 1 as per discussion to get best chunk from best docs
     const MIN_DOC_SCORE_FOR_INCLUSION = 0.3; // Minimum score to include a document
     let finalGuidelineSnippets = [];
 
@@ -1595,7 +1524,7 @@ function parseAnalysisResponse(response) {
     try {
       const parsed = JSON.parse(response);
       return parsed;
-    } catch (directJsonError) {
+    } catch {
       console.log(chalk.yellow('Response is not directly parseable as JSON, trying to extract JSON...'));
     }
 
@@ -1657,19 +1586,11 @@ function parseAnalysisResponse(response) {
  */
 async function getPRCommentContext(filePath, options = {}) {
   try {
-    const {
-      dateRange = null,
-      maxComments = 20,
-      similarityThreshold = 0.15,
-      projectPath = process.cwd(),
-      precomputedQueryEmbedding = null,
-    } = options;
+    const { maxComments = 20, similarityThreshold = 0.15, projectPath = process.cwd(), precomputedQueryEmbedding = null } = options;
 
     // Normalize file path for comparison
     const normalizedPath = path.normalize(filePath);
-    const fileExtension = path.extname(normalizedPath);
     const fileName = path.basename(normalizedPath);
-    const directoryPath = path.dirname(normalizedPath);
 
     debug(`[getPRCommentContext] Getting context for ${normalizedPath}`);
 
@@ -1789,113 +1710,6 @@ async function getPRCommentContext(filePath, options = {}) {
 }
 
 /**
- * Score comment relevance to a specific file path
- */
-async function scoreCommentRelevance(comments, targetFilePath, options = {}) {
-  const { relevanceThreshold = 0.3 } = options;
-  const targetFileName = path.basename(targetFilePath);
-  const targetExtension = path.extname(targetFilePath);
-
-  const scoredComments = [];
-
-  for (const comment of comments) {
-    let score = 0;
-
-    // Direct file path match (highest score)
-    if (comment.file_path === targetFilePath) {
-      score += 1.0;
-    }
-    // File name match in different directory
-    else if (comment.file_path && path.basename(comment.file_path) === targetFileName) {
-      score += 0.7;
-    }
-    // Same file extension
-    else if (comment.file_path && path.extname(comment.file_path) === targetExtension) {
-      score += 0.3;
-    }
-
-    // Content relevance based on keywords
-    if (comment.body) {
-      const contentScore = calculateContentRelevance(comment.body, targetFilePath);
-      score += contentScore * 0.5;
-    }
-
-    // Review type weighting
-    if (comment.comment_type === 'review_comment') {
-      score += 0.2; // Inline code comments are more relevant
-    }
-
-    // Recency bonus (more recent comments slightly more relevant)
-    if (comment.created_at) {
-      const daysSinceComment = (Date.now() - new Date(comment.created_at).getTime()) / (1000 * 60 * 60 * 24);
-      const recencyBonus = Math.max(0, 0.1 - (daysSinceComment / 365) * 0.1); // Small bonus, decaying over year
-      score += recencyBonus;
-    }
-
-    // Only include comments above threshold
-    if (score >= relevanceThreshold) {
-      scoredComments.push({
-        ...comment,
-        relevanceScore: score,
-      });
-    }
-  }
-
-  return scoredComments;
-}
-
-/**
- * Calculate content relevance based on keywords and context
- */
-function calculateContentRelevance(commentBody, targetFilePath) {
-  if (!commentBody || !targetFilePath) return 0;
-
-  const lowerBody = commentBody.toLowerCase();
-  const fileName = path.basename(targetFilePath).toLowerCase();
-  const fileNameWithoutExt = path.basename(targetFilePath, path.extname(targetFilePath)).toLowerCase();
-
-  let relevanceScore = 0;
-
-  // File name mentions
-  if (lowerBody.includes(fileName)) {
-    relevanceScore += 0.5;
-  }
-  if (lowerBody.includes(fileNameWithoutExt)) {
-    relevanceScore += 0.3;
-  }
-
-  // Technical keywords that might be relevant
-  const technicalKeywords = [
-    'function',
-    'method',
-    'class',
-    'component',
-    'module',
-    'import',
-    'export',
-    'bug',
-    'error',
-    'fix',
-    'issue',
-    'problem',
-    'refactor',
-    'optimize',
-    'test',
-    'testing',
-    'coverage',
-    'performance',
-    'security',
-    'validation',
-  ];
-
-  const keywordMatches = technicalKeywords.filter((keyword) => lowerBody.includes(keyword)).length;
-
-  relevanceScore += Math.min(keywordMatches * 0.05, 0.3); // Cap at 0.3
-
-  return Math.min(relevanceScore, 1.0);
-}
-
-/**
  * Extract patterns from historical comments
  */
 function extractCommentPatterns(comments) {
@@ -1986,7 +1800,7 @@ function formatCommentForContext(comment) {
  */
 async function performHolisticPRAnalysis(options) {
   try {
-    const { prFiles, unifiedContext, prContext } = options;
+    const { prFiles, unifiedContext } = options;
 
     console.log(chalk.blue(`🔍 Performing holistic analysis of ${prFiles.length} files with unified context...`));
 
@@ -2120,4 +1934,4 @@ async function performHolisticPRAnalysis(options) {
   }
 }
 
-export { analyzeFile, getPRCommentContext };
+export { analyzeFile };

@@ -6,14 +6,11 @@
  * All database connection, table management, and indexing is handled by embeddings.js.
  */
 
-import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'url';
 import { pipeline } from '@huggingface/transformers';
-import * as lancedb from '@lancedb/lancedb';
 import chalk from 'chalk';
 import stopwords from 'stopwords-iso/stopwords-iso.json' with { type: 'json' };
-import { calculateCosineSimilarity, calculateQueryEmbedding, CONSTANTS, getPRCommentsTable } from '../../embeddings.js';
+import { calculateQueryEmbedding, CONSTANTS, getPRCommentsTable } from '../../embeddings.js';
 
 // Import constants from embeddings.js to avoid duplication
 const { EMBEDDING_DIMENSIONS, PR_COMMENTS_TABLE } = CONSTANTS;
@@ -474,7 +471,7 @@ try {
     device: 'cpu',
   });
   console.log(chalk.green('✓ Local MobileBERT classifier initialized successfully'));
-} catch (error) {
+} catch {
   console.warn(chalk.yellow('⚠ Failed to initialize MobileBERT, trying fallback model...'));
   try {
     // Fallback to a smaller, more stable model

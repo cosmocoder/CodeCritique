@@ -8,23 +8,9 @@
 
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import chalk from 'chalk';
-import * as glob from 'glob';
-import { analyzeFile, getPRCommentContext } from './cag-analyzer.js';
-import { findRelevantDocs, findSimilarCode } from './embeddings.js';
-import {
-  detectFileType,
-  detectLanguageFromExtension,
-  findBaseBranch,
-  getChangedLinesInfo,
-  getFileDiff,
-  shouldProcessFile,
-} from './utils.js';
-
-// Get __dirname equivalent in ESM
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { analyzeFile } from './cag-analyzer.js';
+import { detectFileType, detectLanguageFromExtension, findBaseBranch, getChangedLinesInfo, shouldProcessFile } from './utils.js';
 
 /**
  * Review a single file using CAG approach
@@ -142,134 +128,6 @@ async function reviewFiles(filePaths, options = {}) {
       message: 'Failed to review files due to an unexpected error',
     };
   }
-}
-
-/**
- * Review a directory using dynamic context retrieval.
- *
- * @param {string} dirPath - Path to the directory to review
- * @param {Object} options - Review options (includes filePattern, excludePatterns, and options for reviewFiles)
- * @returns {Promise<Object>} Aggregated review results
- */
-async function reviewDirectory(dirPath, options = {}) {
-  try {
-    const verbose = options.verbose || false;
-    if (verbose) {
-      console.log(chalk.blue(`Reviewing directory: ${dirPath}`));
-    }
-
-    // Check if directory exists
-    if (!fs.existsSync(dirPath)) {
-      throw new Error(`Directory not found: ${dirPath}`);
-    }
-
-    // Find files to review using glob
-    // Default patterns match common code files, excluding node_modules etc.
-    const filePattern = options.filePattern || '**/*.{js,jsx,ts,tsx,py,rb,java,go,php,cs,c,cpp,html,css,scss,json,md,yml,yaml}';
-    const defaultExcludes = [
-      '**/node_modules/**',
-      '**/dist/**',
-      '**/build/**',
-      '**/.*/**',
-      '**/*.min.*',
-      '**/vendor/**',
-      '**/tmp/**',
-      '**/coverage/**',
-    ];
-    const excludePatterns = options.excludePatterns ? [...defaultExcludes, ...options.excludePatterns] : defaultExcludes;
-
-    const filePaths = await findFiles(dirPath, filePattern, excludePatterns, verbose);
-
-    if (filePaths.length === 0) {
-      const message = 'No files found matching the pattern in the specified directory (respecting exclusions).';
-      console.log(chalk.yellow(message));
-      return {
-        success: true,
-        message: message,
-        results: [],
-      };
-    }
-
-    if (verbose) {
-      console.log(chalk.green(`Found ${filePaths.length} files to review in directory`));
-    }
-
-    // Review the found files, passing options down
-    return await reviewFiles(filePaths, options);
-  } catch (error) {
-    console.error(chalk.red(`Error reviewing directory ${dirPath}: ${error.message}`));
-    console.error(error.stack);
-    return {
-      success: false,
-      error: error.message,
-      message: 'Failed to review directory',
-      results: [],
-    };
-  }
-}
-
-/**
- * Find files in a directory matching a pattern using glob.
- *
- * @param {string} dirPath - Directory path
- * @param {string} pattern - File pattern (glob syntax)
- * @param {Array<string>} excludePatterns - Patterns to exclude
- * @param {boolean} verbose - Log detailed output
- * @returns {Promise<Array<string>>} Array of absolute file paths
- */
-function findFiles(dirPath, pattern, excludePatterns = [], verbose = false) {
-  return new Promise((resolve, reject) => {
-    const globOptions = {
-      cwd: dirPath,
-      ignore: excludePatterns,
-      absolute: true, // Get absolute paths
-      nodir: true, // Exclude directories
-      dot: false, // Exclude dotfiles/dotdirectories by default (can be overridden in pattern)
-    };
-
-    if (verbose) {
-      console.log(`Glob pattern: ${pattern}`);
-      console.log(`Glob options:`, globOptions);
-    }
-
-    glob
-      .glob(pattern, globOptions)
-      .then((files) => {
-        if (verbose) {
-          console.log(`Glob found ${files.length} initial matches.`);
-        }
-        // Filter files based on shouldProcessFile (e.g., binary check)
-        // This ensures we don't try to read/analyze unsuitable files found by glob
-        const filteredFiles = files.filter((file) => {
-          try {
-            // Basic check: Does the file exist and is it a file?
-            const stat = fs.statSync(file);
-            if (!stat.isFile()) return false;
-
-            // Content check using shouldProcessFile
-            const content = fs.readFileSync(file, 'utf8');
-            const shouldProcess = shouldProcessFile(file, content);
-            if (!shouldProcess && verbose) {
-              console.log(`Excluding file based on content check: ${file}`);
-            }
-            return shouldProcess;
-          } catch (error) {
-            // Handle potential read errors gracefully
-            console.warn(chalk.yellow(`Skipping file due to read error ${file}: ${error.message}`));
-            return false;
-          }
-        });
-
-        if (verbose) {
-          console.log(`Found ${filteredFiles.length} processable files after filtering.`);
-        }
-        resolve(filteredFiles);
-      })
-      .catch((err) => {
-        console.error(chalk.red(`Glob error: ${err.message}`));
-        reject(err);
-      });
-  });
 }
 
 /**
@@ -716,4 +574,4 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
 }
 
 // Export the core review functions
-export { reviewFile, reviewFiles, reviewDirectory, reviewPullRequest };
+export { reviewFile, reviewFiles, reviewPullRequest };

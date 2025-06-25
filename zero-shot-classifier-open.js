@@ -5,9 +5,6 @@
  * allowing it to detect any technology or framework mentioned in the text.
  */
 
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { env, pipeline } from '@huggingface/transformers';
 import * as linguistLanguages from 'linguist-languages';
 import { LRUCache } from 'lru-cache';
@@ -143,7 +140,7 @@ class OpenZeroShotClassifier {
     ];
 
     // Add dynamic patterns from linguist languages
-    for (const [langName, langData] of Object.entries(linguistLanguages)) {
+    for (const [, langData] of Object.entries(linguistLanguages)) {
       if (langData.aliases) {
         langData.aliases.forEach((alias) => {
           patterns.push(new RegExp(`\\b${this.escapeRegex(alias)}\\b`, 'gi'));
@@ -196,7 +193,6 @@ class OpenZeroShotClassifier {
    */
   extractTechnologyCandidates(text) {
     const candidates = new Set();
-    const lowerText = text.toLowerCase();
 
     // Look for known technologies
     for (const tech of this.knownTechnologies) {

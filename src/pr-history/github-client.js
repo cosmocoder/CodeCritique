@@ -135,7 +135,7 @@ export class GitHubAPIClient {
   /**
    * Resume analysis from last saved position
    */
-  async resumeFromLastPosition(owner, repo, projectPath) {
+  async resumeFromLastPosition() {
     try {
       const progress = await this.loadProgress(true);
 
@@ -188,16 +188,7 @@ export class GitHubAPIClient {
    * Fetch all merged PRs from a repository with intelligent pagination and incremental support
    */
   async fetchAllPRs(owner, repo, options = {}) {
-    const {
-      since = null,
-      until = null,
-      limit = null,
-      skipDependabot = true,
-      includeDrafts = false,
-      resume = false,
-      incremental = false,
-      projectPath = null,
-    } = options;
+    const { limit = null, skipDependabot = true, includeDrafts = false, resume = false, incremental = false, projectPath = null } = options;
 
     // Handle incremental updates
     let effectiveOptions = { ...options };
@@ -576,7 +567,7 @@ export class GitHubAPIClient {
       const progress = JSON.parse(progressData);
       this.log(`Resuming from page ${progress.lastPage || 1}`);
       return progress;
-    } catch (error) {
+    } catch {
       this.log('No previous progress found, starting fresh');
       return {};
     }
@@ -623,11 +614,4 @@ export class GitHubAPIClient {
     const colorFn = colors[level] || chalk.white;
     console.log(colorFn(`[GitHub Client] ${message}`));
   }
-}
-
-/**
- * Convenience function to create a GitHub client
- */
-function createGitHubClient(options = {}) {
-  return new GitHubAPIClient(options);
 }
