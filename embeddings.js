@@ -917,80 +917,116 @@ async function processBatchEmbeddings(filePaths, options = {}) {
     }
   }
 
-  // ULTRA-AGGRESSIVE OPTIMIZATION: Batch file stats and minimal processing
+  // ULTRA-FAST OPTIMIZATION: Parallel async file stats and minimal processing
   console.log(chalk.cyan(`Ultra-fast pre-filtering ${filePaths.length} files...`));
   const filesToActuallyProcess = [];
   const preFilterStartTime = Date.now();
 
-  // Batch process file stats to minimize system calls
+  // Batch size for parallel processing
+  const STAT_BATCH_SIZE = 100;
   const fileStatsMap = new Map();
-  const validFiles = [];
 
-  // First pass: get all file stats in batch and do basic filtering
+  // Pre-compute paths to avoid redundant calculations
+  const pathCache = new Map();
   for (const filePath of filePaths) {
     if (processedFiles.has(filePath) && processedFiles.get(filePath) !== 'failed') continue;
 
     const absoluteFilePath = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(resolvedCanonicalBaseDir, filePath);
     const consistentRelativePath = path.relative(resolvedCanonicalBaseDir, absoluteFilePath);
+    pathCache.set(filePath, { absoluteFilePath, consistentRelativePath });
+  }
 
-    try {
-      const stats = fs.statSync(absoluteFilePath);
+  // Process files in batches with parallel async operations
+  const unprocessedFiles = filePaths.filter((fp) => !processedFiles.has(fp) || processedFiles.get(fp) === 'failed');
 
-      // Quick size check
-      if (stats.size > 1024 * 1024) {
-        results.skipped++;
-        progressTracker.update('skipped');
-        if (typeof onProgress === 'function') onProgress('skipped', filePath);
-        processedFiles.set(filePath, 'skipped_large');
-        continue;
-      }
+  for (let i = 0; i < unprocessedFiles.length; i += STAT_BATCH_SIZE) {
+    const batch = unprocessedFiles.slice(i, i + STAT_BATCH_SIZE);
 
-      // ULTRA-FAST CHECK: If file exists in DB and modification time hasn't changed, skip immediately
-      const existingRecord = existingFileRecords.get(consistentRelativePath);
-      if (existingRecord && existingRecord.last_modified) {
-        const existingMtime = new Date(existingRecord.last_modified);
-        if (stats.mtime <= existingMtime) {
+    // Parallel stat operations for this batch
+    const statPromises = batch.map(async (filePath) => {
+      const { absoluteFilePath, consistentRelativePath } = pathCache.get(filePath);
+
+      try {
+        const stats = await fs.promises.stat(absoluteFilePath);
+
+        // Quick size check
+        if (stats.size > 1024 * 1024) {
           results.skipped++;
           progressTracker.update('skipped');
           if (typeof onProgress === 'function') onProgress('skipped', filePath);
-          processedFiles.set(filePath, 'skipped_unchanged');
-          continue;
+          processedFiles.set(filePath, 'skipped_large');
+          return null;
         }
-      }
 
-      // Store for further processing
-      fileStatsMap.set(filePath, { absoluteFilePath, consistentRelativePath, stats });
-      validFiles.push(filePath);
-    } catch {
-      results.skipped++;
-      progressTracker.update('skipped');
-      if (typeof onProgress === 'function') onProgress('skipped', filePath);
-      processedFiles.set(filePath, 'skipped_stat_error');
+        // ULTRA-FAST CHECK: If file exists in DB and modification time hasn't changed, skip immediately
+        const existingRecord = existingFileRecords.get(consistentRelativePath);
+        if (existingRecord && existingRecord.last_modified) {
+          const existingMtime = new Date(existingRecord.last_modified);
+          if (stats.mtime <= existingMtime) {
+            results.skipped++;
+            progressTracker.update('skipped');
+            if (typeof onProgress === 'function') onProgress('skipped', filePath);
+            processedFiles.set(filePath, 'skipped_unchanged');
+            return null;
+          }
+        }
+
+        return { filePath, absoluteFilePath, consistentRelativePath, stats };
+      } catch {
+        results.skipped++;
+        progressTracker.update('skipped');
+        if (typeof onProgress === 'function') onProgress('skipped', filePath);
+        processedFiles.set(filePath, 'skipped_stat_error');
+        return null;
+      }
+    });
+
+    // Wait for all stats in this batch to complete
+    const batchResults = await Promise.all(statPromises);
+
+    // Filter out nulls and store valid results
+    for (const result of batchResults) {
+      if (result) {
+        fileStatsMap.set(result.filePath, result);
+      }
     }
   }
 
-  // Second pass: only do expensive exclusion checks for files that might need processing
-  for (const filePath of validFiles) {
-    const { absoluteFilePath, consistentRelativePath } = fileStatsMap.get(filePath);
+  // Single pass for exclusion checks on valid files
+  const validFiles = Array.from(fileStatsMap.keys());
 
-    // Only do expensive exclusion check for files that passed the fast checks
-    if (
-      !utilsShouldProcessFile(absoluteFilePath, '', {
-        ...exclusionOptions,
-        baseDir: resolvedCanonicalBaseDir,
-        relativePathToCheck: consistentRelativePath,
-      })
-    ) {
-      results.excluded++;
-      results.excludedFiles.push(filePath);
-      progressTracker.update('skipped');
-      if (typeof onProgress === 'function') onProgress('excluded', filePath);
-      processedFiles.set(filePath, 'excluded');
-      continue;
+  // Process exclusion checks in smaller batches to avoid blocking
+  const EXCLUSION_BATCH_SIZE = 50;
+  for (let i = 0; i < validFiles.length; i += EXCLUSION_BATCH_SIZE) {
+    const batch = validFiles.slice(i, i + EXCLUSION_BATCH_SIZE);
+
+    for (const filePath of batch) {
+      const { absoluteFilePath, consistentRelativePath } = fileStatsMap.get(filePath);
+
+      // Only do expensive exclusion check for files that passed the fast checks
+      if (
+        !utilsShouldProcessFile(absoluteFilePath, '', {
+          ...exclusionOptions,
+          baseDir: resolvedCanonicalBaseDir,
+          relativePathToCheck: consistentRelativePath,
+        })
+      ) {
+        results.excluded++;
+        results.excludedFiles.push(filePath);
+        progressTracker.update('skipped');
+        if (typeof onProgress === 'function') onProgress('excluded', filePath);
+        processedFiles.set(filePath, 'excluded');
+        continue;
+      }
+
+      // File needs processing
+      filesToActuallyProcess.push(filePath);
     }
 
-    // File needs processing
-    filesToActuallyProcess.push(filePath);
+    // Yield to event loop between batches
+    if (i + EXCLUSION_BATCH_SIZE < validFiles.length) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
   }
 
   const preFilterTime = ((Date.now() - preFilterStartTime) / 1000).toFixed(2);
