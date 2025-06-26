@@ -849,20 +849,50 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
 async function callLLMForAnalysis(context, options = {}) {
   try {
     // Prepare the prompt using the dedicated function
-    const prompt = options?.isTestFile ? generateTestFileAnalysisPrompt(context) : generateAnalysisPrompt(context);
+    let prompt = options?.isTestFile ? generateTestFileAnalysisPrompt(context) : generateAnalysisPrompt(context);
+
+    // Enhance the prompt to ensure JSON output for Claude 4 Sonnet
+    prompt += `
+
+CRITICAL FORMATTING REQUIREMENTS:
+- Respond ONLY with a valid JSON object
+- Do not include any text before or after the JSON
+- Do not wrap the JSON in markdown code blocks
+- Ensure all strings are properly escaped
+- Use double quotes for all string values
+- Do not include trailing commas
+- Validate that your response is parseable JSON before sending
+
+Your response must start with { and end with } with no additional text.`;
 
     // Call LLM with the prompt
     const llmResponse = await sendPromptToLLM(prompt, {
-      temperature: 0, // Force deterministic output
+      temperature: 0, // Force deterministic output for consistent JSON format
       maxTokens: options.maxTokens || 4096,
-      model: options.model,
-      isJsonMode: true, // Request JSON output if supported
+      model: options.model || 'claude-sonnet-4-20250514',
     });
+
+    console.log(chalk.blue('Received LLM response, attempting to parse...'));
+
+    console.log(chalk.gray(`Response type: ${typeof llmResponse}`));
+    console.log(chalk.gray(`Response length: ${llmResponse?.length || 0} characters`));
 
     // Parse the raw LLM response
     const analysisResponse = parseAnalysisResponse(llmResponse);
 
-    // Return the parsed analysis results
+    // Validate the parsed response has the expected structure
+    if (!analysisResponse.summary || !Array.isArray(analysisResponse.issues)) {
+      console.warn(chalk.yellow('Parsed response missing expected structure, attempting to reconstruct...'));
+
+      return {
+        summary: analysisResponse.summary || 'Analysis completed with parsing issues',
+        issues: Array.isArray(analysisResponse.issues) ? analysisResponse.issues : [],
+        rawResponse: analysisResponse.rawResponse || llmResponse.substring(0, 500),
+        parseWarning: 'Response structure was reconstructed due to parsing issues',
+      };
+    }
+
+    console.log(chalk.green('Successfully parsed LLM response with expected structure'));
     return analysisResponse;
   } catch (error) {
     console.error(chalk.red(`Error calling LLM for analysis: ${error.message}`));
@@ -1094,9 +1124,12 @@ DO NOT comment on:
 5.  Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
 6.  Ensure all reported issue descriptions clearly state the deviation/problem and suggestions align with the prioritized context (guidelines first, then examples, then historical patterns). Avoid general advice conflicting with context.
 7.  Format the final, consolidated, and prioritized list of issues, along with a brief overall summary, **strictly** according to the JSON structure below.
-8.  Respond **only** with the valid JSON object. Do not include any other text before or after the JSON.
+8.  CRITICAL: Respond ONLY with valid JSON - start with { and end with }, no additional text.
 
-JSON Output Structure:
+REQUIRED JSON OUTPUT FORMAT:
+
+You must respond with EXACTLY this JSON structure, with no additional text:
+
 {
   "summary": "Brief summary of the review, highlighting adherence to documented guidelines and consistency with code examples, plus any major issues found.",
   "issues": [
@@ -1104,11 +1137,19 @@ JSON Output Structure:
       "type": "bug | improvement | convention | performance | security",
       "severity": "critical | high | medium | low",
       "description": "Description of the issue, clearly stating the deviation from the prioritized project pattern (guideline or example) OR the nature of the bug/improvement.",
-      "lineNumbers": [array of relevant line numbers in the reviewed file],
+      "lineNumbers": [1, 2, 3],
       "suggestion": "Concrete suggestion for fixing the issue or aligning with the prioritized inferred pattern. Ensure the suggestion is additive if adding missing functionality (like a hook) and doesn't wrongly suggest replacing existing, unrelated code."
     }
   ]
 }
+
+CRITICAL REQUIREMENTS:
+- Use only double quotes for strings
+- Include lineNumbers as an array of numbers (not strings)
+- Ensure all JSON is properly escaped
+- Do not include trailing commas
+- Start response with { and end with }
+- No text before or after the JSON object
 `;
 }
 
@@ -1254,7 +1295,10 @@ DO NOT comment on:
 2. Provide concrete suggestions that align with the project's testing patterns, referencing specific examples from Context B when applicable.
 3. Format the output according to the JSON structure below.
 
-JSON Output Structure:
+REQUIRED JSON OUTPUT FORMAT:
+
+You must respond with EXACTLY this JSON structure, with no additional text:
+
 {
   "summary": "Brief summary of the test file review, highlighting coverage completeness, adherence to testing best practices, and any critical issues found.",
   "issues": [
@@ -1262,13 +1306,19 @@ JSON Output Structure:
       "type": "bug | improvement | convention | performance | coverage",
       "severity": "critical | high | medium | low",
       "description": "Description of the issue, clearly stating the problem with the test implementation or coverage gap.",
-      "lineNumbers": [array of relevant line numbers in the test file],
+      "lineNumbers": [1, 2, 3],
       "suggestion": "Concrete suggestion for improving the test, adding missing coverage, or following testing best practices."
     }
   ]
 }
 
-Respond **only** with the valid JSON object. Do not include any other text before or after the JSON.
+CRITICAL REQUIREMENTS:
+- Use only double quotes for strings
+- Include lineNumbers as an array of numbers (not strings)
+- Ensure all JSON is properly escaped
+- Do not include trailing commas
+- Start response with { and end with }
+- No text before or after the JSON object
 `;
 }
 
@@ -1508,7 +1558,16 @@ Respond with a JSON object:
 - Each key in "fileSpecificIssues" must match exactly the path shown above
 
 Focus on actionable feedback that will improve code quality and maintainability.
-Respond **only** with the valid JSON object. Do not include any other text before or after the JSON.
+
+CRITICAL FORMATTING REQUIREMENTS:
+- Respond ONLY with a valid JSON object
+- Do not include any text before or after the JSON
+- Do not wrap the JSON in markdown code blocks
+- Ensure all strings are properly escaped
+- Use double quotes for all string values
+- Do not include trailing commas
+- Validate that your response is parseable JSON before sending
+- Start response with { and end with }
 `;
 }
 
