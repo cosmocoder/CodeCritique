@@ -397,6 +397,9 @@ export class GitHubAPIClient {
    */
   async fetchPRDetails(owner, repo, prNumber) {
     try {
+      // Proactively check rate limits before making multiple parallel requests
+      await this.respectRateLimit();
+
       const [prDetails, reviewComments, issueComments, reviews, files] = await Promise.all([
         this.callWithRetry(() => this.octokit.pulls.get({ owner, repo, pull_number: prNumber })),
         this.callWithRetry(() => this.octokit.pulls.listReviewComments({ owner, repo, pull_number: prNumber })),
@@ -423,6 +426,9 @@ export class GitHubAPIClient {
    */
   async getPRReviewComments(owner, repo, prNumber) {
     try {
+      // Proactively check rate limits before making the request
+      await this.respectRateLimit();
+
       const response = await this.callWithRetry(() => this.octokit.pulls.listReviewComments({ owner, repo, pull_number: prNumber }));
       return response.data;
     } catch (error) {
@@ -436,6 +442,9 @@ export class GitHubAPIClient {
    */
   async getPRIssueComments(owner, repo, prNumber) {
     try {
+      // Proactively check rate limits before making the request
+      await this.respectRateLimit();
+
       const response = await this.callWithRetry(() => this.octokit.issues.listComments({ owner, repo, issue_number: prNumber }));
       return response.data;
     } catch (error) {
@@ -449,6 +458,9 @@ export class GitHubAPIClient {
    */
   async getPRFiles(owner, repo, prNumber) {
     try {
+      // Proactively check rate limits before making the request
+      await this.respectRateLimit();
+
       const response = await this.callWithRetry(() => this.octokit.pulls.listFiles({ owner, repo, pull_number: prNumber }));
       return response.data;
     } catch (error) {
