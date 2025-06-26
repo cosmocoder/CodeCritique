@@ -855,7 +855,7 @@ async function callLLMForAnalysis(context, options = {}) {
     const llmResponse = await sendPromptToLLM(prompt, {
       temperature: 0, // Force deterministic output
       maxTokens: options.maxTokens || 4096,
-      model: options.model || 'claude-3-5-sonnet-20241022', // Using latest model
+      model: options.model,
       isJsonMode: true, // Request JSON output if supported
     });
 
@@ -1886,7 +1886,7 @@ async function performHolisticPRAnalysis(options) {
     const llmResponse = await sendPromptToLLM(prompt, {
       temperature: 0,
       maxTokens: options.maxTokens || 8192,
-      model: options.model || 'claude-3-5-sonnet-20241022',
+      model: options.model,
       isJsonMode: true,
     });
 

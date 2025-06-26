@@ -4,7 +4,7 @@
  * This module provides functionality to interact with Large Language Models (LLMs)
  * for code analysis and review. Enhanced to leverage project-specific patterns and
  * feedback from PR reviews for more context-aware recommendations.
- * Currently supports Anthropic's Claude Sonnet 3.7.
+ * Currently supports Anthropic's Claude Sonnet 4.
  */
 
 import { Anthropic } from '@anthropic-ai/sdk';
@@ -33,7 +33,7 @@ const anthropic = new Anthropic({
 });
 
 // Default model
-const DEFAULT_MODEL = 'claude-3-7-sonnet-20250219';
+const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
 
 // Maximum tokens for response
 const MAX_TOKENS = 4096;
