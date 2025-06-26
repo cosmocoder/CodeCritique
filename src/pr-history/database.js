@@ -10,7 +10,7 @@ import path from 'node:path';
 import { pipeline } from '@huggingface/transformers';
 import chalk from 'chalk';
 import stopwords from 'stopwords-iso/stopwords-iso.json' with { type: 'json' };
-import { calculateQueryEmbedding, CONSTANTS, getPRCommentsTable } from '../../embeddings.js';
+import { calculateQueryEmbedding, CONSTANTS, getPRCommentsTable, updatePRCommentsIndex } from '../../embeddings.js';
 
 // Import constants from embeddings.js to avoid duplication
 const { EMBEDDING_DIMENSIONS, PR_COMMENTS_TABLE } = CONSTANTS;
@@ -100,6 +100,9 @@ export async function storePRCommentsBatch(commentsData, projectPath = process.c
           console.error(chalk.red(`Error storing batch: ${batchError.message}`));
         }
       }
+    }
+    if (successCount > 0) {
+      await updatePRCommentsIndex();
     }
   } catch (error) {
     console.error(chalk.red(`Error in batch storage: ${error.message}`));

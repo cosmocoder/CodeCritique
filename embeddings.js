@@ -440,26 +440,36 @@ async function createAdaptiveVectorIndexes(table, tableName, vectorField = 'vect
       return { indexType: 'exact', rowCount };
     } else if (rowCount < 10000) {
       const numPartitions = Math.max(Math.floor(Math.sqrt(rowCount / 50)), 2);
-      console.log(chalk.blue(`[${tableName}] Creating IVF-Flat index for medium dataset (${rowCount} rows, ${numPartitions} partitions)`));
+      console.log(
+        chalk.blue(`[${tableName}] Creating/updating IVF-Flat index for medium dataset (${rowCount} rows, ${numPartitions} partitions)`)
+      );
       await table.createIndex(vectorField, {
         config: lancedb.Index.ivfFlat({ numPartitions }),
+        replace: false,
       });
       return { indexType: 'ivf_flat', rowCount, numPartitions };
     } else {
       const numPartitions = Math.max(Math.floor(Math.sqrt(rowCount / 100)), 8);
       const numSubVectors = Math.floor(EMBEDDING_DIMENSIONS / 4);
-      console.log(chalk.blue(`[${tableName}] Creating IVF-PQ index for large dataset (${rowCount} rows, ${numPartitions} partitions)`));
+      console.log(
+        chalk.blue(`[${tableName}] Creating/updating IVF-PQ index for large dataset (${rowCount} rows, ${numPartitions} partitions)`)
+      );
       await table.createIndex(vectorField, {
         config: lancedb.Index.ivfPq({
           numPartitions,
           numSubVectors,
           numBits: 8,
         }),
+        replace: false,
       });
       return { indexType: 'ivf_pq', rowCount, numPartitions, numSubVectors };
     }
   } catch (error) {
-    console.warn(chalk.yellow(`[${tableName}] Index creation failed: ${error.message}. Falling back to exact search.`));
+    if (error.message.includes('already exists')) {
+      console.log(chalk.green(`[${tableName}] Index already up-to-date.`));
+      return { indexType: 'existing' };
+    }
+    console.warn(chalk.yellow(`[${tableName}] Index creation/update failed: ${error.message}. Falling back to exact search.`));
     return { indexType: 'exact_fallback', error: error.message };
   }
 }
@@ -627,10 +637,12 @@ async function ensureTablesExist(db) {
       [prCommentsTable, PR_COMMENTS_TABLE, 'comment_text'],
     ]) {
       try {
-        await table.createIndex(contentField, { config: lancedb.Index.fts() });
-        console.log(chalk.green(`FTS index created for ${tableName}`));
+        await table.createIndex(contentField, { config: lancedb.Index.fts(), replace: false });
+        console.log(chalk.green(`FTS index created/updated for ${tableName}`));
       } catch (error) {
-        if (!error.message.toLowerCase().includes('already exists')) {
+        if (error.message.toLowerCase().includes('already exists')) {
+          console.log(chalk.green(`FTS index already exists for ${tableName}.`));
+        } else {
           console.warn(chalk.yellow(`FTS index warning for ${tableName}: ${error.message}`));
         }
       }
@@ -1262,7 +1274,7 @@ async function processBatchEmbeddings(filePaths, options = {}) {
   }
   // +++ Create Vector index for fileTable AFTER bulk add and FTS +++
   if (fileTable && allFileRecordsToAdd.length > 0) {
-    console.log(chalk.blue(`Attempting to create/verify Vector (IVF_PQ) index on 'vector' for ${FILE_EMBEDDINGS_TABLE}...`));
+    console.log(chalk.blue(`Attempting to create/update Vector (IVF_PQ) index on 'vector' for ${FILE_EMBEDDINGS_TABLE}...`));
     try {
       const numPartitions = Math.max(1, Math.min(Math.floor(allFileRecordsToAdd.length / 100), 64));
       const numSubVectors = 96; // Dimension 384 is divisible by 96
@@ -1273,22 +1285,18 @@ async function processBatchEmbeddings(filePaths, options = {}) {
           num_partitions: numPartitions,
           num_sub_vectors: numSubVectors,
         },
-        replace: true,
+        replace: false,
       });
-      console.log(chalk.green(`Vector (IVF_PQ) index created/verified for ${FILE_EMBEDDINGS_TABLE} on 'vector'.`));
+      console.log(chalk.green(`Vector (IVF_PQ) index created/updated for ${FILE_EMBEDDINGS_TABLE} on 'vector'.`));
     } catch (vecIndexError) {
       // Check if error is due to index already existing, which is fine
-      if (
-        vecIndexError.message &&
-        !vecIndexError.message.toLowerCase().includes('already exists') &&
-        !vecIndexError.message.toLowerCase().includes('index already built')
-      ) {
+      if (vecIndexError.message && vecIndexError.message.toLowerCase().includes('already exists')) {
+        console.log(chalk.green(`Vector (IVF_PQ) index already exists for ${FILE_EMBEDDINGS_TABLE} on 'vector'.`));
+      } else {
         console.warn(
           chalk.yellow(`Warning creating Vector index for ${FILE_EMBEDDINGS_TABLE}: ${vecIndexError.message}`),
           vecIndexError.stack
         );
-      } else {
-        console.log(chalk.green(`Vector (IVF_PQ) index already exists for ${FILE_EMBEDDINGS_TABLE} on 'vector'.`));
       }
     }
   }
@@ -1470,7 +1478,7 @@ async function processBatchEmbeddings(filePaths, options = {}) {
       // Only attempt IVF_PQ if there's a reasonable amount of data
       if (allDocChunkRecordsToAdd.length >= 256) {
         // Threshold of 256 for PQ training
-        console.log(chalk.blue(`Attempting to create/verify Vector (IVF_PQ) index on 'vector' for ${DOCUMENT_CHUNK_TABLE}...`));
+        console.log(chalk.blue(`Attempting to create/update Vector (IVF_PQ) index on 'vector' for ${DOCUMENT_CHUNK_TABLE}...`));
         try {
           const numPartitions = Math.max(1, Math.min(Math.floor(allDocChunkRecordsToAdd.length / 100), 64));
           const numSubVectors = 96; // Dimension 384 is divisible by 96
@@ -1481,21 +1489,17 @@ async function processBatchEmbeddings(filePaths, options = {}) {
               num_partitions: numPartitions,
               num_sub_vectors: numSubVectors,
             },
-            replace: true,
+            replace: false,
           });
-          console.log(chalk.green(`Vector (IVF_PQ) index created/verified for ${DOCUMENT_CHUNK_TABLE} on 'vector'.`));
+          console.log(chalk.green(`Vector (IVF_PQ) index created/updated for ${DOCUMENT_CHUNK_TABLE} on 'vector'.`));
         } catch (vecIndexError) {
-          if (
-            vecIndexError.message &&
-            !vecIndexError.message.toLowerCase().includes('already exists') &&
-            !vecIndexError.message.toLowerCase().includes('index already built')
-          ) {
+          if (vecIndexError.message && vecIndexError.message.toLowerCase().includes('already exists')) {
+            console.log(chalk.green(`Vector (IVF_PQ) index already exists for ${DOCUMENT_CHUNK_TABLE} on 'vector'.`));
+          } else {
             console.warn(
               chalk.yellow(`Warning creating Vector index for ${DOCUMENT_CHUNK_TABLE}: ${vecIndexError.message}`),
               vecIndexError.stack
             );
-          } else {
-            console.log(chalk.green(`Vector (IVF_PQ) index already exists for ${DOCUMENT_CHUNK_TABLE} on 'vector'.`));
           }
         }
       } else {
@@ -2491,6 +2495,23 @@ export async function getPRCommentsTable() {
   } catch (error) {
     console.error(chalk.red(`Error getting PR comments table: ${error.message}`));
     return null;
+  }
+}
+
+/**
+ * Update the vector index for the PR comments table.
+ * @returns {Promise<void>}
+ */
+export async function updatePRCommentsIndex() {
+  try {
+    const table = await getPRCommentsTable();
+    if (table) {
+      console.log(chalk.blue(`Updating vector index for ${PR_COMMENTS_TABLE}...`));
+      await createAdaptiveVectorIndexes(table, PR_COMMENTS_TABLE, 'combined_embedding');
+      console.log(chalk.green(`Vector index for ${PR_COMMENTS_TABLE} updated.`));
+    }
+  } catch (error) {
+    console.error(chalk.red(`Error updating PR comments index: ${error.message}`));
   }
 }
 
