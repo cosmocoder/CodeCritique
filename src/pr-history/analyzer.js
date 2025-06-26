@@ -365,11 +365,15 @@ export class PRHistoryAnalyzer {
       console.log(
         chalk.blue(`Batch ${batchNumber}/${totalBatches} completed: ${batchCommentCount} comments in ${batchDuration.toFixed(1)}s`)
       );
-      console.log(
-        chalk.blue(
-          `Progress: ${processedComments}/${totalEstimatedComments} comments processed (${((processedComments / totalEstimatedComments) * 100).toFixed(1)}%)`
-        )
-      );
+      // Calculate progress percentage, handling case where totalEstimatedComments is 0
+      const progressPercentage = totalEstimatedComments > 0 ? ((processedComments / totalEstimatedComments) * 100).toFixed(1) : 'unknown';
+
+      const progressText =
+        totalEstimatedComments > 0
+          ? `Progress: ${processedComments}/${totalEstimatedComments} comments processed (${progressPercentage}%)`
+          : `Progress: ${processedComments} comments processed`;
+
+      console.log(chalk.blue(progressText));
 
       this.progress.updateComments(totalComments, processedComments, failedComments);
       await this.progress.save();
