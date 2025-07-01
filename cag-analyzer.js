@@ -1293,7 +1293,8 @@ DO NOT comment on:
 **STAGE 5: Consolidate and Generate Output**
 1. **CRITICAL**: Prioritize issues where the test deviates from implicit project patterns shown in Context B (similar test examples), especially regarding test utilities and helper functions.
 2. Provide concrete suggestions that align with the project's testing patterns, referencing specific examples from Context B when applicable.
-3. Format the output according to the JSON structure below.
+3. Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
+4. Format the output according to the JSON structure below.
 
 REQUIRED JSON OUTPUT FORMAT:
 
@@ -1504,6 +1505,8 @@ ${formattedPRFiles}
    - **Historical patterns**: Issues previously flagged by human reviewers in similar contexts
    - **Cross-file consistency**: Ensure similar changes follow the same patterns across all files
    - **Test patterns**: Verify test files follow established testing conventions from examples
+
+4. Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
 
 ## OUTPUT FORMAT
 
