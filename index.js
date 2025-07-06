@@ -48,7 +48,7 @@ program
   .option('--provider <provider>', 'LLM provider to use (anthropic, openai)', 'anthropic')
   .option('--model <model>', 'LLM model to use (e.g., claude-sonnet-4-20250514)')
   .option('--temperature <number>', 'LLM temperature', parseFloat, 0.2)
-  .option('--max-tokens <number>', 'LLM max tokens', parseInt, 2048)
+  .option('--max-tokens <number>', 'LLM max tokens', parseInt, 8192)
   .option('--similarity-threshold <number>', 'Threshold for finding similar code examples', parseFloat, 0.6)
   .option('--max-examples <number>', 'Max similar code examples to use', parseInt, 5)
   .option('--concurrency <number>', 'Concurrency for processing multiple files', parseInt, 3)

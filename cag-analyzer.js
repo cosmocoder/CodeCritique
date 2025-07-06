@@ -36,7 +36,7 @@ const DEFAULT_TRUNCATE_LINES = 300;
 const GUIDELINE_TRUNCATE_LINES = 400;
 const DEBUG_PREVIEW_LENGTH = 300;
 const RESPONSE_TRUNCATE_LENGTH = 1000;
-const MAX_PR_COMMENTS = 50;
+const MAX_PR_COMMENTS_FOR_CONTEXT = 15;
 
 // Helper function for truncating content with line count
 function truncateContent(content, maxLines = DEFAULT_TRUNCATE_LINES) {
@@ -152,13 +152,13 @@ function createTestGuidelineQueryForLLMRetrieval(codeSnippet, reviewedSnippetCon
 }
 
 /**
- * Analyze a file using the CAG approach
+ * Run an analysis using the CAG approach (single file or holistic PR)
  *
- * @param {string} filePath - Path to the file to analyze
+ * @param {string} filePath - Path to the file to analyze, or a special marker for PR reviews
  * @param {Object} options - Analysis options
  * @returns {Promise<Object>} Analysis results
  */
-async function analyzeFile(filePath, options = {}) {
+async function runAnalysis(filePath, options = {}) {
   try {
     // Check if this is a holistic PR review
     if (options.isHolisticPRReview && filePath === 'PR_HOLISTIC_REVIEW') {
@@ -173,89 +173,14 @@ async function analyzeFile(filePath, options = {}) {
       throw new Error(`File not found: ${filePath}`);
     }
 
-    // Determine the project directory for embedding searches
-    // Priority: 1. Explicit projectPath option, 2. Directory option, 3. Current working directory (for PR comments)
-    const projectPath = options.projectPath || (options.directory ? path.resolve(options.directory) : null) || process.cwd();
-
-    console.log(chalk.gray(`Using project path for embeddings: ${projectPath}`));
-
-    // Warn if no directory was specified and we're using file's directory as fallback
-    if (!options.projectPath && !options.directory) {
-      console.log(chalk.yellow(`Warning: No --directory specified. Using file's directory as project path.`));
-      console.log(chalk.yellow(`If embeddings were generated for a parent directory, specify it with: --directory <path>`));
-    }
-
     // Read file content - use diff content if this is a diff-only review
     let content;
-
     if (options.diffOnly && options.diffContent) {
       content = options.diffContent;
       console.log(chalk.blue(`Analyzing diff only for ${path.basename(filePath)}`));
     } else {
       content = fs.readFileSync(filePath, 'utf8');
       console.log(chalk.blue(`Analyzing full file ${path.basename(filePath)}`));
-    }
-
-    const language = detectLanguageFromExtension(path.extname(filePath).toLowerCase()); // Get language early for context inference
-
-    // Detect file type to check if it's a test file
-    const fileTypeInfo = detectFileType(filePath, content);
-    const isTestFile = fileTypeInfo.isTest;
-
-    if (isTestFile) {
-      console.log(chalk.blue(`Detected test file: ${filePath}`));
-    }
-
-    // --- Stage 0: Initialize Tables (ONE-TIME SETUP) ---
-    console.log(chalk.blue('--- Stage 0: Initializing Database Tables ---'));
-    try {
-      await initializeTables();
-      console.log(chalk.green('✅ Database tables initialized successfully'));
-    } catch (initError) {
-      console.warn(chalk.yellow(`Database initialization warning: ${initError.message}`));
-      // Continue with analysis even if table initialization fails
-    }
-
-    // --- PHASE 1: UNDERSTAND THE CODE SNIPPET BEING REVIEWED ---
-    const reviewedSnippetContext = inferContextFromCodeContent(content, language);
-    debug('[analyzeFile] Reviewed Snippet Context:', reviewedSnippetContext);
-
-    // +++ Compute embeddings once for reuse across all context retrieval functions +++
-    let analyzedFileEmbedding = null;
-    let fileContentQueryEmbedding = null;
-    let guidelineQueryEmbedding = null;
-
-    // Compute file content embedding for H1 similarity (passage embedding)
-    if (content.trim().length > 0) {
-      analyzedFileEmbedding = await calculateEmbedding(content.substring(0, MAX_EMBEDDING_CONTENT_LENGTH));
-      if (!analyzedFileEmbedding) {
-        debug(`[analyzeFile] Could not generate passage embedding for the content of ${filePath}. H1 proxy similarity will be skipped.`);
-      }
-    } else {
-      debug(`[analyzeFile] Content of ${filePath} is empty. H1 proxy similarity will be skipped.`);
-    }
-
-    // Compute file content query embedding (used by findSimilarCode and getPRCommentContext)
-    if (content.trim().length > 0) {
-      const queryContent = isTestFile ? `${content}\n// Looking for similar test files and testing patterns` : content;
-      fileContentQueryEmbedding = await calculateQueryEmbedding(queryContent);
-      if (!fileContentQueryEmbedding) {
-        debug(
-          `[analyzeFile] Could not generate query embedding for the content of ${filePath}. Similarity-based searches will be limited.`
-        );
-      }
-    }
-
-    // Prepare and compute guideline query embedding (used by findRelevantDocs)
-    const guidelineQuery = isTestFile
-      ? createTestGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language)
-      : createGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language);
-
-    if (guidelineQuery && guidelineQuery.trim().length > 0) {
-      guidelineQueryEmbedding = await calculateQueryEmbedding(guidelineQuery);
-      if (!guidelineQueryEmbedding) {
-        debug(`[analyzeFile] Could not generate embedding for guideline query. Documentation search will be limited.`);
-      }
     }
 
     // Check if file should be processed
@@ -268,388 +193,16 @@ async function analyzeFile(filePath, options = {}) {
       };
     }
 
-    // --- Stage 1: PARALLEL CONTEXT RETRIEVAL ---
-    console.log(chalk.blue('--- Stage 1: Parallel Context Retrieval (PR Comments + Documentation + Code Examples) ---'));
+    // --- Stage 1: CONTEXT RETRIEVAL ---
+    console.log(chalk.blue('--- Stage 1: Context Retrieval ---'));
+    const { language, isTestFile, finalCodeExamples, finalGuidelineSnippets, prCommentContext, prContextAvailable } =
+      await getContextForFile(filePath, content, options);
 
-    // Prepare options for parallel execution
-    const prContextOptions = {
-      ...options,
-      maxComments: MAX_PR_COMMENTS,
-      similarityThreshold: options.prSimilarityThreshold || 0.3,
-      timeout: options.prTimeout || 300000,
-      projectPath: projectPath,
-      repository: options.repository || null,
-      precomputedQueryEmbedding: fileContentQueryEmbedding, // Pass pre-computed query embedding
-    };
-
-    const GUIDELINE_CANDIDATE_LIMIT = 100;
-    const CODE_EXAMPLE_LIMIT = 40;
-
-    // Execute all three context retrieval operations in parallel
-    console.log(chalk.blue('🚀 Starting parallel context retrieval...'));
-    const [prContextResult, guidelineCandidates, codeExampleCandidates] = await Promise.all([
-      // 1. PR Comment Context Retrieval
-      getPRCommentContext(filePath, prContextOptions).catch((error) => {
-        console.warn(chalk.yellow(`PR comment context unavailable: ${error.message}`));
-        debug(`[analyzeFile] PR context error: ${error.stack}`);
-        return { success: false, hasContext: false, comments: [] };
-      }),
-
-      // 2. Documentation Guidelines Retrieval
-      findRelevantDocs(guidelineQuery, {
-        similarityThreshold: 0.05,
-        limit: GUIDELINE_CANDIDATE_LIMIT,
-        queryFilePath: filePath,
-        useReranking: true,
-        queryContextForReranking: reviewedSnippetContext,
-        projectPath: projectPath,
-        precomputedQueryEmbedding: guidelineQueryEmbedding, // Pass pre-computed guideline query embedding
-      }).catch((error) => {
-        console.warn(chalk.yellow(`Documentation context unavailable: ${error.message}`));
-        return [];
-      }),
-
-      // 3. Similar Code Examples Retrieval
-      findSimilarCode(isTestFile ? `${content}\n// Looking for similar test files and testing patterns` : content, {
-        similarityThreshold: 0.3,
-        limit: CODE_EXAMPLE_LIMIT,
-        queryFilePath: filePath,
-        includeProjectStructure: false,
-        projectPath: projectPath,
-        isTestFile: isTestFile,
-        precomputedQueryEmbedding: fileContentQueryEmbedding, // Pass pre-computed file content query embedding
-      }).catch((error) => {
-        console.warn(chalk.yellow(`Code examples context unavailable: ${error.message}`));
-        return [];
-      }),
-    ]);
-
-    // Process PR comment results
-    let prCommentContext = [];
-    let prContextAvailable = false;
-    if (prContextResult && prContextResult.comments && prContextResult.comments.length > 0) {
-      prCommentContext = prContextResult.comments;
-      prContextAvailable = true;
-      console.log(chalk.green(`✅ Found ${prCommentContext.length} relevant PR comments`));
-    } else {
-      console.log(chalk.yellow('❌ No relevant PR comments found'));
-    }
-
-    console.log(
-      chalk.green(
-        `🎉 Parallel context retrieval completed - PR: ${prCommentContext.length}, Guidelines: ${guidelineCandidates.length}, Code: ${codeExampleCandidates.length}`
-      )
-    );
-
-    // --- Stage 2: PROCESS DOCUMENTATION GUIDELINES ---
-    console.log(chalk.blue('--- Stage 2: Processing Documentation Guidelines ---'));
-
-    const RELEVANT_CHUNK_THRESHOLD = 0.1;
-    const W_H1_SIM = 0.2;
-    const W_DOC_CONTEXT_MATCH = 0.6;
-    const GENERIC_DOC_REGEX = /(README|RUNBOOK|CONTRIBUTING|CHANGELOG|LICENSE|SETUP|INSTALL)(\.md|$)/i;
-    const GENERIC_DOC_PENALTY_FACTOR = 0.7;
-
-    // --- Stage 3 (was PHASE 4): DOCUMENT SCORING AND SELECTION ---
-    console.log(chalk.blue('--- Stage 3: Document Scoring and Selection ---'));
-    // Filter guidelineCandidates to only those that are document chunks, if findSimilarCode somehow returns other types
-    const documentChunks = Array.isArray(guidelineCandidates) ? guidelineCandidates.filter((c) => c.type === 'documentation-chunk') : [];
-    console.log(
-      chalk.blue(
-        `[analyzeFile] Received ${documentChunks.length} document chunks from findSimilarCode (out of ${
-          guidelineCandidates?.length || 0
-        } total candidates).`
-      )
-    );
-
-    const chunksByDocument = new Map();
-    for (const chunk of documentChunks) {
-      if (!chunksByDocument.has(chunk.path)) {
-        chunksByDocument.set(chunk.path, []);
-      }
-      chunksByDocument.get(chunk.path).push(chunk);
-    }
-
-    const scoredDocuments = [];
-
-    for (const [docPath, docChunks] of chunksByDocument.entries()) {
-      const docH1 = docChunks[0]?.document_title || path.basename(docPath, path.extname(docPath)); // All chunks from same doc share same document_title
-      // Infer context of the *candidate document* using H1 and its chunks
-      // Pass language of the code snippet for context, could be refined if doc lang is known
-      const candidateDocFullContext = await inferContextFromDocumentContent(docPath, docH1, docChunks, language);
-      debug(`[analyzeFile] Context for Doc ${docPath}:`, candidateDocFullContext);
-
-      // Chunks in docChunks already have their contextually re-ranked `finalScore` from findSimilarCode
-      // We will use this score directly.
-      const relevantChunksForDoc = docChunks.filter((c) => c.similarity >= RELEVANT_CHUNK_THRESHOLD); // c.similarity is the finalScore from findSimilarCode
-
-      if (relevantChunksForDoc.length === 0) {
-        debug(`[analyzeFile] Doc ${docPath} has 0 chunks meeting RELEVANT_CHUNK_THRESHOLD (${RELEVANT_CHUNK_THRESHOLD}), skipping.`);
-        continue;
-      }
-
-      const maxChunkScoreInDoc = Math.max(...relevantChunksForDoc.map((c) => c.similarity));
-      const avgChunkScoreInDoc = relevantChunksForDoc.reduce((sum, c) => sum + c.similarity, 0) / relevantChunksForDoc.length;
-      const numRelevantChunks = relevantChunksForDoc.length;
-
-      // Score based on aggregated quality of its *already contextually-reranked* chunks from findSimilarCode
-      let semanticQualityScore = maxChunkScoreInDoc * 0.5 + avgChunkScoreInDoc * 0.3 + Math.min(numRelevantChunks, 5) * 0.04;
-
-      let docLevelContextMatchScore = 0;
-      if (
-        reviewedSnippetContext.area !== 'Unknown' &&
-        candidateDocFullContext.area !== 'Unknown' &&
-        candidateDocFullContext.area !== 'General'
-      ) {
-        if (reviewedSnippetContext.area === candidateDocFullContext.area) {
-          docLevelContextMatchScore += 0.8; // VERY_HEAVY_BOOST_DOC_AREA_MATCH
-          let techMatch = false;
-          for (const tech of reviewedSnippetContext.dominantTech) {
-            if (candidateDocFullContext.dominantTech.map((t) => t.toLowerCase()).includes(tech.toLowerCase())) {
-              docLevelContextMatchScore += 0.2; // MODERATE_BOOST_DOC_TECH_MATCH
-              techMatch = true;
-              break;
-            }
-          }
-          debug(
-            `[analyzeFile] Doc ${docPath} Area Match! Snippet: ${reviewedSnippetContext.area}, Doc: ${candidateDocFullContext.area}. Tech match: ${techMatch}. Score bonus: ${docLevelContextMatchScore}`
-          );
-        } else if (reviewedSnippetContext.area !== 'GeneralJS_TS') {
-          // Don't penalize if snippet is general JS/TS
-          docLevelContextMatchScore -= 0.2; // REDUCED PENALTY - automatic classifier uses different categorization
-          debug(
-            `[analyzeFile] Doc ${docPath} Area MISMATCH! Snippet: ${reviewedSnippetContext.area}, Doc: ${candidateDocFullContext.area}. Score penalty: -0.8`
-          );
-        }
-      }
-
-      // H1 match to the *overall query context* (file being reviewed)
-      // This uses the `analyzedFileEmbedding` (embedding of the file being reviewed)
-      // vs the H1 of the candidate doc.
-      let docH1RelevanceToReviewedFile = 0;
-      if (docH1 && analyzedFileEmbedding) {
-        const docH1Embedding = await calculateEmbedding(docH1);
-        if (docH1Embedding) {
-          docH1RelevanceToReviewedFile = calculateCosineSimilarity(analyzedFileEmbedding, docH1Embedding);
-        } else {
-          debug(`[analyzeFile] Could not embed H1 for ${docPath}: "${docH1}"`);
-        }
-      } else if (!analyzedFileEmbedding) {
-        debug('[analyzeFile] Cannot calculate docH1RelevanceToReviewedFile, analyzedFileEmbedding is null');
-      }
-      debug(
-        `[analyzeFile] Doc ${docPath} H1 ("${docH1.substring(0, 30)}") relevance to reviewed file: ${docH1RelevanceToReviewedFile.toFixed(
-          4
-        )}`
-      );
-
-      let genericDocPenaltyFactor = 1.0; // No penalty by default
-
-      // Check if document matches generic document pattern
-      const isGenericByName = GENERIC_DOC_REGEX.test(docPath);
-
-      // Apply penalty to generic documents
-      if (candidateDocFullContext.isGeneralPurposeReadmeStyle || isGenericByName) {
-        // Always penalize generic docs unless reviewing DevOps code or has very high context match
-        if (reviewedSnippetContext.area !== 'DevOps' && (docLevelContextMatchScore < 0.8 || isGenericByName)) {
-          genericDocPenaltyFactor = GENERIC_DOC_PENALTY_FACTOR; // Use the 0.7 factor
-          debug(`[analyzeFile] Doc ${docPath} is generic document, applying penalty factor: ${genericDocPenaltyFactor}`);
-        }
-      }
-
-      // Final Document Score
-      let finalDocScore =
-        semanticQualityScore * 0.2 + // Quality of its best chunks (already context-ranked by findSimilarCode)
-        docLevelContextMatchScore * W_DOC_CONTEXT_MATCH + // Explicit F/E, B/E match based on full doc
-        docH1RelevanceToReviewedFile * W_H1_SIM; // H1 of doc vs. content of file being reviewed
-
-      finalDocScore *= genericDocPenaltyFactor; // Apply penalty at the end
-
-      scoredDocuments.push({
-        path: docPath,
-        score: finalDocScore,
-        chunks: docChunks.sort((a, b) => b.similarity - a.similarity), // chunks already have finalScore from findSimilarCode as .similarity
-        debug: {
-          area: candidateDocFullContext.area,
-          tech: candidateDocFullContext.dominantTech.join(', '),
-          isGenericStyle: candidateDocFullContext.isGeneralPurposeReadmeStyle || isGenericByName,
-          semanticQualityScore: semanticQualityScore.toFixed(4),
-          docLevelContextMatchScore: docLevelContextMatchScore.toFixed(4),
-          docH1RelevanceToReviewedFile: docH1RelevanceToReviewedFile.toFixed(4),
-          genericDocPenaltyFactor: genericDocPenaltyFactor.toFixed(4),
-          finalScore: finalDocScore.toFixed(4),
-        },
-      });
-    }
-
-    scoredDocuments.sort((a, b) => b.score - a.score);
-    debug('[analyzeFile] Top Scored Documents (after new scoring):');
-    scoredDocuments.slice(0, 7).forEach((d) => {
-      console.log(
-        chalk.cyanBright(
-          `  Path: ${d.path}, Score: ${d.score.toFixed(4)}, Area: ${d.debug.area}, Tech: ${d.debug.tech}, Generic: ${
-            d.debug.isGenericStyle
-          }`
-        )
-      );
-      console.log(
-        chalk.gray(
-          `    (Debug: SemQ=${d.debug.semanticQualityScore}, CtxMatch=${d.debug.docLevelContextMatchScore}, H1Rel=${d.debug.docH1RelevanceToReviewedFile}, PenaltyF=${d.debug.genericDocPenaltyFactor})`
-        )
-      );
-    });
-
-    // --- Stage 4 (was PHASE 5): SELECT FINAL SNIPPETS FOR LLM ---
-    console.log(chalk.blue('--- Stage 4: Selecting Final Snippets for LLM ---'));
-    const MAX_FINAL_DOCUMENTS = 4;
-    const MIN_DOC_SCORE_FOR_INCLUSION = 0.3; // Minimum score to include a document
-    let finalGuidelineSnippets = [];
-
-    // Filter out low-scoring documents and those with area mismatches
-    const relevantDocs = scoredDocuments.filter((doc) => {
-      // Exclude if score is too low
-      if (doc.score < MIN_DOC_SCORE_FOR_INCLUSION) {
-        debug(`[analyzeFile] Excluding doc ${doc.path} - score too low: ${doc.score.toFixed(4)}`);
-        return false;
-      }
-
-      // Exclude if there's a strong area mismatch (unless areas are unknown/general)
-      if (
-        reviewedSnippetContext.area !== 'Unknown' &&
-        doc.debug.area !== 'Unknown' &&
-        doc.debug.area !== 'General' &&
-        reviewedSnippetContext.area !== doc.debug.area
-      ) {
-        // Check if it at least has matching technology
-        const hasTechMatch = reviewedSnippetContext.dominantTech.some((tech) => doc.debug.tech.toLowerCase().includes(tech.toLowerCase()));
-        if (!hasTechMatch) {
-          debug(
-            `[analyzeFile] Excluding doc ${doc.path} - area mismatch without tech match: ${doc.debug.area} vs ${reviewedSnippetContext.area}`
-          );
-          return false;
-        }
-      }
-
-      return true;
-    });
-
-    for (const doc of relevantDocs.slice(0, MAX_FINAL_DOCUMENTS)) {
-      if (doc.chunks && doc.chunks.length > 0) {
-        // Chunks are already sorted by their `similarity` (which is findSimilarCode's finalScore)
-        finalGuidelineSnippets.push(doc.chunks[0]);
-      }
-    }
-    // This replaces the old finalGuidelineSnippets selection logic
-
-    console.log(
-      chalk.green(
-        `Selected ${finalGuidelineSnippets.length} final guideline snippets from ${relevantDocs.length} relevant documents (filtered from ${scoredDocuments.length} scored documents, derived from ${documentChunks.length} initial relevant chunks).`
-      )
-    );
-
-    // Check if this is context-only mode (for PR holistic review)
-    if (options.contextOnly) {
-      console.log(chalk.blue('--- Context-Only Mode: Returning processed context ---'));
-
-      // Process code examples quickly for context
-      const uniqueCandidates = [];
-      const seenPaths = new Set();
-      const normalizedReviewPath = path.resolve(filePath);
-
-      for (const candidate of codeExampleCandidates) {
-        const normalizedCandidatePath = path.resolve(candidate.path);
-        const isSameFile = normalizedCandidatePath === normalizedReviewPath;
-        const isDocumentation = candidate.isDocumentation;
-        const alreadySeen = seenPaths.has(candidate.path);
-
-        if (!isSameFile && !isDocumentation && !alreadySeen) {
-          uniqueCandidates.push(candidate);
-          seenPaths.add(candidate.path);
-        }
-      }
-
-      uniqueCandidates.sort((a, b) => b.similarity - a.similarity);
-      const finalCodeExamples = uniqueCandidates.slice(0, 40);
-
-      return {
-        success: true,
-        filePath,
-        language,
-        processedContext: {
-          codeExamples: finalCodeExamples,
-          guidelines: finalGuidelineSnippets,
-          prComments: prCommentContext,
-        },
-        metadata: {
-          analysisTimestamp: new Date().toISOString(),
-          contextOnly: true,
-        },
-      };
-    }
-
-    // --- Stage 3: PROCESS CODE EXAMPLES ---
-    console.log(chalk.blue('--- Stage 3: Processing Code Examples ---'));
-
-    // Filter and process the code examples we got from parallel retrieval
-    const uniqueCandidates = [];
-    const seenPaths = new Set();
-    const normalizedReviewPath = path.resolve(filePath);
-
-    debug(`[cag-analyzer] Filtering code examples. Review file: ${normalizedReviewPath}`);
-    debug(`[cag-analyzer] Total candidates received: ${codeExampleCandidates.length}`);
-
-    for (const candidate of codeExampleCandidates) {
-      // Exclude the file being reviewed and documentation files
-      const normalizedCandidatePath = path.resolve(candidate.path);
-      const isSameFile = normalizedCandidatePath === normalizedReviewPath;
-      const isDocumentation = candidate.isDocumentation;
-      const alreadySeen = seenPaths.has(candidate.path);
-
-      if (isSameFile) {
-        debug(`[cag-analyzer] Excluding review file: ${candidate.path} (similarity: ${candidate.similarity})`);
-        continue;
-      }
-
-      if (isDocumentation) {
-        debug(`[cag-analyzer] Excluding documentation file: ${candidate.path}`);
-        continue;
-      }
-
-      if (alreadySeen) {
-        debug(`[cag-analyzer] Excluding duplicate: ${candidate.path}`);
-        continue;
-      }
-
-      uniqueCandidates.push(candidate);
-      seenPaths.add(candidate.path);
-      debug(`[cag-analyzer] Including candidate: ${candidate.path} (similarity: ${candidate.similarity})`);
-    }
-
-    // Sort by relevance and limit
-    uniqueCandidates.sort((a, b) => b.similarity - a.similarity);
-    const MAX_FINAL_EXAMPLES = 8;
-    let finalCodeExamples = uniqueCandidates.slice(0, MAX_FINAL_EXAMPLES);
-
-    console.log(chalk.green(`Found ${finalCodeExamples.length} final code examples from ${codeExampleCandidates.length} candidates.`));
-
-    // Log the top code examples with their similarity scores
-    console.log(chalk.cyan('--- Code Examples Found ---'));
-    if (finalCodeExamples.length > 0) {
-      finalCodeExamples.forEach((ex, idx) => {
-        console.log(chalk.cyan(`  [${idx + 1}] ${ex.path} (similarity: ${ex.similarity?.toFixed(3) || 'N/A'})`));
-      });
-    } else {
-      console.log(chalk.cyan('  (None found)'));
-    }
-    console.log(chalk.cyan('---------------------------'));
-
-    let finalCodeExamplesForContext = finalCodeExamples;
-
-    // --- Stage 4: PREPARE CONTEXT FOR LLM ---
-    console.log(chalk.blue('--- Stage 4: Preparing Context for LLM ---'));
+    // --- Stage 2: PREPARE CONTEXT FOR LLM ---
+    console.log(chalk.blue('--- Stage 2: Preparing Context for LLM ---'));
 
     // Format the lists that will be passed
-    const formattedCodeExamples = formatContextItems(finalCodeExamplesForContext, 'code');
+    const formattedCodeExamples = formatContextItems(finalCodeExamples, 'code');
     const formattedGuidelines = formatContextItems(finalGuidelineSnippets, 'guideline');
 
     // --- Log the context being sent to the LLM --- >
@@ -657,17 +210,17 @@ async function analyzeFile(filePath, options = {}) {
     if (formattedGuidelines.length > 0) {
       formattedGuidelines.forEach((g, i) => {
         console.log(chalk.magenta(`  [${i + 1}] Path: ${g.path} ${g.headingText ? `(Heading: "${g.headingText}")` : ''}`));
-        console.log(chalk.gray(`      Content: ${g.content.substring(0, 100).replace(/\n/g, ' ')}...`));
+        console.log(chalk.gray(`      Content: ${g.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
       });
     } else {
       console.log(chalk.magenta('  (None)'));
     }
 
     console.log(chalk.magenta('--- Code Examples Sent to LLM ---'));
-    if (finalCodeExamplesForContext.length > 0) {
-      finalCodeExamplesForContext.forEach((ex, i) => {
+    if (finalCodeExamples.length > 0) {
+      finalCodeExamples.forEach((ex, i) => {
         console.log(chalk.magenta(`  [${i + 1}] Path: ${ex.path} (Similarity: ${ex.similarity?.toFixed(3) || 'N/A'})`));
-        console.log(chalk.gray(`      Content: ${ex.content.substring(0, 100).replace(/\n/g, ' ')}...`));
+        console.log(chalk.gray(`      Content: ${ex.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
       });
     } else {
       console.log(chalk.magenta('  (None)'));
@@ -688,7 +241,7 @@ async function analyzeFile(filePath, options = {}) {
     );
 
     // Call LLM for analysis
-    const analysisResults = await callLLMForAnalysis(context, options);
+    const analysisResults = await callLLMForAnalysis(context, { ...options, isTestFile });
 
     return {
       success: true,
@@ -699,7 +252,7 @@ async function analyzeFile(filePath, options = {}) {
         codeExamples: finalCodeExamples.length,
         guidelines: finalGuidelineSnippets.length,
         prComments: prCommentContext.length,
-        prContextAvailable: prContextAvailable,
+        prContextAvailable,
       },
       prHistory: prContextAvailable
         ? {
@@ -848,28 +401,22 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
  */
 async function callLLMForAnalysis(context, options = {}) {
   try {
-    // Prepare the prompt using the dedicated function
-    let prompt = options?.isTestFile ? generateTestFileAnalysisPrompt(context) : generateAnalysisPrompt(context);
+    let prompt;
+    const model = options.model || 'claude-sonnet-4-20250514';
+    const maxTokens = options.maxTokens || 8192; // Default to a safe limit
 
-    // Enhance the prompt to ensure JSON output for Claude 4 Sonnet
-    prompt += `
-
-CRITICAL FORMATTING REQUIREMENTS:
-- Respond ONLY with a valid JSON object
-- Do not include any text before or after the JSON
-- Do not wrap the JSON in markdown code blocks
-- Ensure all strings are properly escaped
-- Use double quotes for all string values
-- Do not include trailing commas
-- Validate that your response is parseable JSON before sending
-
-Your response must start with { and end with } with no additional text.`;
+    if (options.isHolisticPRReview) {
+      prompt = generateHolisticPRAnalysisPrompt(context);
+    } else {
+      prompt = options.isTestFile ? generateTestFileAnalysisPrompt(context) : generateAnalysisPrompt(context);
+    }
 
     // Call LLM with the prompt
     const llmResponse = await sendPromptToLLM(prompt, {
-      temperature: 0, // Force deterministic output for consistent JSON format
-      maxTokens: options.maxTokens || 4096,
-      model: options.model || 'claude-sonnet-4-20250514',
+      temperature: 0,
+      maxTokens: maxTokens,
+      model: model,
+      isJsonMode: true, // Standardize on using JSON mode if available
     });
 
     console.log(chalk.blue('Received LLM response, attempting to parse...'));
@@ -881,7 +428,7 @@ Your response must start with { and end with } with no additional text.`;
     const analysisResponse = parseAnalysisResponse(llmResponse);
 
     // Validate the parsed response has the expected structure
-    if (!analysisResponse.summary || !Array.isArray(analysisResponse.issues)) {
+    if (!options.isHolisticPRReview && (!analysisResponse.summary || !Array.isArray(analysisResponse.issues))) {
       console.warn(chalk.yellow('Parsed response missing expected structure, attempting to reconstruct...'));
 
       return {
@@ -899,6 +446,26 @@ Your response must start with { and end with } with no additional text.`;
     console.error(error.stack);
     throw error;
   }
+}
+
+/**
+ * Appends critical JSON formatting requirements to a prompt.
+ * @param {string} promptBody - The main body of the prompt.
+ * @returns {string} The finalized prompt with JSON formatting instructions.
+ */
+function finalizePrompt(promptBody) {
+  return `${promptBody}
+
+CRITICAL FORMATTING REQUIREMENTS:
+- Respond ONLY with a valid JSON object
+- Do not include any text before or after the JSON
+- Do not wrap the JSON in markdown code blocks
+- Ensure all strings are properly escaped
+- Use double quotes for all string values
+- Do not include trailing commas
+- Validate that your response is parseable JSON before sending
+
+Your response must start with { and end with } with no additional text.`;
 }
 
 // LLM call function
@@ -985,13 +552,13 @@ ${ex.content}
     const prComments = contextSections.find((section) => section.title === 'Historical Review Comments');
     if (prComments && prComments.items.length > 0) {
       console.log(chalk.green(`✅ Adding ${prComments.items.length} PR comments to LLM prompt`));
-      prHistorySection = `
+      prHistorySection += `
 
 CONTEXT C: HISTORICAL REVIEW COMMENTS
 Similar code patterns and issues identified by human reviewers in past PRs
 
 `;
-      prComments.items.forEach((comment, idx) => {
+      prComments.items.slice(0, MAX_PR_COMMENTS_FOR_CONTEXT).forEach((comment, idx) => {
         prHistorySection += `### Historical Comment ${idx + 1}\n`;
         prHistorySection += `- **PR**: #${comment.pr_number} by ${comment.author}\n`;
         prHistorySection += `- **File**: ${comment.file_path}\n`;
@@ -1039,7 +606,7 @@ ${file.content}
 \`\`\``;
 
   // Corrected prompt with full two-stage analysis + combined output stage
-  return `
+  return finalizePrompt(`
 You are an expert code reviewer acting as a senior developer on this specific project.
 ${reviewInstructions}
 
@@ -1123,8 +690,9 @@ DO NOT comment on:
 4.  **Special attention to historical patterns**: Issues that have been previously identified by human reviewers in similar code (from Context C) should be given high priority, especially those with high relevance scores.
 5.  Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
 6.  Ensure all reported issue descriptions clearly state the deviation/problem and suggestions align with the prioritized context (guidelines first, then examples, then historical patterns). Avoid general advice conflicting with context.
-7.  Format the final, consolidated, and prioritized list of issues, along with a brief overall summary, **strictly** according to the JSON structure below.
-8.  CRITICAL: Respond ONLY with valid JSON - start with { and end with }, no additional text.
+7.  **CRITICAL 'lineNumbers' RULE**: For issues that are widespread within a single file, list only the first few occurrences (AT MOST 5). Do NOT list every single line number for a file-specific issue.
+8.  Format the final, consolidated, and prioritized list of issues, along with a brief overall summary, **strictly** according to the JSON structure below.
+9.  CRITICAL: Respond ONLY with valid JSON - start with { and end with }, no additional text.
 
 REQUIRED JSON OUTPUT FORMAT:
 
@@ -1137,20 +705,12 @@ You must respond with EXACTLY this JSON structure, with no additional text:
       "type": "bug | improvement | convention | performance | security",
       "severity": "critical | high | medium | low",
       "description": "Description of the issue, clearly stating the deviation from the prioritized project pattern (guideline or example) OR the nature of the bug/improvement.",
-      "lineNumbers": [1, 2, 3],
+      "lineNumbers": [42, 55, 61],
       "suggestion": "Concrete suggestion for fixing the issue or aligning with the prioritized inferred pattern. Ensure the suggestion is additive if adding missing functionality (like a hook) and doesn't wrongly suggest replacing existing, unrelated code."
     }
   ]
 }
-
-CRITICAL REQUIREMENTS:
-- Use only double quotes for strings
-- Include lineNumbers as an array of numbers (not strings)
-- Ensure all JSON is properly escaped
-- Do not include trailing commas
-- Start response with { and end with }
-- No text before or after the JSON object
-`;
+`);
 }
 
 /**
@@ -1227,7 +787,7 @@ ${file.content}
 \`\`\``;
 
   // Test-specific prompt
-  return `
+  return finalizePrompt(`
 You are an expert test code reviewer acting as a senior developer on this specific project.
 ${reviewInstructions}
 
@@ -1294,7 +854,8 @@ DO NOT comment on:
 1. **CRITICAL**: Prioritize issues where the test deviates from implicit project patterns shown in Context B (similar test examples), especially regarding test utilities and helper functions.
 2. Provide concrete suggestions that align with the project's testing patterns, referencing specific examples from Context B when applicable.
 3. Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
-4. Format the output according to the JSON structure below.
+4. **CRITICAL 'lineNumbers' RULE**: For issues that are widespread (e.g., incorrect mocking strategy used in multiple tests), list only the first few occurrences (AT MOST 5). Do NOT list every single line number.
+5. Format the output according to the JSON structure below.
 
 REQUIRED JSON OUTPUT FORMAT:
 
@@ -1307,20 +868,12 @@ You must respond with EXACTLY this JSON structure, with no additional text:
       "type": "bug | improvement | convention | performance | coverage",
       "severity": "critical | high | medium | low",
       "description": "Description of the issue, clearly stating the problem with the test implementation or coverage gap.",
-      "lineNumbers": [1, 2, 3],
+      "lineNumbers": [25, 38],
       "suggestion": "Concrete suggestion for improving the test, adding missing coverage, or following testing best practices."
     }
   ]
 }
-
-CRITICAL REQUIREMENTS:
-- Use only double quotes for strings
-- Include lineNumbers as an array of numbers (not strings)
-- Ensure all JSON is properly escaped
-- Do not include trailing commas
-- Start response with { and end with }
-- No text before or after the JSON object
-`;
+`);
 }
 
 /**
@@ -1369,7 +922,7 @@ ${g.content}
   const formattedPRComments =
     contextSections
       .find((s) => s.title === 'Historical Review Comments')
-      ?.items?.slice(0, 10)
+      ?.items?.slice(0, MAX_PR_COMMENTS_FOR_CONTEXT)
       .map((comment, idx) => {
         return `### Historical Comment ${idx + 1}
 - **PR**: #${comment.pr_number} by ${comment.author}
@@ -1400,7 +953,7 @@ ${prFile.diff}
     })
     .join('\n');
 
-  return `
+  return finalizePrompt(`
 You are an expert code reviewer performing a holistic review of a Pull Request with ${prFiles.length} files.
 Analyze ALL files together to identify cross-file issues, consistency problems, and overall code quality.
 
@@ -1507,134 +1060,82 @@ ${formattedPRFiles}
    - **Test patterns**: Verify test files follow established testing conventions from examples
 
 4. Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
+5. **CRITICAL 'lineNumbers' RULE**: For issues that are widespread within a single file, list only the first few occurrences (AT MOST 5). Do NOT list every single line number for a file-specific issue.
 
-## OUTPUT FORMAT
+REQUIRED JSON OUTPUT FORMAT:
 
-**CRITICAL**: Use the EXACT file paths shown in the "PR FILES WITH CHANGES" section as keys in the JSON response.
-
-Respond with a JSON object:
+You must respond with EXACTLY this JSON structure, with no additional text:
 
 {
-  "summary": "Brief summary of the PR quality and main findings",
+      "summary": "Brief, high-level summary of the entire PR review...",
   "crossFileIssues": [
     {
-      "type": "consistency | testing | architecture | integration",
+          "type": "bug | improvement | convention | architecture",
       "severity": "critical | high | medium | low",
-      "description": "Description of the cross-file issue",
-      "affectedFiles": ["frontend/src/apps/listing/file1.tsx", "frontend/src/apps/listing/file2.tsx"],
-      "suggestion": "How to resolve this issue"
+          "description": "Detailed description of an issue that spans multiple files...",
+          "suggestion": "Actionable suggestion to resolve the cross-file issue.",
+          "filesInvolved": ["path/to/file1.js", "path/to/file2.ts"]
     }
   ],
   "fileSpecificIssues": {
-    "frontend/src/apps/listing/containers/ListingGateKeeper/ListingGateKeeper.tsx": [
+        "path/to/file1.js": [
       {
         "type": "bug | improvement | convention | performance | security",
         "severity": "critical | high | medium | low",
-        "description": "Issue description",
-        "lineNumbers": [],
-        "suggestion": "How to fix this issue"
-      }
-    ],
-    "frontend/src/apps/listing/containers/ListingGateKeeper/ListingGateKeeper.graphql": [
-      {
-        "type": "bug | improvement | convention | performance | security",
-        "severity": "critical | high | medium | low",
-        "description": "Issue description",
-        "lineNumbers": [],
-        "suggestion": "How to fix this issue"
+            "description": "Description of the issue specific to this file.",
+            "lineNumbers": [10, 15],
+            "suggestion": "Concrete suggestion for fixing the issue in this file."
       }
     ]
   },
   "recommendations": [
     {
-      "priority": "high | medium | low",
-      "category": "testing | architecture | consistency | performance",
-      "description": "Recommendation description",
-      "impact": "Expected impact of implementing this recommendation"
+          "type": "refactoring | testing | documentation",
+          "description": "A high-level recommendation for improving the codebase...",
+          "filesInvolved": ["path/to/relevant/file.js"]
+        }
+      ]
     }
-  ]
-}
-
-**IMPORTANT**:
-- Use the FULL relative paths (e.g., "frontend/src/apps/listing/containers/ListingGateKeeper/ListingGateKeeper.tsx") as shown in the PR FILES section
-- Do NOT use just filenames (e.g., "ListingGateKeeper.tsx")
-- Each key in "fileSpecificIssues" must match exactly the path shown above
-
-Focus on actionable feedback that will improve code quality and maintainability.
-
-CRITICAL FORMATTING REQUIREMENTS:
-- Respond ONLY with a valid JSON object
-- Do not include any text before or after the JSON
-- Do not wrap the JSON in markdown code blocks
-- Ensure all strings are properly escaped
-- Use double quotes for all string values
-- Do not include trailing commas
-- Validate that your response is parseable JSON before sending
-- Start response with { and end with }
-`;
+`);
 }
 
 /**
  * Parse LLM analysis response
  *
- * @param {string} response - LLM response
- * @returns {Object} Parsed analysis results
+ * @param {string} rawResponse - Raw LLM response
+ * @returns {Object} Parsed analysis response
  */
-function parseAnalysisResponse(response) {
+function parseAnalysisResponse(rawResponse) {
   try {
-    // First try to parse the response directly as JSON
-    try {
-      const parsed = JSON.parse(response);
-      return parsed;
-    } catch {
-      console.log(chalk.yellow('Response is not directly parseable as JSON, trying to extract JSON...'));
+    const parsedResponse = JSON.parse(rawResponse);
+
+    // Check for holistic review structure, which contains fileSpecificIssues
+    if (parsedResponse.fileSpecificIssues || parsedResponse.crossFileIssues || parsedResponse.recommendations) {
+      return {
+        summary: parsedResponse.summary || 'No summary provided',
+        crossFileIssues: parsedResponse.crossFileIssues || [],
+        fileSpecificIssues: parsedResponse.fileSpecificIssues || {},
+        recommendations: parsedResponse.recommendations || [],
+        rawResponse,
+      };
     }
 
-    // Try to extract JSON from response with different patterns
-    const jsonMatch = response.match(/```json\n([\s\S]*?)\n```/) || response.match(/```\n([\s\S]*?)\n```/) || response.match(/{[\s\S]*?}/);
-
-    if (jsonMatch) {
-      const jsonStr = jsonMatch[1] || jsonMatch[0];
-      console.log(chalk.blue('Found potential JSON match:'));
-      console.log(chalk.gray(jsonStr.substring(0, DEBUG_PREVIEW_LENGTH) + '... (truncated)'));
-
-      try {
-        const parsed = JSON.parse(jsonStr);
-        console.log(chalk.green('Successfully extracted and parsed JSON from response'));
-        return parsed;
-      } catch (parseError) {
-        console.warn(chalk.yellow(`Failed to parse extracted JSON: ${parseError.message}`));
-      }
-    } else {
-      console.warn(chalk.yellow('No JSON pattern matched in the response'));
-    }
-
-    console.warn(chalk.yellow('Failed to extract valid JSON from response, constructing fallback response'));
-
-    // If JSON extraction fails, construct a basic response with the raw text
-    const truncatedResponse =
-      response.length > RESPONSE_TRUNCATE_LENGTH ? response.substring(0, RESPONSE_TRUNCATE_LENGTH) + '... (truncated)' : response;
+    // Fallback to single-file review structure
     return {
-      summary: 'Analysis was performed but results could not be parsed into the expected format.',
-      issues: [
-        {
-          type: 'improvement',
-          severity: 'low',
-          description: 'LLM response could not be parsed into structured format',
-          lineNumbers: [],
-          suggestion: 'Review raw response below for insights',
-        },
-      ],
-      rawResponse: truncatedResponse,
+      summary: parsedResponse.summary || 'No summary provided',
+      issues: parsedResponse.issues || [],
+      rawResponse,
     };
   } catch (error) {
-    console.warn(chalk.yellow(`Error parsing LLM response: ${error.message}`));
-
-    // Return a basic valid structure
+    console.error(chalk.red(`Error parsing LLM response: ${error.message}`));
     return {
-      summary: 'Failed to parse LLM response into structured format',
+      summary: 'Error parsing LLM response',
       issues: [],
-      error: error.message,
+      crossFileIssues: [],
+      fileSpecificIssues: {},
+      recommendations: [],
+      rawResponse,
+      parseError: error.message,
     };
   }
 }
@@ -1923,7 +1424,7 @@ async function performHolisticPRAnalysis(options) {
     if (unifiedContext.codeExamples.length > 0) {
       unifiedContext.codeExamples.slice(0, 10).forEach((ex, i) => {
         debug(`  [${i + 1}] Path: ${ex.path} (Similarity: ${ex.similarity?.toFixed(3) || 'N/A'})`);
-        debug(`      Content: ${ex.content.substring(0, 100).replace(/\n/g, ' ')}...`);
+        debug(`      Content: ${ex.content.substring(0, 100).replace(/\\n/g, ' ')}...`);
       });
     } else {
       debug('  (None)');
@@ -1941,19 +1442,11 @@ async function performHolisticPRAnalysis(options) {
     }
     debug('--- Sending Holistic PR Analysis Prompt to LLM ---');
 
-    // Generate prompt using the holistic PR analysis prompt
-    const prompt = generateHolisticPRAnalysisPrompt(holisticContext);
-
-    // Call LLM with the comprehensive prompt
-    const llmResponse = await sendPromptToLLM(prompt, {
-      temperature: 0,
-      maxTokens: options.maxTokens || 8192,
-      model: options.model,
-      isJsonMode: true,
+    // Call the centralized analysis function
+    const parsedResponse = await callLLMForAnalysis(holisticContext, {
+      ...options,
+      isHolisticPRReview: true,
     });
-
-    // Parse the response using existing parser
-    const parsedResponse = parseAnalysisResponse(llmResponse);
 
     // Debug logging
     console.log(chalk.blue(`🐛 Holistic analysis parsed response:`));
@@ -1996,4 +1489,309 @@ async function performHolisticPRAnalysis(options) {
   }
 }
 
-export { analyzeFile };
+/**
+ * NEW: Gathers all context for a single file.
+ * This encapsulates the logic for finding docs, code, and PR comments.
+ * @param {string} filePath - Path to the file to get context for.
+ * @param {string} content - The content of the file (or diff).
+ * @param {Object} options - Analysis options.
+ * @returns {Promise<Object>} An object containing the gathered context.
+ */
+async function getContextForFile(filePath, content, options = {}) {
+  const RELEVANT_CHUNK_THRESHOLD = 0.1;
+  const W_H1_SIM = 0.2;
+  const W_DOC_CONTEXT_MATCH = 0.6;
+  const GENERIC_DOC_PENALTY_FACTOR = 0.7;
+  const GUIDELINE_CANDIDATE_LIMIT = 100;
+  const CODE_EXAMPLE_LIMIT = 40;
+  const MAX_FINAL_EXAMPLES = 8;
+
+  // --- Stage 0: Initialize Tables (ONE-TIME SETUP) ---
+  // Note: This may be called concurrently. `initializeTables` should be idempotent.
+  try {
+    await initializeTables();
+  } catch (initError) {
+    console.warn(chalk.yellow(`Database initialization warning: ${initError.message}`));
+  }
+
+  const projectPath = options.projectPath || (options.directory ? path.resolve(options.directory) : null) || process.cwd();
+  const language = detectLanguageFromExtension(path.extname(filePath).toLowerCase());
+  const fileTypeInfo = detectFileType(filePath, content);
+  const isTestFile = fileTypeInfo.isTest;
+
+  const reviewedSnippetContext = inferContextFromCodeContent(content, language);
+  debug('[getContextForFile] Reviewed Snippet Context:', reviewedSnippetContext);
+
+  let analyzedFileEmbedding = null;
+  let fileContentQueryEmbedding = null;
+  let guidelineQueryEmbedding = null;
+
+  if (content.trim().length > 0) {
+    analyzedFileEmbedding = await calculateEmbedding(content.substring(0, MAX_EMBEDDING_CONTENT_LENGTH));
+    const queryContent = isTestFile ? `${content}\\n// Looking for similar test files and testing patterns` : content;
+    fileContentQueryEmbedding = await calculateQueryEmbedding(queryContent);
+  }
+
+  const guidelineQuery = isTestFile
+    ? createTestGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language)
+    : createGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language);
+
+  if (guidelineQuery && guidelineQuery.trim().length > 0) {
+    guidelineQueryEmbedding = await calculateQueryEmbedding(guidelineQuery);
+  }
+
+  console.log(chalk.blue('🚀 Starting parallel context retrieval...'));
+  const [prContextResult, guidelineCandidates, codeExampleCandidates] = await Promise.all([
+    getPRCommentContext(filePath, {
+      ...options,
+      projectPath,
+      precomputedQueryEmbedding: fileContentQueryEmbedding,
+      maxComments: MAX_PR_COMMENTS_FOR_CONTEXT,
+      similarityThreshold: options.prSimilarityThreshold || 0.3,
+      timeout: options.prTimeout || 300000,
+      repository: options.repository || null,
+    }),
+    findRelevantDocs(guidelineQuery, {
+      ...options,
+      projectPath,
+      precomputedQueryEmbedding: guidelineQueryEmbedding,
+      limit: GUIDELINE_CANDIDATE_LIMIT,
+      similarityThreshold: 0.05,
+      useReranking: true,
+      queryContextForReranking: reviewedSnippetContext,
+    }),
+    findSimilarCode(isTestFile ? `${content}\\n// Looking for similar test files and testing patterns` : content, {
+      ...options,
+      projectPath,
+      isTestFile,
+      precomputedQueryEmbedding: fileContentQueryEmbedding,
+      limit: CODE_EXAMPLE_LIMIT,
+      similarityThreshold: 0.3,
+      queryFilePath: filePath,
+      includeProjectStructure: false,
+    }),
+  ]).catch((error) => {
+    console.warn(chalk.yellow(`Parallel context retrieval failed: ${error.message}`));
+    return [[], [], []];
+  });
+
+  const prCommentContext = prContextResult?.comments || [];
+  const prContextAvailable = prCommentContext.length > 0;
+  console.log(chalk.green(`✅ Found ${prCommentContext.length} relevant PR comments`));
+
+  const documentChunks = Array.isArray(guidelineCandidates) ? guidelineCandidates.filter((c) => c.type === 'documentation-chunk') : [];
+  const chunksByDocument = new Map();
+  for (const chunk of documentChunks) {
+    if (!chunksByDocument.has(chunk.path)) {
+      chunksByDocument.set(chunk.path, []);
+    }
+    chunksByDocument.get(chunk.path).push(chunk);
+  }
+
+  const scoredDocuments = [];
+  const GENERIC_DOC_REGEX = /(README|RUNBOOK|CONTRIBUTING|CHANGELOG|LICENSE|SETUP|INSTALL)(\\.md|$)/i;
+
+  for (const [docPath, docChunks] of chunksByDocument.entries()) {
+    const docH1 = docChunks[0]?.document_title || path.basename(docPath, path.extname(docPath));
+    const candidateDocFullContext = await inferContextFromDocumentContent(docPath, docH1, docChunks, language);
+    const relevantChunksForDoc = docChunks.filter((c) => c.similarity >= RELEVANT_CHUNK_THRESHOLD);
+    if (relevantChunksForDoc.length === 0) continue;
+
+    const maxChunkScoreInDoc = Math.max(...relevantChunksForDoc.map((c) => c.similarity));
+    const avgChunkScoreInDoc = relevantChunksForDoc.reduce((sum, c) => sum + c.similarity, 0) / relevantChunksForDoc.length;
+    const numRelevantChunks = relevantChunksForDoc.length;
+    const semanticQualityScore = maxChunkScoreInDoc * 0.5 + avgChunkScoreInDoc * 0.3 + Math.min(numRelevantChunks, 5) * 0.04;
+
+    let docLevelContextMatchScore = 0;
+    if (
+      reviewedSnippetContext.area !== 'Unknown' &&
+      candidateDocFullContext.area !== 'Unknown' &&
+      candidateDocFullContext.area !== 'General'
+    ) {
+      if (reviewedSnippetContext.area === candidateDocFullContext.area) {
+        docLevelContextMatchScore += 0.8;
+        for (const tech of reviewedSnippetContext.dominantTech) {
+          if (candidateDocFullContext.dominantTech.map((t) => t.toLowerCase()).includes(tech.toLowerCase())) {
+            docLevelContextMatchScore += 0.2;
+            break;
+          }
+        }
+      } else if (reviewedSnippetContext.area !== 'GeneralJS_TS') {
+        docLevelContextMatchScore -= 0.2;
+      }
+    }
+
+    let docH1RelevanceToReviewedFile = 0;
+    if (docH1 && analyzedFileEmbedding) {
+      const docH1Embedding = await calculateEmbedding(docH1);
+      if (docH1Embedding) {
+        docH1RelevanceToReviewedFile = calculateCosineSimilarity(analyzedFileEmbedding, docH1Embedding);
+      }
+    }
+
+    const isGenericByName = GENERIC_DOC_REGEX.test(docPath);
+    let genericDocPenaltyFactor = 1.0;
+    if (candidateDocFullContext.isGeneralPurposeReadmeStyle || isGenericByName) {
+      if (reviewedSnippetContext.area !== 'DevOps' && (docLevelContextMatchScore < 0.8 || isGenericByName)) {
+        genericDocPenaltyFactor = GENERIC_DOC_PENALTY_FACTOR;
+      }
+    }
+
+    let finalDocScore =
+      semanticQualityScore * 0.2 + docLevelContextMatchScore * W_DOC_CONTEXT_MATCH + docH1RelevanceToReviewedFile * W_H1_SIM;
+    finalDocScore *= genericDocPenaltyFactor;
+
+    scoredDocuments.push({
+      path: docPath,
+      score: finalDocScore,
+      chunks: docChunks.sort((a, b) => b.similarity - a.similarity),
+      debug: {
+        area: candidateDocFullContext.area,
+        tech: candidateDocFullContext.dominantTech.join(', '),
+        isGenericStyle: candidateDocFullContext.isGeneralPurposeReadmeStyle || isGenericByName,
+        semanticQualityScore: semanticQualityScore.toFixed(4),
+        docLevelContextMatchScore: docLevelContextMatchScore.toFixed(4),
+        docH1RelevanceToReviewedFile: docH1RelevanceToReviewedFile.toFixed(4),
+        genericDocPenaltyFactor: genericDocPenaltyFactor.toFixed(4),
+        finalScore: finalDocScore.toFixed(4),
+      },
+    });
+  }
+  scoredDocuments.sort((a, b) => b.score - a.score);
+
+  debug('[getContextForFile] Top Scored Documents:');
+  scoredDocuments.slice(0, 7).forEach((d) => {
+    debug(
+      `  Path: ${d.path}, Score: ${d.score.toFixed(4)}, Area: ${d.debug.area}, Tech: ${d.debug.tech}, Generic: ${d.debug.isGenericStyle}`
+    );
+  });
+
+  const finalGuidelineSnippets = [];
+  const relevantDocs = scoredDocuments.filter((doc) => {
+    if (doc.score < 0.3) {
+      debug(`[getContextForFile] Excluding doc ${doc.path} - score too low: ${doc.score.toFixed(4)}`);
+      return false;
+    }
+    if (
+      reviewedSnippetContext.area !== 'Unknown' &&
+      doc.debug.area !== 'Unknown' &&
+      doc.debug.area !== 'General' &&
+      reviewedSnippetContext.area !== doc.debug.area
+    ) {
+      const hasTechMatch = reviewedSnippetContext.dominantTech.some((tech) => doc.debug.tech.toLowerCase().includes(tech.toLowerCase()));
+      if (!hasTechMatch) {
+        debug(
+          `[getContextForFile] Excluding doc ${doc.path} - area mismatch without tech match: ${doc.debug.area} vs ${reviewedSnippetContext.area}`
+        );
+        return false;
+      }
+    }
+    return true;
+  });
+
+  for (const doc of relevantDocs.slice(0, 4)) {
+    if (doc.chunks && doc.chunks.length > 0) {
+      finalGuidelineSnippets.push(doc.chunks[0]);
+    }
+  }
+
+  const uniqueCandidates = [];
+  const seenPaths = new Set();
+  const normalizedReviewPath = path.resolve(filePath);
+
+  for (const candidate of codeExampleCandidates || []) {
+    const normalizedCandidatePath = path.resolve(candidate.path);
+    if (normalizedCandidatePath !== normalizedReviewPath && !candidate.isDocumentation && !seenPaths.has(candidate.path)) {
+      uniqueCandidates.push(candidate);
+      seenPaths.add(candidate.path);
+    }
+  }
+  uniqueCandidates.sort((a, b) => b.similarity - a.similarity);
+  const finalCodeExamples = uniqueCandidates.slice(0, MAX_FINAL_EXAMPLES);
+
+  return {
+    language,
+    isTestFile,
+    finalCodeExamples,
+    finalGuidelineSnippets,
+    prCommentContext,
+    prContextAvailable,
+  };
+}
+
+async function gatherUnifiedContextForPR(prFiles, options = {}) {
+  const allProcessedContext = {
+    codeExamples: new Map(),
+    guidelines: new Map(),
+    prComments: new Map(),
+  };
+
+  const contextPromises = prFiles.map(async (file) => {
+    try {
+      const filePath = file.filePath;
+      const content = file.diffContent || file.content;
+      // Use the new, modular context gathering function
+      const context = await getContextForFile(filePath, content, options);
+      return {
+        ...context,
+        filePath,
+      };
+    } catch (error) {
+      console.error(chalk.red(`Error gathering context for file ${file.filePath}: ${error.message}`));
+      return null; // Return null on error for this file
+    }
+  });
+
+  const allContexts = (await Promise.all(contextPromises)).filter(Boolean); // Filter out nulls
+
+  // Aggregate and deduplicate results
+  for (const context of allContexts) {
+    (context.finalCodeExamples || []).forEach((example) => {
+      const key = example.path;
+      if (
+        key &&
+        (!allProcessedContext.codeExamples.has(key) || example.similarity > allProcessedContext.codeExamples.get(key).similarity)
+      ) {
+        allProcessedContext.codeExamples.set(key, example);
+      }
+    });
+
+    (context.finalGuidelineSnippets || []).forEach((guideline) => {
+      const key = `${guideline.path}-${guideline.heading_text || ''}`;
+      if (!allProcessedContext.guidelines.has(key) || guideline.similarity > allProcessedContext.guidelines.get(key).similarity) {
+        allProcessedContext.guidelines.set(key, guideline);
+      }
+    });
+
+    (context.prCommentContext || []).forEach((comment) => {
+      const key = comment.id;
+      if (
+        key &&
+        (!allProcessedContext.prComments.has(key) || comment.relevanceScore > allProcessedContext.prComments.get(key).relevanceScore)
+      ) {
+        allProcessedContext.prComments.set(key, comment);
+      }
+    });
+  }
+
+  // Convert Maps to sorted arrays
+  const deduplicatedCodeExamples = Array.from(allProcessedContext.codeExamples.values())
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, options.maxExamples || 40);
+
+  const deduplicatedGuidelines = Array.from(allProcessedContext.guidelines.values())
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, 100);
+
+  const deduplicatedPRComments = Array.from(allProcessedContext.prComments.values())
+    .sort((a, b) => b.relevanceScore - a.relevanceScore)
+    .slice(0, 40); // Keep a larger pool of 40 candidates for the final prompt selection
+
+  return {
+    codeExamples: deduplicatedCodeExamples,
+    guidelines: deduplicatedGuidelines,
+    prComments: deduplicatedPRComments,
+  };
+}
+
+export { runAnalysis, gatherUnifiedContextForPR };

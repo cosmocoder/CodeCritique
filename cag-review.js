@@ -9,7 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
-import { analyzeFile } from './cag-analyzer.js';
+import { runAnalysis, gatherUnifiedContextForPR } from './cag-analyzer.js';
 import { detectFileType, detectLanguageFromExtension, findBaseBranch, getChangedLinesInfo, shouldProcessFile } from './utils.js';
 
 /**
@@ -24,7 +24,7 @@ async function reviewFile(filePath, options = {}) {
     console.log(chalk.blue(`Reviewing file: ${filePath}`));
 
     // Analyze the file using the CAG analyzer
-    const analyzeResult = await analyzeFile(filePath, options);
+    const analyzeResult = await runAnalysis(filePath, options);
 
     // If analysis successful, return the result
     if (analyzeResult.success) {
@@ -261,114 +261,15 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
       };
     }
 
-    // Step 2: Use sophisticated context processing like individual file analysis
+    // Step 2: Gather unified context for the entire PR
     if (verbose) {
-      console.log(chalk.blue(`Performing sophisticated context retrieval for ${prFiles.length} PR files...`));
+      console.log(chalk.blue(`Performing unified context retrieval for ${prFiles.length} PR files...`));
     }
-
-    // Use the existing analyzeFile function to get properly processed context for each file
-    // but extract just the context without doing full analysis
-    const allProcessedContext = {
-      codeExamples: new Map(),
-      guidelines: new Map(),
-      prComments: new Map(),
-    };
-
-    // Process files in parallel batches for context gathering (like individual file analysis)
-    const CONTEXT_CONCURRENCY = 3; // Max 3 files at a time to avoid CPU stress
-
-    for (let i = 0; i < prFiles.length; i += CONTEXT_CONCURRENCY) {
-      const batch = prFiles.slice(i, i + CONTEXT_CONCURRENCY);
-
-      if (verbose) {
-        console.log(
-          chalk.blue(
-            `Processing context batch ${Math.floor(i / CONTEXT_CONCURRENCY) + 1}/${Math.ceil(prFiles.length / CONTEXT_CONCURRENCY)}`
-          )
-        );
-      }
-
-      // Use partial analyzeFile processing to get sophisticated context
-      const batchPromises = batch.map(async (file) => {
-        try {
-          // Call analyzeFile with special options to get just the processed context
-          const contextResult = await analyzeFile(file.filePath, {
-            ...options,
-            contextOnly: true, // Flag to return just processed context
-            diffOnly: true,
-            diffContent: file.diffContent,
-            isTestFile: file.isTest,
-            projectPath: options.projectPath,
-          });
-
-          if (contextResult.success && contextResult.processedContext) {
-            return {
-              filePath: file.filePath,
-              context: contextResult.processedContext,
-            };
-          }
-        } catch (error) {
-          console.warn(chalk.yellow(`Error getting sophisticated context for ${file.filePath}: ${error.message}`));
-        }
-        return null;
-      });
-
-      const batchResults = await Promise.all(batchPromises);
-
-      // Merge sophisticated context from all files
-      batchResults.forEach((result) => {
-        if (result && result.context) {
-          const { codeExamples, guidelines, prComments } = result.context;
-
-          // Merge code examples with sophisticated deduplication
-          codeExamples.forEach((example) => {
-            const key = example.path || example.original_document_path;
-            if (
-              key &&
-              (!allProcessedContext.codeExamples.has(key) ||
-                example.similarity > (allProcessedContext.codeExamples.get(key)?.similarity || 0))
-            ) {
-              allProcessedContext.codeExamples.set(key, example);
-            }
-          });
-
-          // Merge guidelines with sophisticated deduplication
-          guidelines.forEach((guideline) => {
-            const key = `${guideline.path}-${guideline.heading_text || guideline.heading || ''}`;
-            if (
-              !allProcessedContext.guidelines.has(key) ||
-              guideline.similarity > (allProcessedContext.guidelines.get(key)?.similarity || 0)
-            ) {
-              allProcessedContext.guidelines.set(key, guideline);
-            }
-          });
-
-          // Merge PR comments with sophisticated deduplication
-          prComments.forEach((comment) => {
-            const key = `${comment.id}-${comment.file_path}`;
-            if (
-              !allProcessedContext.prComments.has(key) ||
-              comment.relevanceScore > (allProcessedContext.prComments.get(key)?.relevanceScore || 0)
-            ) {
-              allProcessedContext.prComments.set(key, comment);
-            }
-          });
-        }
-      });
-    }
-
-    // Convert to arrays with sophisticated selection (like individual file analysis)
-    const deduplicatedCodeExamples = Array.from(allProcessedContext.codeExamples.values())
-      .sort((a, b) => (b.similarity || 0) - (a.similarity || 0))
-      .slice(0, options.maxExamples || 40);
-
-    const deduplicatedGuidelines = Array.from(allProcessedContext.guidelines.values())
-      .sort((a, b) => (b.similarity || 0) - (a.similarity || 0))
-      .slice(0, 100);
-
-    const deduplicatedPRComments = Array.from(allProcessedContext.prComments.values())
-      .sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0))
-      .slice(0, options.maxExamples || 40);
+    const {
+      codeExamples: deduplicatedCodeExamples,
+      guidelines: deduplicatedGuidelines,
+      prComments: deduplicatedPRComments,
+    } = await gatherUnifiedContextForPR(prFiles, options);
 
     if (verbose) {
       console.log(
@@ -401,7 +302,7 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
       // Create a comprehensive review context with all files and their diffs
       const comprehensiveContext = {
         prFiles: prFiles.map((file) => ({
-          path: path.relative(process.cwd(), file.filePath),
+          path: path.relative(workingDir, file.filePath),
           language: file.language,
           isTest: file.isTest,
           isComponent: file.isComponent,
@@ -428,7 +329,7 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
       };
 
       // Create a synthetic "file" path for holistic analysis
-      const holisticResult = await analyzeFile('PR_HOLISTIC_REVIEW', holisticOptions);
+      const holisticResult = await runAnalysis('PR_HOLISTIC_REVIEW', holisticOptions);
 
       // Convert holistic result to individual file results format for compatibility
       const results = prFiles.map((file) => {
@@ -535,7 +436,7 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
               allPRFiles: prContext.allFiles,
             };
 
-            const result = await analyzeFile(file.filePath, enhancedOptions);
+            const result = await runAnalysis(file.filePath, enhancedOptions);
             return result;
           } catch (error) {
             console.error(chalk.red(`Error reviewing ${file.filePath}: ${error.message}`));
