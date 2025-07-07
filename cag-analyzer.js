@@ -297,6 +297,8 @@ async function runAnalysis(filePath, options = {}) {
  * @returns {Object} Context for LLM
  */
 function prepareContextForLLM(filePath, content, language, finalCodeExamples, finalGuidelineSnippets, prCommentContext = [], options = {}) {
+  const { customDocs } = options;
+
   // Extract file name and directory
   const fileName = path.basename(filePath);
   const dirPath = path.dirname(filePath);
@@ -380,6 +382,7 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
     context: contextSections,
     codeExamples,
     guidelineSnippets,
+    customDocs,
     metadata: {
       hasCodeExamples: finalCodeExamples.length > 0,
       hasGuidelines: finalGuidelineSnippets.length > 0,
@@ -498,7 +501,7 @@ async function sendPromptToLLM(prompt, llmOptions) {
  * @returns {string} Analysis prompt
  */
 function generateAnalysisPrompt(context) {
-  const { file, codeExamples, guidelineSnippets } = context;
+  const { file, codeExamples, guidelineSnippets, customDocs } = context;
 
   // Format code examples
   const formattedCodeExamples =
@@ -605,10 +608,50 @@ Language: ${file.language}
 ${file.content}
 \`\`\``;
 
+  let customDocsSection = '';
+  if (customDocs && customDocs.length > 0) {
+    customDocsSection = `
+
+CRITICAL: CUSTOM INSTRUCTIONS - FOLLOW THESE BEFORE ALL OTHER INSTRUCTIONS
+=====================================================================
+
+`;
+    customDocs.forEach((doc) => {
+      customDocsSection += `
+### CUSTOM INSTRUCTION: "${doc.title}"
+
+${doc.content}
+
+---
+
+`;
+    });
+    customDocsSection += `
+=====================================================================
+END OF CUSTOM INSTRUCTIONS - These take precedence over all other guidelines
+`;
+  }
+
+  // Build the role definition that incorporates custom instructions
+  let roleDefinition = 'You are an expert code reviewer acting as a senior developer on this specific project.';
+
+  // If custom instructions exist, incorporate them directly into the role
+  if (customDocs && customDocs.length > 0) {
+    roleDefinition += '\n\nIMPORTANT: You have been given specific custom instructions that define your review approach:';
+    customDocs.forEach((doc, index) => {
+      roleDefinition += `\n\n**CUSTOM INSTRUCTION ${index + 1}: "${doc.title}"**\n${doc.content}`;
+    });
+    roleDefinition +=
+      '\n\nThese custom instructions are fundamental to your identity as a reviewer for this project and must be followed throughout your analysis.';
+  }
+
   // Corrected prompt with full two-stage analysis + combined output stage
   return finalizePrompt(`
-You are an expert code reviewer acting as a senior developer on this specific project.
+${roleDefinition}
+
 ${reviewInstructions}
+
+${customDocsSection}
 
 ${fileSection}
 
@@ -640,10 +683,11 @@ DO NOT comment on:
     : ''
 }**Perform the following analysis stages sequentially:**
 
-**STAGE 1: Guideline-Based Review**
-1.  Analyze the 'FILE TO REVIEW' strictly against the standards, rules, and explanations provided in 'CONTEXT A: EXPLICIT GUIDELINES'.
-2.  Identify any specific deviations where the reviewed code violates an explicit guideline. Note the guideline source (path or index) for each deviation found.
-3.  Temporarily ignore 'CONTEXT B: SIMILAR CODE EXAMPLES' during this stage.
+**STAGE 1: Custom Instructions & Guideline-Based Review**
+1.  **FIRST AND MOST IMPORTANT**: If custom instructions were provided at the beginning of this prompt, analyze the 'FILE TO REVIEW' against those custom instructions BEFORE all other analysis. Custom instructions always take precedence.
+2.  Analyze the 'FILE TO REVIEW' strictly against the standards, rules, and explanations provided in 'CONTEXT A: EXPLICIT GUIDELINES'.
+3.  Identify any specific deviations where the reviewed code violates custom instructions OR explicit guidelines. Note the source for each deviation found.
+4.  Temporarily ignore 'CONTEXT B: SIMILAR CODE EXAMPLES' during this stage.
 
 **STAGE 2: Code Example-Based Review (CRITICAL FOR IMPLICIT PATTERNS)**
 1.  **CRITICAL FIRST STEP**: Scan ALL code examples in Context B and create a mental list of:
@@ -678,21 +722,24 @@ DO NOT comment on:
 4.  **Learn from Past Reviews**: Use the historical comments to understand what human reviewers consider important in this codebase
 
 **STAGE 4: Consolidate, Prioritize, and Generate Output**
-1.  Combine the potential issues identified in Stage 1 (Guideline-Based), Stage 2 (Example-Based), and Stage 3 (Historical Review Comments).
-2.  **Apply Conflict Resolution AND Citation Rules:**
+1.  **CRITICAL REMINDER**: If custom instructions were provided at the beginning of this prompt, they take ABSOLUTE PRECEDENCE over all other guidelines and must be followed strictly.
+2.  Combine the potential issues identified in Stage 1 (Guideline-Based), Stage 2 (Example-Based), and Stage 3 (Historical Review Comments).
+3.  **Apply Conflict Resolution AND Citation Rules:**
     *   **Guideline Precedence:** If an issue identified in Stage 2 (from code examples) or Stage 3 (from historical comments) **contradicts** an explicit guideline from Stage 1, **discard the conflicting issue**. Guidelines always take precedence.
     *   **Citation Priority:** When reporting an issue:
        *   If the relevant convention or standard is defined in 'CONTEXT A: EXPLICIT GUIDELINES', cite the guideline document.
        *   For implicit patterns discovered from code examples (like helper utilities, common practices), cite the specific code examples that demonstrate the pattern.
        *   For issues identified from historical review comments, report them as standard code review findings without referencing the historical source.
        *   **IMPORTANT**: When citing implicit patterns from Context B, be specific about which files demonstrate the pattern and what the pattern is.
-3.  **Special attention to implicit patterns**: Issues related to not using project-specific utilities or helpers should be marked as high priority if the pattern appears consistently across multiple examples in Context B.
-4.  **Special attention to historical patterns**: Issues that have been previously identified by human reviewers in similar code (from Context C) should be given high priority, especially those with high relevance scores.
-5.  Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
-6.  Ensure all reported issue descriptions clearly state the deviation/problem and suggestions align with the prioritized context (guidelines first, then examples, then historical patterns). Avoid general advice conflicting with context.
-7.  **CRITICAL 'lineNumbers' RULE**: For issues that are widespread within a single file, list only the first few occurrences (AT MOST 5). Do NOT list every single line number for a file-specific issue.
-8.  Format the final, consolidated, and prioritized list of issues, along with a brief overall summary, **strictly** according to the JSON structure below.
-9.  CRITICAL: Respond ONLY with valid JSON - start with { and end with }, no additional text.
+4.  **Special attention to implicit patterns**: Issues related to not using project-specific utilities or helpers should be marked as high priority if the pattern appears consistently across multiple examples in Context B.
+5.  **Special attention to historical patterns**: Issues that have been previously identified by human reviewers in similar code (from Context C) should be given high priority, especially those with high relevance scores.
+6.  Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
+7.  Ensure all reported issue descriptions clearly state the deviation/problem and suggestions align with the prioritized context (guidelines first, then examples, then historical patterns). Avoid general advice conflicting with context.
+8.  **CRITICAL 'lineNumbers' RULE**: For issues that are widespread within a single file, list only the first few occurrences (AT MOST 5). Do NOT list every single line number for a file-specific issue.
+9.  Format the final, consolidated, and prioritized list of issues, along with a brief overall summary, **strictly** according to the JSON structure below.
+10. CRITICAL: Respond ONLY with valid JSON - start with { and end with }, no additional text.
+
+**FINAL REMINDER: If custom instructions were provided at the start of this prompt, they MUST be followed and take precedence over all other guidelines.**
 
 REQUIRED JSON OUTPUT FORMAT:
 
@@ -720,7 +767,7 @@ You must respond with EXACTLY this JSON structure, with no additional text:
  * @returns {string} Test file analysis prompt
  */
 function generateTestFileAnalysisPrompt(context) {
-  const { file, codeExamples, guidelineSnippets } = context;
+  const { file, codeExamples, guidelineSnippets, customDocs } = context;
 
   // Format code examples
   const formattedCodeExamples =
@@ -786,12 +833,53 @@ Language: ${file.language}
 ${file.content}
 \`\`\``;
 
+  let customDocsSection = '';
+  if (customDocs && customDocs.length > 0) {
+    customDocsSection = `
+
+CRITICAL: CUSTOM INSTRUCTIONS - FOLLOW THESE BEFORE ALL OTHER INSTRUCTIONS
+=====================================================================
+
+`;
+    customDocs.forEach((doc) => {
+      customDocsSection += `
+### CUSTOM INSTRUCTION: "${doc.title}"
+
+${doc.content}
+
+---
+
+`;
+    });
+    customDocsSection += `
+=====================================================================
+END OF CUSTOM INSTRUCTIONS - These take precedence over all other guidelines
+`;
+  }
+
+  // Build the role definition that incorporates custom instructions
+  let roleDefinition = 'You are an expert test code reviewer acting as a senior developer on this specific project.';
+
+  // If custom instructions exist, incorporate them directly into the role
+  if (customDocs && customDocs.length > 0) {
+    roleDefinition += '\n\nIMPORTANT: You have been given specific custom instructions that define your test review approach:';
+    customDocs.forEach((doc, index) => {
+      roleDefinition += `\n\n**CUSTOM INSTRUCTION ${index + 1}: "${doc.title}"**\n${doc.content}`;
+    });
+    roleDefinition +=
+      '\n\nThese custom instructions are fundamental to your identity as a test reviewer for this project and must be followed throughout your analysis.';
+  }
+
   // Test-specific prompt
   return finalizePrompt(`
-You are an expert test code reviewer acting as a senior developer on this specific project.
+${roleDefinition}
+
 ${reviewInstructions}
 
 ${fileSection}
+
+## ANALYSIS CONTEXT
+${customDocsSection}
 
 CONTEXT FROM PROJECT:
 
@@ -819,10 +907,11 @@ DO NOT comment on:
     : ''
 }**Perform the following test-specific analysis:**
 
-**STAGE 1: Test Coverage and Completeness**
-1. Analyze if the test file provides adequate coverage for the functionality it's testing.
-2. Identify any missing test cases or edge cases that should be covered.
-3. Check if both positive and negative test scenarios are included.
+**STAGE 1: Custom Instructions & Test Coverage Analysis**
+1. **FIRST AND MOST IMPORTANT**: If custom instructions were provided at the beginning of this prompt, analyze the test file against those custom instructions BEFORE all other analysis. Custom instructions always take precedence.
+2. Analyze if the test file provides adequate coverage for the functionality it's testing.
+3. Identify any missing test cases or edge cases that should be covered.
+4. Check if both positive and negative test scenarios are included.
 
 **STAGE 2: Test Quality and Best Practices**
 1. Evaluate test naming conventions - are test names descriptive and follow project patterns?
@@ -857,6 +946,8 @@ DO NOT comment on:
 4. **CRITICAL 'lineNumbers' RULE**: For issues that are widespread (e.g., incorrect mocking strategy used in multiple tests), list only the first few occurrences (AT MOST 5). Do NOT list every single line number.
 5. Format the output according to the JSON structure below.
 
+**FINAL REMINDER: If custom instructions were provided at the start of this prompt, they MUST be followed and take precedence over all other guidelines.**
+
 REQUIRED JSON OUTPUT FORMAT:
 
 You must respond with EXACTLY this JSON structure, with no additional text:
@@ -883,7 +974,7 @@ You must respond with EXACTLY this JSON structure, with no additional text:
  * @returns {string} Holistic PR analysis prompt
  */
 function generateHolisticPRAnalysisPrompt(context) {
-  const { file, context: contextSections } = context;
+  const { file, context: contextSections, customDocs } = context;
 
   // Format unified context sections
   const formattedCodeExamples =
@@ -953,9 +1044,47 @@ ${prFile.diff}
     })
     .join('\n');
 
+  let customDocsSection = '';
+  if (customDocs && customDocs.length > 0) {
+    customDocsSection = `
+
+CRITICAL: CUSTOM INSTRUCTIONS - FOLLOW THESE BEFORE ALL OTHER INSTRUCTIONS
+=====================================================================
+
+`;
+    customDocs.forEach((doc) => {
+      customDocsSection += `
+### CUSTOM INSTRUCTION: "${doc.title}"
+
+${doc.content}
+
+---
+
+`;
+    });
+    customDocsSection += `
+=====================================================================
+END OF CUSTOM INSTRUCTIONS - These take precedence over all other guidelines
+`;
+  }
+
+  // Build the role definition that incorporates custom instructions for PR analysis
+  let roleDefinition = `You are an expert code reviewer performing a holistic review of a Pull Request with ${prFiles.length} files.`;
+
+  // If custom instructions exist, incorporate them directly into the role
+  if (customDocs && customDocs.length > 0) {
+    roleDefinition += '\n\nIMPORTANT: You have been given specific custom instructions that define your PR review approach:';
+    customDocs.forEach((doc, index) => {
+      roleDefinition += `\n\n**CUSTOM INSTRUCTION ${index + 1}: "${doc.title}"**\n${doc.content}`;
+    });
+    roleDefinition +=
+      '\n\nThese custom instructions are fundamental to your identity as a PR reviewer for this project and must be followed throughout your analysis.';
+  }
+
+  roleDefinition += '\nAnalyze ALL files together to identify cross-file issues, consistency problems, and overall code quality.';
+
   return finalizePrompt(`
-You are an expert code reviewer performing a holistic review of a Pull Request with ${prFiles.length} files.
-Analyze ALL files together to identify cross-file issues, consistency problems, and overall code quality.
+${roleDefinition}
 
 ## PULL REQUEST OVERVIEW
 - **Total Files**: ${prFiles.length}
@@ -975,6 +1104,9 @@ ${formattedPRComments}
 
 ## PR FILES WITH CHANGES
 ${formattedPRFiles}
+
+## ANALYSIS CONTEXT
+${customDocsSection}
 
 ## ANALYSIS INSTRUCTIONS
 
@@ -1002,12 +1134,12 @@ ${formattedPRFiles}
    - Test files don't follow established test helper patterns
    - Import statements are inconsistent across similar files
 
-### **STAGE 2: Guideline Compliance Analysis**
+### **STAGE 2: Custom Instructions & Guideline Compliance Analysis**
 
-1. Analyze ALL PR files strictly against the standards, rules, and explanations in PROJECT GUIDELINES
-2. Identify specific deviations where any file violates explicit guidelines
-3. Check for consistency of guideline application across all files
-4. Note guideline source (path or index) for each deviation found
+1. **FIRST AND MOST IMPORTANT**: If custom instructions were provided at the beginning of this prompt, analyze ALL PR files against those custom instructions BEFORE all other analysis. Custom instructions always take precedence.
+2. Analyze ALL PR files strictly against the standards, rules, and explanations in PROJECT GUIDELINES
+3. Identify specific deviations where any file violates custom instructions OR explicit guidelines. Note the source for each deviation found.
+4. Check for consistency of guideline application across all files
 5. Ensure architectural decisions are consistent across the PR
 
 ### **STAGE 3: Historical Pattern Recognition**
@@ -1062,6 +1194,8 @@ ${formattedPRFiles}
 4. Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
 5. DO NOT check if any file referenced in a import statement, is missing.
 6. **CRITICAL 'lineNumbers' RULE**: For issues that are widespread within a single file, list only the first few occurrences (AT MOST 5). Do NOT list every single line number for a file-specific issue.
+
+**FINAL REMINDER: If custom instructions were provided at the start of this prompt, they MUST be followed and take precedence over all other guidelines.**
 
 REQUIRED JSON OUTPUT FORMAT:
 
@@ -1364,7 +1498,7 @@ function formatCommentForContext(comment) {
  */
 async function performHolisticPRAnalysis(options) {
   try {
-    const { prFiles, unifiedContext } = options;
+    const { prFiles, unifiedContext, customDocs } = options;
 
     console.log(chalk.blue(`🔍 Performing holistic analysis of ${prFiles.length} files with unified context...`));
 
@@ -1398,6 +1532,7 @@ async function performHolisticPRAnalysis(options) {
           items: unifiedContext.prComments.slice(0, 10),
         },
       ],
+      customDocs,
       metadata: {
         hasCodeExamples: unifiedContext.codeExamples.length > 0,
         hasGuidelines: unifiedContext.guidelines.length > 0,

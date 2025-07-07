@@ -52,6 +52,10 @@ program
   .option('--similarity-threshold <number>', 'Threshold for finding similar code examples', parseFloat, 0.6)
   .option('--max-examples <number>', 'Max similar code examples to use', parseInt, 5)
   .option('--concurrency <number>', 'Concurrency for processing multiple files', parseInt, 3)
+  .option(
+    '--doc <specs...>',
+    'A document to provide custom instructions to the LLM (e.g., "Engineering Guidelines:./docs/guidelines.md"). Can be specified multiple times.'
+  )
   .action(runCodeReview); // Assumes runCodeReview function exists and is correct
 
 // Existing Embeddings commands (ensure they are present and correct)
@@ -140,6 +144,7 @@ Examples:
   $ ai-code-review analyze --file src/utils/validation.ts
   $ ai-code-review analyze --files "src/**/*.tsx" "lib/*.js"
   $ ai-code-review analyze -b main
+  $ ai-code-review analyze --doc "Our Eng Guidelines:./ENGINEERING_GUIDELINES.md" --file src/utils/validation.ts
   $ ai-code-review analyze --diff-with feature-branch -d /path/to/repo
   $ ai-code-review analyze --output json > review-results.json
   $ ai-code-review embeddings:generate --directory src
@@ -253,6 +258,54 @@ async function runCodeReview(options) {
   const projectPath = options.directory ? path.resolve(options.directory) : process.cwd();
   console.log(chalk.gray(`Using project path for analysis: ${projectPath}`));
 
+  // Parse custom documents
+  const customDocs = [];
+  if (options.doc) {
+    for (const docSpec of options.doc) {
+      const separatorIndex = docSpec.indexOf(':');
+      if (separatorIndex === -1) {
+        console.error(chalk.red(`Invalid --doc format: "${docSpec}". Expected "title:path/to/file.md"`));
+        process.exit(1);
+      }
+      const title = docSpec.substring(0, separatorIndex).trim();
+      const filePath = docSpec.substring(separatorIndex + 1).trim();
+
+      if (!fs.existsSync(filePath)) {
+        console.error(chalk.red(`Document file not found: ${filePath}`));
+        process.exit(1);
+      }
+      let content = fs.readFileSync(filePath, 'utf-8');
+
+      // Clean up the content for better LLM processing
+      content = content
+        .replace(/\r\n/g, '\n') // Normalize line endings
+        .replace(/\r/g, '\n') // Handle old Mac line endings
+        .replace(/\n\s*\n\s*\n/g, '\n\n') // Remove excessive blank lines
+        // Join broken sentences and fragmented content
+        .replace(/([a-z,;:])\n([a-z])/g, '$1 $2') // Join broken sentences (lowercase to lowercase)
+        .replace(/([a-zA-Z])\n([a-zA-Z])/g, '$1 $2') // Join general broken lines
+        // Handle numbered/lettered list items that are fragmented
+        .replace(/(\d+\.)\n\s*([A-Za-z])/g, '$1 $2') // Join numbered items
+        .replace(/([a-z]\.)\n\s*([A-Za-z])/g, '$1 $2') // Join lettered items
+        // Handle bullet points and dashes that are fragmented
+        .replace(/(-|\*|\+)\n\s*([A-Za-z])/g, '$1 $2') // Join bullet items
+        // Join lines that end with incomplete words or phrases
+        .replace(/([a-z])\n\s+([a-z])/g, '$1 $2') // Join with leading spaces
+        // Clean up any excessive whitespace created by joining
+        .replace(/ {2,}/g, ' ') // Replace multiple spaces with single space
+        .replace(/\n\s*\n\s*\n/g, '\n\n') // Remove excessive blank lines again
+        .trim(); // Remove leading/trailing whitespace
+
+      customDocs.push({ title, content });
+      console.log(chalk.gray(`Loaded custom document '${title}' from ${filePath} (${content.length} chars)`));
+
+      // Debug: Show a clean preview of the content
+      const previewLength = 200;
+      const preview = content.substring(0, previewLength).replace(/\n/g, '\\n');
+      console.log(chalk.gray(`  Content preview: ${preview}${content.length > previewLength ? '...' : ''}`));
+    }
+  }
+
   // Consolidate review options to pass down
   const reviewOptions = {
     verbose: options.verbose,
@@ -265,6 +318,7 @@ async function runCodeReview(options) {
     concurrency: options.concurrency,
     projectPath: projectPath, // Add project path for embedding searches
     directory: options.directory, // Also pass the directory option
+    customDocs,
     // Add any other relevant options here
   };
 
@@ -315,7 +369,10 @@ async function runCodeReview(options) {
       console.error(chalk.gray('  ai-code-review analyze --file src/component.tsx'));
       console.error(chalk.gray('  ai-code-review analyze --files "src/**/*.ts"'));
       console.error(chalk.gray('  ai-code-review analyze -b feature-branch'));
-      console.error(chalk.gray('  ai-code-review analyze -b feature-branch -d /path/to/repo'));
+      console.error(
+        chalk.gray('  ai-code-review analyze --doc "Our Eng Guidelines:./ENGINEERING_GUIDELINES.md" --file src/utils/validation.ts')
+      );
+      console.error(chalk.gray('  ai-code-review analyze --diff-with feature-branch -d /path/to/repo'));
       process.exit(1);
     }
 
