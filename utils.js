@@ -527,6 +527,12 @@ function shouldProcessFile(filePath, _, options = {}) {
     return false;
   }
 
+  // Skip specific filenames like lock files
+  const skipFileNames = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'composer.lock', 'Gemfile.lock'];
+  if (skipFileNames.includes(path.basename(filePath))) {
+    return false;
+  }
+
   // Skip files that are likely to be generated
   const skipFilePatterns = [/\.min\.(js|css)$/, /\.bundle\.(js|css)$/, /\.generated\./, /\.d\.ts$/, /\.snap$/];
 
@@ -1212,6 +1218,37 @@ function getChangedLinesInfo(filePath, baseBranch, targetBranch, workingDir = pr
   }
 }
 
+/**
+ * Get the content of a file from a specific git branch/commit without checking it out
+ *
+ * @param {string} filePath - Absolute path to the file in the repository
+ * @param {string} branchOrCommit - The branch or commit hash to get the file from
+ * @param {string} workingDir - The git repository directory
+ * @returns {string} The content of the file
+ */
+function getFileContentFromGit(filePath, branchOrCommit, workingDir) {
+  try {
+    const gitRoot = execSync('git rev-parse --show-toplevel', { cwd: workingDir }).toString().trim();
+    const relativePath = path.relative(gitRoot, filePath);
+    // Use forward slashes for git path
+    const gitPath = relativePath.split(path.sep).join('/');
+
+    // Command: git show <branch>:<path>
+    const command = `git show ${branchOrCommit}:${gitPath}`;
+    return execSync(command, { cwd: workingDir, encoding: 'utf8' });
+  } catch (error) {
+    // Handle cases where the file might not exist in that commit (e.g., a new file in a feature branch)
+    if (error.stderr && error.stderr.includes('exists on disk, but not in')) {
+      // This case can be ignored if we are sure the file is new.
+      // For a robust solution, you might need to check file status (new, modified, deleted).
+      // For now, we return an empty string, assuming it's a new file not yet in the base.
+      return '';
+    }
+    // Re-throw other errors
+    throw new Error(`Failed to get content of ${filePath} from ${branchOrCommit}: ${error.message}`);
+  }
+}
+
 // --- END Git Helper Functions ---
 
 export {
@@ -1228,4 +1265,5 @@ export {
   ensureBranchExists,
   findBaseBranch,
   getChangedLinesInfo,
+  getFileContentFromGit,
 };

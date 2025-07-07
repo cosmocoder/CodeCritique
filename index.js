@@ -847,14 +847,14 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
 
     // Use three-dot notation to get changes in branch compared to base
     // This shows commits that are in 'branch' but not in 'baseBranch'
-    const gitOutput = execSync(`git diff --name-only ${baseBranch}...${branch}`, { cwd: gitRoot }).toString();
+    // By adding --diff-filter=d, we exclude deleted files from the list.
+    const gitOutput = execSync(`git diff --name-only --diff-filter=d ${baseBranch}...${branch}`, { cwd: gitRoot }).toString();
 
     // Split, filter empty lines, resolve paths, and check existence
     const changedFiles = gitOutput
       .split('\n')
       .filter((file) => file)
-      .map((file) => path.resolve(gitRoot, file)) // Get absolute path
-      .filter((file) => fs.existsSync(file) && fs.statSync(file).isFile()); // Ensure it exists and is a file
+      .map((file) => path.resolve(gitRoot, file)); // Get absolute path
 
     if (changedFiles.length > 0) {
       console.log(chalk.gray(`Found ${changedFiles.length} changed files in ${branch} vs ${baseBranch}`));

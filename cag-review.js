@@ -10,7 +10,14 @@ import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import { runAnalysis, gatherUnifiedContextForPR } from './cag-analyzer.js';
-import { detectFileType, detectLanguageFromExtension, findBaseBranch, getChangedLinesInfo, shouldProcessFile } from './utils.js';
+import {
+  detectFileType,
+  detectLanguageFromExtension,
+  findBaseBranch,
+  getChangedLinesInfo,
+  shouldProcessFile,
+  getFileContentFromGit,
+} from './utils.js';
 
 /**
  * Review a single file using CAG approach
@@ -144,21 +151,9 @@ async function reviewPullRequest(changedFilePaths, options = {}) {
       console.log(chalk.blue(`Reviewing ${changedFilePaths.length} changed files from PR...`));
     }
 
-    // Filter out files that might not exist or shouldn't be processed
-    const filesToReview = changedFilePaths.filter((filePath) => {
-      if (!fs.existsSync(filePath)) {
-        if (verbose) console.warn(chalk.yellow(`Changed file not found locally: ${filePath}`));
-        return false;
-      }
-      // Add other checks if needed (e.g., based on status from PR data if available)
-      try {
-        const content = fs.readFileSync(filePath, 'utf8');
-        return shouldProcessFile(filePath, content);
-      } catch (error) {
-        console.warn(chalk.yellow(`Skipping changed file due to read error ${filePath}: ${error.message}`));
-        return false;
-      }
-    });
+    // No longer filter files here, as new files in a different branch won't exist locally.
+    // The downstream functions are responsible for fetching content from git.
+    const filesToReview = changedFilePaths;
 
     if (filesToReview.length === 0) {
       const message = 'No processable files found among the changed files provided for PR review.';
@@ -217,7 +212,15 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
     const prFiles = [];
     for (const filePath of filesToReview) {
       try {
-        const content = fs.readFileSync(filePath, 'utf8');
+        // Check if the file should be processed before fetching its content from git
+        if (!shouldProcessFile(filePath, '', options)) {
+          if (verbose) {
+            console.log(chalk.yellow(`Skipping file due to exclusion rules: ${path.basename(filePath)}`));
+          }
+          continue;
+        }
+
+        const content = getFileContentFromGit(filePath, actualTargetBranch, workingDir);
         const language = detectLanguageFromExtension(path.extname(filePath));
         const fileType = detectFileType(filePath, content);
 

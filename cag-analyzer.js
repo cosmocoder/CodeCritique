@@ -1060,7 +1060,8 @@ ${formattedPRFiles}
    - **Test patterns**: Verify test files follow established testing conventions from examples
 
 4. Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
-5. **CRITICAL 'lineNumbers' RULE**: For issues that are widespread within a single file, list only the first few occurrences (AT MOST 5). Do NOT list every single line number for a file-specific issue.
+5. DO NOT check if any file referenced in a import statement, is missing.
+6. **CRITICAL 'lineNumbers' RULE**: For issues that are widespread within a single file, list only the first few occurrences (AT MOST 5). Do NOT list every single line number for a file-specific issue.
 
 REQUIRED JSON OUTPUT FORMAT:
 
