@@ -1846,9 +1846,7 @@ export const findRelevantDocs = async (queryText, options = {}) => {
           const contextMatchScore = queryContextForReranking.area === chunkParentDocContext.area ? 1.0 : 0.0;
           if (contextMatchScore < 0.4) {
             genericDocPenalty = PENALTY_GENERIC_DOC_LOW_CONTEXT_MATCH;
-            debug(
-              `[findSimilarDocumentation] Doc ${result.path} is generic with low context match, applying penalty: ${genericDocPenalty}`
-            );
+            debug(`[findRelevantDocs] Doc ${result.path} is generic with low context match, applying penalty: ${genericDocPenalty}`);
           }
         }
 
