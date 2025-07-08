@@ -667,6 +667,10 @@ ${prHistorySection}
 
 INSTRUCTIONS:
 
+**🚨 CRITICAL: LINE NUMBER REPORTING RULE - READ CAREFULLY 🚨**
+When reporting issues in the JSON output, NEVER provide exhaustive lists of line numbers. For repeated issues, list only 3-5 representative line numbers maximum. Exhaustive line number lists are considered errors and must be avoided.
+
+
 ${
   isDiffReview
     ? `**DIFF REVIEW MODE - FOCUS ONLY ON CHANGED LINES**
@@ -735,13 +739,20 @@ DO NOT comment on:
 5.  **Special attention to historical patterns**: Issues that have been previously identified by human reviewers in similar code (from Context C) should be given high priority, especially those with high relevance scores.
 6.  Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
 7.  Ensure all reported issue descriptions clearly state the deviation/problem and suggestions align with the prioritized context (guidelines first, then examples, then historical patterns). Avoid general advice conflicting with context.
-8.  **CRITICAL 'lineNumbers' RULE**: For issues that are widespread within a single file, list only the first few occurrences (AT MOST 5). Do NOT list every single line number for a file-specific issue.
+8.  **CRITICAL 'lineNumbers' RULE - MANDATORY COMPLIANCE**:
+    - For ANY issue that occurs multiple times in a file, list ONLY the first 3-5 occurrences maximum
+    - NEVER provide exhaustive lists of line numbers (e.g., [1,2,3,4,5,6,7,8,9,10...])
+    - If an issue affects many lines, use representative examples only
+    - Exhaustive line number lists are considered hallucination and must be avoided
+    - Example: Instead of listing 20+ line numbers, use [15, 23, 47, "...and 12 other occurrences"]
 9.  Format the final, consolidated, and prioritized list of issues, along with a brief overall summary, **strictly** according to the JSON structure below.
 10. CRITICAL: Respond ONLY with valid JSON - start with { and end with }, no additional text.
 
 **FINAL REMINDER: If custom instructions were provided at the start of this prompt, they MUST be followed and take precedence over all other guidelines.**
 
 REQUIRED JSON OUTPUT FORMAT:
+
+**REMINDER: For lineNumbers array, use ONLY 3-5 representative line numbers for repeated issues. NEVER provide exhaustive lists.**
 
 You must respond with EXACTLY this JSON structure, with no additional text:
 
@@ -891,6 +902,10 @@ ${formattedCodeExamples}
 
 INSTRUCTIONS:
 
+**🚨 CRITICAL: LINE NUMBER REPORTING RULE - READ CAREFULLY 🚨**
+When reporting issues in the JSON output, NEVER provide exhaustive lists of line numbers. For repeated issues, list only 3-5 representative line numbers maximum. Exhaustive line number lists are considered errors and must be avoided.
+
+
 ${
   isDiffReview
     ? `**DIFF REVIEW MODE - FOCUS ONLY ON CHANGED LINES**
@@ -943,12 +958,19 @@ DO NOT comment on:
 1. **CRITICAL**: Prioritize issues where the test deviates from implicit project patterns shown in Context B (similar test examples), especially regarding test utilities and helper functions.
 2. Provide concrete suggestions that align with the project's testing patterns, referencing specific examples from Context B when applicable.
 3. Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
-4. **CRITICAL 'lineNumbers' RULE**: For issues that are widespread (e.g., incorrect mocking strategy used in multiple tests), list only the first few occurrences (AT MOST 5). Do NOT list every single line number.
+4. **CRITICAL 'lineNumbers' RULE - MANDATORY COMPLIANCE**:
+   - For ANY issue that occurs multiple times in a test file, list ONLY the first 3-5 occurrences maximum
+   - NEVER provide exhaustive lists of line numbers (e.g., [1,2,3,4,5,6,7,8,9,10...])
+   - If an issue affects many lines, use representative examples only
+   - Exhaustive line number lists are considered hallucination and must be avoided
+   - Example: Instead of listing 20+ line numbers, use [15, 23, 47, "...and 12 other occurrences"]
 5. Format the output according to the JSON structure below.
 
 **FINAL REMINDER: If custom instructions were provided at the start of this prompt, they MUST be followed and take precedence over all other guidelines.**
 
 REQUIRED JSON OUTPUT FORMAT:
+
+**REMINDER: For lineNumbers array, use ONLY 3-5 representative line numbers for repeated issues. NEVER provide exhaustive lists.**
 
 You must respond with EXACTLY this JSON structure, with no additional text:
 
@@ -1110,6 +1132,9 @@ ${customDocsSection}
 
 ## ANALYSIS INSTRUCTIONS
 
+**🚨 CRITICAL: LINE NUMBER REPORTING RULE - READ CAREFULLY 🚨**
+When reporting issues in the JSON output, NEVER provide exhaustive lists of line numbers. For repeated issues, list only 3-5 representative line numbers maximum. Exhaustive line number lists are considered errors and must be avoided.
+
 **Perform the following holistic analysis stages sequentially for all PR files:**
 
 ### **STAGE 1: Project Pattern Analysis (CRITICAL FOR CONSISTENCY)**
@@ -1193,11 +1218,18 @@ ${customDocsSection}
 
 4. Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
 5. DO NOT check if any file referenced in a import statement, is missing.
-6. **CRITICAL 'lineNumbers' RULE**: For issues that are widespread within a single file, list only the first few occurrences (AT MOST 5). Do NOT list every single line number for a file-specific issue.
+6. **CRITICAL 'lineNumbers' RULE - MANDATORY COMPLIANCE**:
+   - For ANY issue that occurs multiple times in a file, list ONLY the first 3-5 occurrences maximum
+   - NEVER provide exhaustive lists of line numbers (e.g., [1,2,3,4,5,6,7,8,9,10...])
+   - If an issue affects many lines, use representative examples only
+   - Exhaustive line number lists are considered hallucination and must be avoided
+   - Example: Instead of listing 20+ line numbers, use [15, 23, 47, "...and 12 other occurrences"]
 
 **FINAL REMINDER: If custom instructions were provided at the start of this prompt, they MUST be followed and take precedence over all other guidelines.**
 
 REQUIRED JSON OUTPUT FORMAT:
+
+**REMINDER: For lineNumbers array, use ONLY 3-5 representative line numbers for repeated issues. NEVER provide exhaustive lists.**
 
 You must respond with EXACTLY this JSON structure, with no additional text:
 
