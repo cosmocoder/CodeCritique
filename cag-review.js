@@ -6,7 +6,6 @@
  * relying on dynamic context retrieval via embeddings.
  */
 
-import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import { runAnalysis, gatherUnifiedContextForPR } from './cag-analyzer.js';
