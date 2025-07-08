@@ -670,6 +670,8 @@ INSTRUCTIONS:
 **🚨 CRITICAL: LINE NUMBER REPORTING RULE - READ CAREFULLY 🚨**
 When reporting issues in the JSON output, NEVER provide exhaustive lists of line numbers. For repeated issues, list only 3-5 representative line numbers maximum. Exhaustive line number lists are considered errors and must be avoided.
 
+**🚨 CRITICAL: IMPORT STATEMENT RULE - READ CAREFULLY 🚨**
+DO NOT flag missing imports or files referenced in import statements as issues. Focus only on code quality, logic, and patterns within the provided files.
 
 ${
   isDiffReview
@@ -905,6 +907,8 @@ INSTRUCTIONS:
 **🚨 CRITICAL: LINE NUMBER REPORTING RULE - READ CAREFULLY 🚨**
 When reporting issues in the JSON output, NEVER provide exhaustive lists of line numbers. For repeated issues, list only 3-5 representative line numbers maximum. Exhaustive line number lists are considered errors and must be avoided.
 
+**🚨 CRITICAL: IMPORT STATEMENT RULE - READ CAREFULLY 🚨**
+DO NOT flag missing imports or files referenced in import statements as issues. Focus only on test quality, logic, and patterns within the provided test files.
 
 ${
   isDiffReview
@@ -1134,6 +1138,9 @@ ${customDocsSection}
 
 **🚨 CRITICAL: LINE NUMBER REPORTING RULE - READ CAREFULLY 🚨**
 When reporting issues in the JSON output, NEVER provide exhaustive lists of line numbers. For repeated issues, list only 3-5 representative line numbers maximum. Exhaustive line number lists are considered errors and must be avoided.
+
+**🚨 CRITICAL: IMPORT STATEMENT RULE - READ CAREFULLY 🚨**
+DO NOT flag missing imports or files referenced in import statements as issues. In PR analysis, some files (especially assets like images, fonts, or excluded files) may not be included in the review scope. Focus only on code quality, logic, and patterns within the provided PR files.
 
 **Perform the following holistic analysis stages sequentially for all PR files:**
 
