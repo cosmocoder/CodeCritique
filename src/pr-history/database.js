@@ -10,7 +10,7 @@ import path from 'node:path';
 import { pipeline } from '@huggingface/transformers';
 import chalk from 'chalk';
 import stopwords from 'stopwords-iso/stopwords-iso.json' with { type: 'json' };
-import { calculateQueryEmbedding, CONSTANTS, getPRCommentsTable, updatePRCommentsIndex } from '../../embeddings.js';
+import { calculateQueryEmbedding, CONSTANTS, getPRCommentsTable, updatePRCommentsIndex } from '../embeddings.js';
 
 // Import constants from embeddings.js to avoid duplication
 const { EMBEDDING_DIMENSIONS, PR_COMMENTS_TABLE } = CONSTANTS;

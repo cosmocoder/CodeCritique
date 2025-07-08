@@ -18,7 +18,7 @@ import {
   initializeTables,
 } from './embeddings.js';
 import * as llm from './llm.js';
-import { findRelevantPRComments } from './src/pr-history/database.js';
+import { findRelevantPRComments } from './pr-history/database.js';
 import {
   debug,
   detectFileType,

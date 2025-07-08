@@ -6,7 +6,7 @@
  */
 
 import chalk from 'chalk';
-import { calculateEmbedding } from '../../embeddings.js';
+import { calculateEmbedding } from '../embeddings.js';
 import { filterBotComments } from './bot-detector.js';
 
 export class PRCommentProcessor {

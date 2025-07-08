@@ -9,7 +9,7 @@ import { env, pipeline } from '@huggingface/transformers';
 import * as linguistLanguages from 'linguist-languages';
 import { LRUCache } from 'lru-cache';
 import stopwords from 'stopwords-iso/stopwords-iso.json' with { type: 'json' };
-import techKeywords from './src/technology-keywords.json' with { type: 'json' };
+import techKeywords from './technology-keywords.json' with { type: 'json' };
 
 // Configure Transformers.js environment
 env.allowLocalModels = false;

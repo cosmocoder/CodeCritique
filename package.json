@@ -3,14 +3,14 @@
   "version": "0.1.0",
   "description": "AI-powered code review tool for any programming language",
   "type": "module",
-  "main": "index.js",
+  "main": "src/index.js",
   "bin": {
-    "ai-code-review": "./index.js"
+    "ai-code-review": "./src/index.js"
   },
   "scripts": {
-    "start": "node index.js",
+    "start": "node src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "prepublishOnly": "chmod +x index.js",
+    "prepublishOnly": "chmod +x src/index.js",
     "lint": "eslint . --cache",
     "lint:ci": "eslint . --cache --cache-strategy content",
     "lint:fix": "eslint . --cache --fix",
@@ -32,8 +32,8 @@
     "linter"
   ],
   "files": [
-    "*.js",
-    "ai-code-review.sh",
+    "src/*.js",
+    "src/ai-code-review.sh",
     "README.md",
     "LICENSE"
   ],

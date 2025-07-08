@@ -17,7 +17,7 @@ import { program } from 'commander';
 import { glob } from 'glob';
 import { reviewFile as cagReviewFile, reviewFiles as cagReviewFiles, reviewPullRequest as cagReviewPullRequest } from './cag-review.js';
 import * as embeddings from './embeddings.js';
-import { PRHistoryAnalyzer } from './src/pr-history/analyzer.js';
+import { PRHistoryAnalyzer } from './pr-history/analyzer.js';
 import {
   displayAnalysisResults,
   displayDatabaseStats,
@@ -25,11 +25,11 @@ import {
   displayStatus,
   getRepositoryAndProjectPath,
   validateGitHubToken,
-} from './src/pr-history/cli-utils.js';
-import { cleanupClassifier, clearPRComments, getPRCommentsStats, hasPRComments } from './src/pr-history/database.js';
+} from './pr-history/cli-utils.js';
+import { cleanupClassifier, clearPRComments, getPRCommentsStats, hasPRComments } from './pr-history/database.js';
 import { ensureBranchExists, findBaseBranch } from './utils.js';
 
-const packageJson = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 // Configure command-line interface
 program.name('ai-code-review').description('CLI tool for AI-powered code review using the CAG approach').version(packageJson.version);
