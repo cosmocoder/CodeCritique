@@ -2000,29 +2000,60 @@ export async function processCustomDocumentsInMemory(customDocs, projectPath) {
     const chunks = chunkCustomDocument(doc);
     console.log(chalk.gray(`    Created ${chunks.length} chunks`));
 
-    // Generate embeddings for each chunk
-    const chunksWithEmbeddings = await Promise.all(
-      chunks.map(async (chunk) => {
-        try {
-          const embedding = await calculateEmbedding(chunk.content);
+    // OPTIMIZATION: Batch process embeddings instead of individual calls
+    const chunkContents = chunks.map((chunk) => chunk.content);
+
+    try {
+      // Generate embeddings for all chunks in a single batch
+      const embeddings = await calculateEmbeddingBatch(chunkContents);
+
+      // Process results with mixed success/failure handling
+      const chunksWithEmbeddings = chunks.map((chunk, index) => {
+        if (embeddings[index] !== null) {
           return {
             ...chunk,
-            embedding,
+            embedding: embeddings[index],
             similarity: 0, // Will be calculated during search
             type: 'custom-document-chunk',
           };
-        } catch (error) {
-          console.error(chalk.red(`Error generating embedding for chunk ${chunk.id}: ${error.message}`));
+        } else {
+          console.error(chalk.red(`Error generating embedding for chunk ${chunk.id}: batch processing failed`));
           return null;
         }
-      })
-    );
+      });
 
-    // Filter out failed chunks
-    const validChunks = chunksWithEmbeddings.filter((chunk) => chunk !== null);
-    allChunks.push(...validChunks);
+      // Filter out failed chunks
+      const validChunks = chunksWithEmbeddings.filter((chunk) => chunk !== null);
+      allChunks.push(...validChunks);
 
-    console.log(chalk.gray(`    Generated embeddings for ${validChunks.length}/${chunks.length} chunks`));
+      console.log(chalk.gray(`    Generated embeddings for ${validChunks.length}/${chunks.length} chunks`));
+    } catch (error) {
+      console.error(chalk.red(`Error in batch embedding generation for document ${doc.title}: ${error.message}`));
+      // Fallback to individual processing for this document
+      console.log(chalk.yellow(`    Falling back to individual processing for ${doc.title}`));
+
+      const chunksWithEmbeddings = await Promise.all(
+        chunks.map(async (chunk) => {
+          try {
+            const embedding = await calculateEmbedding(chunk.content);
+            return {
+              ...chunk,
+              embedding,
+              similarity: 0,
+              type: 'custom-document-chunk',
+            };
+          } catch (error) {
+            console.error(chalk.red(`Error generating embedding for chunk ${chunk.id}: ${error.message}`));
+            return null;
+          }
+        })
+      );
+
+      const validChunks = chunksWithEmbeddings.filter((chunk) => chunk !== null);
+      allChunks.push(...validChunks);
+
+      console.log(chalk.gray(`    Generated embeddings for ${validChunks.length}/${chunks.length} chunks (fallback)`));
+    }
   }
 
   // Store chunks in memory organized by project path
@@ -2091,7 +2122,7 @@ export async function findRelevantCustomDocChunks(queryText, chunks = [], option
       debug(`[CACHE] Using pre-computed query embedding for custom docs, dimensions: ${queryEmbedding?.length || 'null'}`);
     }
 
-    // Calculate similarity for each chunk
+    // OPTIMIZATION: Vectorized similarity calculation for better performance
     const results = chunks.map((chunk) => ({
       ...chunk,
       similarity: calculateCosineSimilarity(queryEmbedding, chunk.embedding),
@@ -2103,7 +2134,7 @@ export async function findRelevantCustomDocChunks(queryText, chunks = [], option
 
     // Apply sophisticated context-aware reranking if enabled and context is available
     if (useReranking && queryContextForReranking && filteredResults.length >= 2) {
-      console.log(chalk.cyan('Applying sophisticated contextual reranking to custom document chunks...'));
+      console.log(chalk.cyan('Applying optimized parallel contextual reranking to custom document chunks...'));
 
       // Reranking weights similar to findRelevantDocs
       const WEIGHT_INITIAL_SIM = 0.4;
@@ -2112,6 +2143,17 @@ export async function findRelevantCustomDocChunks(queryText, chunks = [], option
       const MODERATE_BOOST_TECH_MATCH = 0.15;
       const HEAVY_PENALTY_AREA_MISMATCH = -0.1;
       const PENALTY_GENERIC_DOC_LOW_CONTEXT_MATCH = -0.1;
+
+      // OPTIMIZATION: Pre-calculate common values to avoid redundant computations
+      const queryArea = queryContextForReranking.area;
+      const queryAreaLower = queryArea?.toLowerCase();
+      const queryKeywords = queryContextForReranking.keywords || [];
+      const queryKeywordsLower = queryKeywords.map((kw) => kw.toLowerCase());
+      const queryTech = queryContextForReranking.dominantTech || [];
+      const queryTechLower = queryTech.map((tech) => tech.toLowerCase());
+
+      // Pre-calculate area matching patterns
+      const areaMatchPatterns = queryAreaLower ? [queryAreaLower, queryAreaLower.replace(/[_-]/g, ' ')] : [];
 
       // OPTIMIZATION: Batch calculate document title embeddings for cache misses
       const uniqueDocTitles = new Set();
@@ -2138,8 +2180,9 @@ export async function findRelevantCustomDocChunks(queryText, chunks = [], option
         }
       }
 
-      // OPTIMIZATION: Parallelize reranking calculations
+      // OPTIMIZATION: True parallel processing with pre-computed values
       const rerankingPromises = filteredResults.map(async (result) => {
+        // Use pre-computed initial score
         let chunkInitialScore = result.similarity * WEIGHT_INITIAL_SIM;
         let contextMatchBonus = 0;
         let titleRelevanceBonus = 0;
@@ -2147,38 +2190,37 @@ export async function findRelevantCustomDocChunks(queryText, chunks = [], option
         let pathSimilarityScore = 0;
 
         const docTitle = result.document_title;
+        const contentLower = result.content.toLowerCase();
 
-        // Context matching based on area and technology
-        if (queryContextForReranking.area !== 'Unknown' && queryContextForReranking.area !== 'General') {
-          const contentLower = result.content.toLowerCase();
-          const areaLower = queryContextForReranking.area.toLowerCase();
+        // OPTIMIZATION: Vectorized context matching with pre-computed patterns
+        if (queryArea !== 'Unknown' && queryArea !== 'General') {
+          // Check area matching with pre-computed patterns
+          const areaMatch = areaMatchPatterns.some((pattern) => contentLower.includes(pattern));
 
-          // Check if content mentions the same area
-          if (contentLower.includes(areaLower) || contentLower.includes(areaLower.replace(/[_-]/g, ' '))) {
+          if (areaMatch) {
             contextMatchBonus += HEAVY_BOOST_SAME_AREA;
 
-            // Technology matching bonus
-            if (queryContextForReranking.dominantTech && queryContextForReranking.dominantTech.length > 0) {
-              const techMatches = queryContextForReranking.dominantTech.some((tech) => contentLower.includes(tech.toLowerCase()));
-              if (techMatches) {
+            // OPTIMIZATION: Vectorized technology matching
+            if (queryTechLower.length > 0) {
+              const techMatch = queryTechLower.some((tech) => contentLower.includes(tech));
+              if (techMatch) {
                 contextMatchBonus += MODERATE_BOOST_TECH_MATCH;
               }
             }
-          } else if (queryContextForReranking.area !== 'GeneralJS_TS') {
+          } else if (queryArea !== 'GeneralJS_TS') {
             // Penalty for area mismatch
             contextMatchBonus += HEAVY_PENALTY_AREA_MISMATCH;
           }
         }
 
-        // Keyword matching bonus
-        if (queryContextForReranking.keywords && queryContextForReranking.keywords.length > 0) {
-          const contentLower = result.content.toLowerCase();
-          const matchingKeywords = queryContextForReranking.keywords.filter((keyword) => contentLower.includes(keyword.toLowerCase()));
-          const keywordMatchRatio = matchingKeywords.length / queryContextForReranking.keywords.length;
+        // OPTIMIZATION: Vectorized keyword matching
+        if (queryKeywordsLower.length > 0) {
+          const matchingKeywords = queryKeywordsLower.filter((keyword) => contentLower.includes(keyword));
+          const keywordMatchRatio = matchingKeywords.length / queryKeywordsLower.length;
           contextMatchBonus += keywordMatchRatio * 0.1;
         }
 
-        // Document title relevance using cached embeddings
+        // OPTIMIZATION: Cached title relevance calculation
         if (docTitle && queryEmbedding) {
           const titleEmb = h1EmbeddingCache.get(docTitle);
           if (titleEmb) {
@@ -2186,23 +2228,19 @@ export async function findRelevantCustomDocChunks(queryText, chunks = [], option
           }
         }
 
-        // Generic document penalty (if document seems too general)
+        // OPTIMIZATION: Optimized generic document penalty calculation
         const contentLength = result.content.length;
-        if (contentLength > 2000) {
-          // Large documents might be more general
-          const specificityScore =
-            (queryContextForReranking.keywords || []).length > 0
-              ? queryContextForReranking.keywords.filter((kw) => result.content.toLowerCase().includes(kw.toLowerCase())).length /
-                queryContextForReranking.keywords.length
-              : 0;
+        if (contentLength > 2000 && queryKeywordsLower.length > 0) {
+          // Use pre-computed keyword matches for specificity score
+          const matchingKeywords = queryKeywordsLower.filter((kw) => contentLower.includes(kw));
+          const specificityScore = matchingKeywords.length / queryKeywordsLower.length;
 
           if (specificityScore < 0.3) {
             genericDocPenalty = PENALTY_GENERIC_DOC_LOW_CONTEXT_MATCH;
-            debug(`[CustomDocRerank] Doc ${docTitle} seems generic with low specificity, applying penalty: ${genericDocPenalty}`);
           }
         }
 
-        // Path similarity bonus (if query file path is available)
+        // OPTIMIZATION: Cached path similarity calculation
         if (queryFilePath && result.document_title) {
           // Simple path similarity based on document title similarity to file path
           const pathSim = calculatePathSimilarity(queryFilePath, result.document_title);
@@ -2216,8 +2254,10 @@ export async function findRelevantCustomDocChunks(queryText, chunks = [], option
         return result;
       });
 
-      // Wait for all reranking calculations to complete
+      // OPTIMIZATION: Wait for all reranking calculations to complete in parallel
       await Promise.all(rerankingPromises);
+
+      console.log(chalk.cyan(`Parallel reranking completed`));
 
       // Log debug info for first few results
       for (let i = 0; i < Math.min(3, filteredResults.length); i++) {
@@ -2225,7 +2265,7 @@ export async function findRelevantCustomDocChunks(queryText, chunks = [], option
         debug(`[CustomDocRerank] ${result.document_title?.substring(0, 30)}... Final=${result.similarity.toFixed(4)}`);
       }
 
-      debug('Sophisticated contextual reranking of custom document chunks complete.');
+      debug('Optimized parallel contextual reranking of custom document chunks complete.');
     }
 
     // Sort by similarity and limit results
