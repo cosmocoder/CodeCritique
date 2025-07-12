@@ -16,6 +16,9 @@ import {
   findRelevantDocs,
   findSimilarCode,
   initializeTables,
+  processCustomDocumentsInMemory,
+  findRelevantCustomDocChunks,
+  getExistingCustomDocumentChunks,
 } from './embeddings.js';
 import * as llm from './llm.js';
 import { findRelevantPRComments } from './pr-history/database.js';
@@ -193,8 +196,15 @@ async function runAnalysis(filePath, options = {}) {
 
     // --- Stage 1: CONTEXT RETRIEVAL ---
     console.log(chalk.blue('--- Stage 1: Context Retrieval ---'));
-    const { language, isTestFile, finalCodeExamples, finalGuidelineSnippets, prCommentContext, prContextAvailable } =
-      await getContextForFile(filePath, content, options);
+    const {
+      language,
+      isTestFile,
+      finalCodeExamples,
+      finalGuidelineSnippets,
+      prCommentContext,
+      prContextAvailable,
+      relevantCustomDocChunks,
+    } = await getContextForFile(filePath, content, options);
 
     // --- Stage 2: PREPARE CONTEXT FOR LLM ---
     console.log(chalk.blue('--- Stage 2: Preparing Context for LLM ---'));
@@ -223,6 +233,17 @@ async function runAnalysis(filePath, options = {}) {
     } else {
       console.log(chalk.magenta('  (None)'));
     }
+
+    console.log(chalk.magenta('--- Custom Document Chunks Sent to LLM ---'));
+    if (relevantCustomDocChunks && relevantCustomDocChunks.length > 0) {
+      relevantCustomDocChunks.forEach((chunk, i) => {
+        console.log(chalk.magenta(`  [${i + 1}] Document: "${chunk.document_title}" (Chunk ${chunk.chunk_index + 1})`));
+        console.log(chalk.magenta(`      Similarity: ${chunk.similarity?.toFixed(3) || 'N/A'}`));
+        console.log(chalk.gray(`      Content: ${chunk.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
+      });
+    } else {
+      console.log(chalk.magenta('  (None)'));
+    }
     console.log(chalk.magenta('---------------------------------'));
     // --- End Logging --->
 
@@ -235,7 +256,7 @@ async function runAnalysis(filePath, options = {}) {
       formattedCodeExamples,
       formattedGuidelines, // Always pass the formatted guidelines
       prCommentContext, // Pass PR comment context
-      { ...options, isTestFile } // Pass isTestFile flag in options
+      { ...options, isTestFile, relevantCustomDocChunks } // Pass isTestFile flag and relevant custom doc chunks
     );
 
     // Call LLM for analysis
@@ -295,7 +316,7 @@ async function runAnalysis(filePath, options = {}) {
  * @returns {Object} Context for LLM
  */
 function prepareContextForLLM(filePath, content, language, finalCodeExamples, finalGuidelineSnippets, prCommentContext = [], options = {}) {
-  const { customDocs } = options;
+  const { customDocs, relevantCustomDocChunks } = options;
 
   // Extract file name and directory
   const fileName = path.basename(filePath);
@@ -380,7 +401,7 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
     context: contextSections,
     codeExamples,
     guidelineSnippets,
-    customDocs,
+    customDocs: relevantCustomDocChunks || customDocs, // Use relevant chunks if available, fallback to full docs
     metadata: {
       hasCodeExamples: finalCodeExamples.length > 0,
       hasGuidelines: finalGuidelineSnippets.length > 0,
@@ -614,19 +635,42 @@ CRITICAL: CUSTOM INSTRUCTIONS - FOLLOW THESE BEFORE ALL OTHER INSTRUCTIONS
 =====================================================================
 
 `;
+
+    // Group chunks by document title to provide better context
+    const chunksByDocument = new Map();
     customDocs.forEach((doc) => {
+      const title = doc.document_title || doc.title;
+      if (!chunksByDocument.has(title)) {
+        chunksByDocument.set(title, []);
+      }
+      chunksByDocument.get(title).push(doc);
+    });
+
+    chunksByDocument.forEach((chunks, docTitle) => {
       customDocsSection += `
-### CUSTOM INSTRUCTION: "${doc.title}"
+### AUTHORITATIVE CUSTOM INSTRUCTION: "${docTitle}"
 
-${doc.content}
+IMPORTANT: This is an authoritative document that defines mandatory review standards for this project.
+When you find violations of these standards, you MUST cite "${docTitle}" as the source in your response.
 
+`;
+      chunks.forEach((chunk, index) => {
+        customDocsSection += `
+**Section ${index + 1}${chunk.chunk_index !== undefined ? ` (Chunk ${chunk.chunk_index + 1})` : ''}:**
+
+${chunk.content}
+
+`;
+      });
+      customDocsSection += `
 ---
 
 `;
     });
+
     customDocsSection += `
 =====================================================================
-END OF CUSTOM INSTRUCTIONS - These take precedence over all other guidelines
+END OF CUSTOM INSTRUCTIONS - These are authoritative project guidelines that take precedence over all other standards
 `;
   }
 
@@ -635,12 +679,16 @@ END OF CUSTOM INSTRUCTIONS - These take precedence over all other guidelines
 
   // If custom instructions exist, incorporate them directly into the role
   if (customDocs && customDocs.length > 0) {
-    roleDefinition += '\n\nIMPORTANT: You have been given specific custom instructions that define your review approach:';
-    customDocs.forEach((doc, index) => {
-      roleDefinition += `\n\n**CUSTOM INSTRUCTION ${index + 1}: "${doc.title}"**\n${doc.content}`;
+    // Group chunks by document title for better context
+    const docTitles = [...new Set(customDocs.map((doc) => doc.document_title || doc.title))];
+
+    roleDefinition += '\n\nIMPORTANT: You have been given specific custom instructions that define how you should conduct your review:';
+    docTitles.forEach((title, index) => {
+      roleDefinition += `\n\n**CUSTOM INSTRUCTION SOURCE ${index + 1}: "${title}"**`;
+      roleDefinition += '\nThis contains specific instructions for your review approach and criteria.';
     });
     roleDefinition +=
-      '\n\nThese custom instructions are fundamental to your identity as a reviewer for this project and must be followed throughout your analysis.';
+      '\n\nThese custom instructions define your review methodology and must be followed throughout your analysis. When you apply these instructions, reference the source document that informed your decision.';
   }
 
   // Corrected prompt with full two-stage analysis + combined output stage
@@ -690,7 +738,7 @@ DO NOT comment on:
 **STAGE 1: Custom Instructions & Guideline-Based Review**
 1.  **FIRST AND MOST IMPORTANT**: If custom instructions were provided at the beginning of this prompt, analyze the 'FILE TO REVIEW' against those custom instructions BEFORE all other analysis. Custom instructions always take precedence.
 2.  Analyze the 'FILE TO REVIEW' strictly against the standards, rules, and explanations provided in 'CONTEXT A: EXPLICIT GUIDELINES'.
-3.  Identify any specific deviations where the reviewed code violates custom instructions OR explicit guidelines. Note the source for each deviation found.
+3.  Identify any specific deviations where the reviewed code violates custom instructions OR explicit guidelines. **CRITICAL**: When you find violations of custom instructions, you MUST cite the specific custom instruction source document name in your issue description and suggestion.
 4.  Temporarily ignore 'CONTEXT B: SIMILAR CODE EXAMPLES' during this stage.
 
 **STAGE 2: Code Example-Based Review (CRITICAL FOR IMPLICIT PATTERNS)**
@@ -731,6 +779,7 @@ DO NOT comment on:
 3.  **Apply Conflict Resolution AND Citation Rules:**
     *   **Guideline Precedence:** If an issue identified in Stage 2 (from code examples) or Stage 3 (from historical comments) **contradicts** an explicit guideline from Stage 1, **discard the conflicting issue**. Guidelines always take precedence.
     *   **Citation Priority:** When reporting an issue:
+       *   **CRITICAL FOR CUSTOM INSTRUCTIONS**: If the issue violates a custom instruction provided at the beginning of this prompt, you MUST include the source document name in both the description and suggestion. For example: "violates the coding standards specified in '[Document Name]'" or "as required by '[Document Name]'".
        *   If the relevant convention or standard is defined in 'CONTEXT A: EXPLICIT GUIDELINES', cite the guideline document.
        *   For implicit patterns discovered from code examples (like helper utilities, common practices), cite the specific code examples that demonstrate the pattern.
        *   For issues identified from historical review comments, report them as standard code review findings without referencing the historical source.
@@ -749,6 +798,12 @@ DO NOT comment on:
 10. CRITICAL: Respond ONLY with valid JSON - start with { and end with }, no additional text.
 
 **FINAL REMINDER: If custom instructions were provided at the start of this prompt, they MUST be followed and take precedence over all other guidelines.**
+
+**🚨 CRITICAL CITATION REQUIREMENT 🚨**
+When you identify issues that violate custom instructions provided at the beginning of this prompt, you MUST:
+- Include the source document name in your issue description (e.g., "violates the logging guidelines specified in '[Document Name]'")
+- Reference the source document in your suggestion (e.g., "as required by '[Document Name]'" or "according to '[Document Name]'")
+- Do NOT provide generic suggestions - always tie violations back to the specific custom instruction source
 
 REQUIRED JSON OUTPUT FORMAT:
 
@@ -852,19 +907,42 @@ CRITICAL: CUSTOM INSTRUCTIONS - FOLLOW THESE BEFORE ALL OTHER INSTRUCTIONS
 =====================================================================
 
 `;
+
+    // Group chunks by document title to provide better context
+    const chunksByDocument = new Map();
     customDocs.forEach((doc) => {
+      const title = doc.document_title || doc.title;
+      if (!chunksByDocument.has(title)) {
+        chunksByDocument.set(title, []);
+      }
+      chunksByDocument.get(title).push(doc);
+    });
+
+    chunksByDocument.forEach((chunks, docTitle) => {
       customDocsSection += `
-### CUSTOM INSTRUCTION: "${doc.title}"
+### AUTHORITATIVE CUSTOM INSTRUCTION: "${docTitle}"
 
-${doc.content}
+IMPORTANT: This is an authoritative document that defines mandatory review standards for this project.
+When you find violations of these standards, you MUST cite "${docTitle}" as the source in your response.
 
+`;
+      chunks.forEach((chunk, index) => {
+        customDocsSection += `
+**Section ${index + 1}${chunk.chunk_index !== undefined ? ` (Chunk ${chunk.chunk_index + 1})` : ''}:**
+
+${chunk.content}
+
+`;
+      });
+      customDocsSection += `
 ---
 
 `;
     });
+
     customDocsSection += `
 =====================================================================
-END OF CUSTOM INSTRUCTIONS - These take precedence over all other guidelines
+END OF CUSTOM INSTRUCTIONS - These are review methodology instructions that take precedence over all other guidelines
 `;
   }
 
@@ -873,12 +951,17 @@ END OF CUSTOM INSTRUCTIONS - These take precedence over all other guidelines
 
   // If custom instructions exist, incorporate them directly into the role
   if (customDocs && customDocs.length > 0) {
-    roleDefinition += '\n\nIMPORTANT: You have been given specific custom instructions that define your test review approach:';
-    customDocs.forEach((doc, index) => {
-      roleDefinition += `\n\n**CUSTOM INSTRUCTION ${index + 1}: "${doc.title}"**\n${doc.content}`;
+    // Group chunks by document title for better context
+    const docTitles = [...new Set(customDocs.map((doc) => doc.document_title || doc.title))];
+
+    roleDefinition +=
+      '\n\nIMPORTANT: You have been given specific custom instructions that define how you should conduct your test reviews:';
+    docTitles.forEach((title, index) => {
+      roleDefinition += `\n\n**CUSTOM INSTRUCTION SOURCE ${index + 1}: "${title}"**`;
+      roleDefinition += '\nThis contains specific instructions for your test review approach and criteria.';
     });
     roleDefinition +=
-      '\n\nThese custom instructions are fundamental to your identity as a test reviewer for this project and must be followed throughout your analysis.';
+      '\n\nThese custom instructions define your review methodology and must be followed throughout your analysis. When you apply these instructions, reference the source document that informed your decision.';
   }
 
   // Test-specific prompt
@@ -969,6 +1052,12 @@ DO NOT comment on:
 5. Format the output according to the JSON structure below.
 
 **FINAL REMINDER: If custom instructions were provided at the start of this prompt, they MUST be followed and take precedence over all other guidelines.**
+
+**🚨 CRITICAL CITATION REQUIREMENT 🚨**
+When you identify issues that violate custom instructions provided at the beginning of this prompt, you MUST:
+- Include the source document name in your issue description (e.g., "violates the testing guidelines specified in '[Document Name]'")
+- Reference the source document in your suggestion (e.g., "as required by '[Document Name]'" or "according to '[Document Name]'")
+- Do NOT provide generic suggestions - always tie violations back to the specific custom instruction source
 
 REQUIRED JSON OUTPUT FORMAT:
 
@@ -1076,19 +1165,42 @@ CRITICAL: CUSTOM INSTRUCTIONS - FOLLOW THESE BEFORE ALL OTHER INSTRUCTIONS
 =====================================================================
 
 `;
+
+    // Group chunks by document title to provide better context
+    const chunksByDocument = new Map();
     customDocs.forEach((doc) => {
+      const title = doc.document_title || doc.title;
+      if (!chunksByDocument.has(title)) {
+        chunksByDocument.set(title, []);
+      }
+      chunksByDocument.get(title).push(doc);
+    });
+
+    chunksByDocument.forEach((chunks, docTitle) => {
       customDocsSection += `
-### CUSTOM INSTRUCTION: "${doc.title}"
+### AUTHORITATIVE CUSTOM INSTRUCTION: "${docTitle}"
 
-${doc.content}
+IMPORTANT: This is an authoritative document that defines mandatory review standards for this project.
+When you find violations of these standards, you MUST cite "${docTitle}" as the source in your response.
 
+`;
+      chunks.forEach((chunk, index) => {
+        customDocsSection += `
+**Section ${index + 1}${chunk.chunk_index !== undefined ? ` (Chunk ${chunk.chunk_index + 1})` : ''}:**
+
+${chunk.content}
+
+`;
+      });
+      customDocsSection += `
 ---
 
 `;
     });
+
     customDocsSection += `
 =====================================================================
-END OF CUSTOM INSTRUCTIONS - These take precedence over all other guidelines
+END OF CUSTOM INSTRUCTIONS - These are review methodology instructions that take precedence over all other guidelines
 `;
   }
 
@@ -1097,12 +1209,16 @@ END OF CUSTOM INSTRUCTIONS - These take precedence over all other guidelines
 
   // If custom instructions exist, incorporate them directly into the role
   if (customDocs && customDocs.length > 0) {
-    roleDefinition += '\n\nIMPORTANT: You have been given specific custom instructions that define your PR review approach:';
-    customDocs.forEach((doc, index) => {
-      roleDefinition += `\n\n**CUSTOM INSTRUCTION ${index + 1}: "${doc.title}"**\n${doc.content}`;
+    // Group chunks by document title for better context
+    const docTitles = [...new Set(customDocs.map((doc) => doc.document_title || doc.title))];
+
+    roleDefinition += '\n\nIMPORTANT: You have been given specific custom instructions that define how you should conduct your PR reviews:';
+    docTitles.forEach((title, index) => {
+      roleDefinition += `\n\n**CUSTOM INSTRUCTION SOURCE ${index + 1}: "${title}"**`;
+      roleDefinition += '\nThis contains specific instructions for your PR review approach and criteria.';
     });
     roleDefinition +=
-      '\n\nThese custom instructions are fundamental to your identity as a PR reviewer for this project and must be followed throughout your analysis.';
+      '\n\nThese custom instructions define your review methodology and must be followed throughout your analysis. When you apply these instructions, reference the source document that informed your decision.';
   }
 
   roleDefinition += '\nAnalyze ALL files together to identify cross-file issues, consistency problems, and overall code quality.';
@@ -1231,6 +1347,12 @@ DO NOT flag missing imports or files referenced in import statements as issues. 
    - Example: Instead of listing 20+ line numbers, use [15, 23, 47, "...and 12 other occurrences"]
 
 **FINAL REMINDER: If custom instructions were provided at the start of this prompt, they MUST be followed and take precedence over all other guidelines.**
+
+**🚨 CRITICAL CITATION REQUIREMENT 🚨**
+When you identify issues that violate custom instructions provided at the beginning of this prompt, you MUST:
+- Include the source document name in your issue description (e.g., "violates the coding standards specified in '[Document Name]'")
+- Reference the source document in your suggestion (e.g., "as required by '[Document Name]'" or "according to '[Document Name]'")
+- Do NOT provide generic suggestions - always tie violations back to the specific custom instruction source
 
 REQUIRED JSON OUTPUT FORMAT:
 
@@ -1569,7 +1691,7 @@ async function performHolisticPRAnalysis(options) {
           items: unifiedContext.prComments.slice(0, 10),
         },
       ],
-      customDocs,
+      customDocs: unifiedContext.customDocChunks || options.relevantCustomDocChunks || customDocs, // Use unified chunks first, then relevant chunks, then full docs
       metadata: {
         hasCodeExamples: unifiedContext.codeExamples.length > 0,
         hasGuidelines: unifiedContext.guidelines.length > 0,
@@ -1583,37 +1705,56 @@ async function performHolisticPRAnalysis(options) {
     };
 
     // Add verbose debug logging similar to individual file reviews
-    debug('--- Holistic PR Review: Guidelines Sent to LLM ---');
+    console.log(chalk.magenta('--- Holistic PR Review: Guidelines Sent to LLM ---'));
     if (unifiedContext.guidelines.length > 0) {
       unifiedContext.guidelines.slice(0, 10).forEach((g, i) => {
-        debug(`  [${i + 1}] Path: ${g.path} ${g.headingText || g.heading_text ? `(Heading: "${g.headingText || g.heading_text}")` : ''}`);
-        debug(`      Content: ${g.content.substring(0, 100).replace(/\n/g, ' ')}...`);
+        console.log(
+          chalk.magenta(
+            `  [${i + 1}] Path: ${g.path} ${g.headingText || g.heading_text ? `(Heading: "${g.headingText || g.heading_text}")` : ''}`
+          )
+        );
+        console.log(chalk.gray(`      Content: ${g.content.substring(0, 100).replace(/\n/g, ' ')}...`));
       });
     } else {
-      debug('  (None)');
+      console.log(chalk.magenta('  (None)'));
     }
 
-    debug('--- Holistic PR Review: Code Examples Sent to LLM ---');
+    console.log(chalk.magenta('--- Holistic PR Review: Code Examples Sent to LLM ---'));
     if (unifiedContext.codeExamples.length > 0) {
       unifiedContext.codeExamples.slice(0, 10).forEach((ex, i) => {
-        debug(`  [${i + 1}] Path: ${ex.path} (Similarity: ${ex.similarity?.toFixed(3) || 'N/A'})`);
-        debug(`      Content: ${ex.content.substring(0, 100).replace(/\\n/g, ' ')}...`);
+        console.log(chalk.magenta(`  [${i + 1}] Path: ${ex.path} (Similarity: ${ex.similarity?.toFixed(3) || 'N/A'})`));
+        console.log(chalk.gray(`      Content: ${ex.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
       });
     } else {
-      debug('  (None)');
+      console.log(chalk.magenta('  (None)'));
     }
 
-    debug('--- Holistic PR Review: Top Historic Comments Sent to LLM ---');
+    console.log(chalk.magenta('--- Holistic PR Review: Top Historic Comments Sent to LLM ---'));
     if (unifiedContext.prComments.length > 0) {
       unifiedContext.prComments.slice(0, 5).forEach((comment, i) => {
-        debug(`  [${i + 1}] PR #${comment.prNumber} by ${comment.author} (Relevance: ${(comment.relevanceScore * 100).toFixed(1)}%)`);
-        debug(`      File: ${comment.filePath}`);
-        debug(`      Comment: ${comment.body.substring(0, 100).replace(/\n/g, ' ')}...`);
+        console.log(
+          chalk.magenta(
+            `  [${i + 1}] PR #${comment.prNumber} by ${comment.author} (Relevance: ${(comment.relevanceScore * 100).toFixed(1)}%)`
+          )
+        );
+        console.log(chalk.gray(`      File: ${comment.filePath}`));
+        console.log(chalk.gray(`      Comment: ${comment.body.substring(0, 100).replace(/\n/g, ' ')}...`));
       });
     } else {
-      debug('  (None)');
+      console.log(chalk.magenta('  (None)'));
     }
-    debug('--- Sending Holistic PR Analysis Prompt to LLM ---');
+
+    console.log(chalk.magenta('--- Holistic PR Review: Custom Document Chunks Sent to LLM ---'));
+    if (unifiedContext.customDocChunks && unifiedContext.customDocChunks.length > 0) {
+      unifiedContext.customDocChunks.forEach((chunk, i) => {
+        console.log(chalk.magenta(`  [${i + 1}] Document: "${chunk.document_title}" (Chunk ${chunk.chunk_index + 1})`));
+        console.log(chalk.gray(`      Similarity: ${chunk.similarity?.toFixed(3) || 'N/A'}`));
+        console.log(chalk.gray(`      Content: ${chunk.content.substring(0, 100).replace(/\n/g, ' ')}...`));
+      });
+    } else {
+      console.log(chalk.magenta('  (None)'));
+    }
+    console.log(chalk.magenta('--- Sending Holistic PR Analysis Prompt to LLM ---'));
 
     // Call the centralized analysis function
     const parsedResponse = await callLLMForAnalysis(holisticContext, {
@@ -1713,8 +1854,101 @@ async function getContextForFile(filePath, content, options = {}) {
     guidelineQueryEmbedding = await calculateQueryEmbedding(guidelineQuery);
   }
 
-  console.log(chalk.blue('🚀 Starting parallel context retrieval...'));
-  const [prContextResult, guidelineCandidates, codeExampleCandidates] = await Promise.all([
+  console.log(chalk.blue('� Starting parallel context retrieval...'));
+  // Helper function to process custom documents in parallel (with caching)
+  const processCustomDocuments = async () => {
+    // Check if preprocessed chunks are available (from PR-level processing)
+    if (options.preprocessedCustomDocChunks && options.preprocessedCustomDocChunks.length > 0) {
+      console.log(chalk.blue(`📄 Using preprocessed custom document chunks (${options.preprocessedCustomDocChunks.length} available)`));
+
+      // Use the guideline query for finding relevant custom document chunks
+      const relevantChunks = await findRelevantCustomDocChunks(guidelineQuery, options.preprocessedCustomDocChunks, {
+        limit: 5,
+        similarityThreshold: 0.3,
+        queryContextForReranking: reviewedSnippetContext,
+        useReranking: true,
+        precomputedQueryEmbedding: guidelineQueryEmbedding,
+        queryFilePath: filePath,
+      });
+
+      console.log(chalk.green(`📄 Found ${relevantChunks.length} relevant custom document chunks`));
+
+      // Log which chunks made the cut
+      if (relevantChunks.length > 0) {
+        console.log(chalk.cyan('📋 Custom Document Chunks Selected:'));
+        relevantChunks.forEach((chunk, i) => {
+          console.log(chalk.cyan(`  [${i + 1}] "${chunk.document_title}" (Chunk ${chunk.chunk_index + 1})`));
+          console.log(chalk.gray(`      Similarity: ${chunk.similarity?.toFixed(3) || 'N/A'}`));
+          console.log(chalk.gray(`      Content: ${chunk.content.substring(0, 80).replace(/\n/g, ' ')}...`));
+        });
+      }
+
+      return relevantChunks;
+    }
+
+    // Fallback to original processing if no preprocessed chunks available
+    if (!options.customDocs || options.customDocs.length === 0) {
+      return [];
+    }
+
+    try {
+      console.log(chalk.blue('📄 Processing custom documents for context...'));
+
+      // Check if custom documents are already processed for this project
+      let processedChunks = await checkExistingCustomDocumentChunks(projectPath);
+
+      if (!processedChunks || processedChunks.length === 0) {
+        console.log(chalk.cyan('📄 Custom documents not yet processed for this project, processing now...'));
+        // Process custom documents into chunks (only if not already processed)
+        processedChunks = await processCustomDocumentsInMemory(options.customDocs, projectPath);
+      } else {
+        console.log(chalk.green(`📄 Reusing ${processedChunks.length} already processed custom document chunks`));
+      }
+
+      if (processedChunks.length > 0) {
+        // Use the guideline query for finding relevant custom document chunks
+        const relevantChunks = await findRelevantCustomDocChunks(guidelineQuery, processedChunks, {
+          limit: 5,
+          similarityThreshold: 0.3,
+          queryContextForReranking: reviewedSnippetContext,
+          useReranking: true,
+          precomputedQueryEmbedding: guidelineQueryEmbedding,
+          queryFilePath: filePath,
+        });
+
+        console.log(chalk.green(`📄 Found ${relevantChunks.length} relevant custom document chunks`));
+
+        // Log which chunks made the cut
+        if (relevantChunks.length > 0) {
+          console.log(chalk.cyan('📋 Custom Document Chunks Selected:'));
+          relevantChunks.forEach((chunk, i) => {
+            console.log(chalk.cyan(`  [${i + 1}] "${chunk.document_title}" (Chunk ${chunk.chunk_index + 1})`));
+            console.log(chalk.gray(`      Similarity: ${chunk.similarity?.toFixed(3) || 'N/A'}`));
+            console.log(chalk.gray(`      Content: ${chunk.content.substring(0, 80).replace(/\n/g, ' ')}...`));
+          });
+        }
+
+        return relevantChunks;
+      }
+    } catch (error) {
+      console.error(chalk.red(`Error processing custom documents: ${error.message}`));
+    }
+
+    return [];
+  };
+
+  // Helper function to check if custom documents are already processed
+  const checkExistingCustomDocumentChunks = async (projectPath) => {
+    try {
+      // Use the statically imported function
+      return await getExistingCustomDocumentChunks(projectPath);
+    } catch (error) {
+      console.log(chalk.gray('No existing custom document chunks found, will process from scratch'));
+      return [];
+    }
+  };
+
+  const [prContextResult, guidelineCandidates, codeExampleCandidates, relevantCustomDocChunks] = await Promise.all([
     getPRCommentContext(filePath, {
       ...options,
       projectPath,
@@ -1743,9 +1977,10 @@ async function getContextForFile(filePath, content, options = {}) {
       queryFilePath: filePath,
       includeProjectStructure: false,
     }),
+    processCustomDocuments(), // Add custom document processing as 4th parallel operation
   ]).catch((error) => {
     console.warn(chalk.yellow(`Parallel context retrieval failed: ${error.message}`));
-    return [[], [], []];
+    return [[], [], [], []];
   });
 
   const prCommentContext = prContextResult?.comments || [];
@@ -1889,6 +2124,7 @@ async function getContextForFile(filePath, content, options = {}) {
     finalGuidelineSnippets,
     prCommentContext,
     prContextAvailable,
+    relevantCustomDocChunks, // Add relevant custom document chunks
   };
 }
 
@@ -1897,14 +2133,44 @@ async function gatherUnifiedContextForPR(prFiles, options = {}) {
     codeExamples: new Map(),
     guidelines: new Map(),
     prComments: new Map(),
+    customDocChunks: new Map(),
   };
+
+  // Process custom documents into chunks once at the start for the entire PR
+  let globalCustomDocChunks = [];
+  if (options.customDocs && options.customDocs.length > 0) {
+    const projectPath = options.projectPath || process.cwd();
+    console.log(chalk.blue('📄 Processing custom documents once for entire PR...'));
+
+    try {
+      // Check if custom documents are already processed for this project
+      let processedChunks = await getExistingCustomDocumentChunks(projectPath);
+
+      if (!processedChunks || processedChunks.length === 0) {
+        console.log(chalk.cyan('📄 Custom documents not yet processed for this project, processing now...'));
+        processedChunks = await processCustomDocumentsInMemory(options.customDocs, projectPath);
+      } else {
+        console.log(chalk.green(`📄 Reusing ${processedChunks.length} already processed custom document chunks`));
+      }
+
+      globalCustomDocChunks = processedChunks;
+      console.log(chalk.green(`📄 Custom documents processed: ${globalCustomDocChunks.length} chunks available for PR analysis`));
+    } catch (error) {
+      console.error(chalk.red(`Error processing custom documents for PR: ${error.message}`));
+    }
+  }
 
   const contextPromises = prFiles.map(async (file) => {
     try {
       const filePath = file.filePath;
       const content = file.diffContent || file.content;
-      // Use the new, modular context gathering function
-      const context = await getContextForFile(filePath, content, options);
+      // Pass the pre-processed chunks to avoid reprocessing, but still allow file-specific similarity search
+      const optionsWithPreprocessedChunks = {
+        ...options,
+        customDocs: [], // Remove original custom docs to avoid reprocessing
+        preprocessedCustomDocChunks: globalCustomDocChunks, // Pass pre-processed chunks
+      };
+      const context = await getContextForFile(filePath, content, optionsWithPreprocessedChunks);
       return {
         ...context,
         filePath,
@@ -1945,6 +2211,16 @@ async function gatherUnifiedContextForPR(prFiles, options = {}) {
         allProcessedContext.prComments.set(key, comment);
       }
     });
+
+    (context.relevantCustomDocChunks || []).forEach((chunk) => {
+      const key = chunk.id;
+      if (
+        key &&
+        (!allProcessedContext.customDocChunks.has(key) || chunk.similarity > allProcessedContext.customDocChunks.get(key).similarity)
+      ) {
+        allProcessedContext.customDocChunks.set(key, chunk);
+      }
+    });
   }
 
   // Convert Maps to sorted arrays
@@ -1960,10 +2236,15 @@ async function gatherUnifiedContextForPR(prFiles, options = {}) {
     .sort((a, b) => b.relevanceScore - a.relevanceScore)
     .slice(0, 40); // Keep a larger pool of 40 candidates for the final prompt selection
 
+  const deduplicatedCustomDocChunks = Array.from(allProcessedContext.customDocChunks.values())
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, 10); // Keep top 10 custom document chunks
+
   return {
     codeExamples: deduplicatedCodeExamples,
     guidelines: deduplicatedGuidelines,
     prComments: deduplicatedPRComments,
+    customDocChunks: deduplicatedCustomDocChunks,
   };
 }
 

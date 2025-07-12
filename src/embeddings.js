@@ -83,6 +83,9 @@ const h1EmbeddingCache = new Map();
 const embeddingCache = new Map();
 const MAX_EMBEDDING_CACHE_SIZE = 1000;
 
+// In-memory storage for custom document chunks (projectPath -> chunks[])
+const customDocumentChunks = new Map();
+
 // Progress Tracker
 const progressTracker = {
   totalFiles: 0,
@@ -1888,6 +1891,387 @@ export const findRelevantDocs = async (queryText, options = {}) => {
     return [];
   }
 };
+
+// ============================================================================
+// CUSTOM DOCUMENT PROCESSING FUNCTIONS
+// ============================================================================
+
+/**
+ * Chunk a single custom document into semantic sections
+ * @param {Object} doc - Custom document object with title and content
+ * @returns {Array<Object>} Array of document chunks
+ */
+function chunkCustomDocument(doc) {
+  const { title, content } = doc;
+
+  // Extract the actual document title from content (e.g., "# Engineering Guidelines")
+  let documentTitle = title;
+
+  // Try to find a markdown header in the content
+  const headerMatch = content.match(/^#\s+(.+)$/m);
+  if (headerMatch) {
+    documentTitle = headerMatch[1].trim();
+  } else {
+    // If no header found, try to extract filename from title like "instruction:./FILENAME.md"
+    const filePathMatch = title.match(/:\.\/([^/]+)\.([a-zA-Z]+)$/);
+    if (filePathMatch) {
+      // Use filename without extension, but capitalize it nicely
+      documentTitle = filePathMatch[1].replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+    }
+  }
+
+  const chunks = [];
+
+  // Split content into paragraphs and sections
+  const sections = content.split(/\n\s*\n/);
+  let currentChunk = '';
+  let chunkIndex = 0;
+  const maxChunkSize = 1000; // Max characters per chunk
+  const minChunkSize = 100; // Min characters to avoid tiny chunks
+
+  for (let i = 0; i < sections.length; i++) {
+    const section = sections[i].trim();
+    if (!section) continue;
+
+    // Check if adding this section would exceed max chunk size
+    if (currentChunk.length + section.length > maxChunkSize && currentChunk.length > minChunkSize) {
+      // Save current chunk
+      chunks.push({
+        id: `${slugify(documentTitle)}_chunk_${chunkIndex}`,
+        content: currentChunk.trim(),
+        document_title: documentTitle,
+        chunk_index: chunkIndex,
+        metadata: {
+          section_start: chunkIndex === 0,
+          total_chunks: 0, // Will be updated after all chunks are created
+        },
+      });
+
+      chunkIndex++;
+      currentChunk = section;
+    } else {
+      // Add section to current chunk
+      currentChunk += (currentChunk ? '\n\n' : '') + section;
+    }
+  }
+
+  // Add the last chunk if it has content
+  if (currentChunk.trim()) {
+    chunks.push({
+      id: `${slugify(documentTitle)}_chunk_${chunkIndex}`,
+      content: currentChunk.trim(),
+      document_title: documentTitle,
+      chunk_index: chunkIndex,
+      metadata: {
+        section_start: chunkIndex === 0,
+        total_chunks: 0, // Will be updated after all chunks are created
+      },
+    });
+  }
+
+  // Update total_chunks metadata for all chunks
+  chunks.forEach((chunk) => {
+    chunk.metadata.total_chunks = chunks.length;
+  });
+
+  return chunks;
+}
+
+/**
+ * Process custom documents into chunks with embeddings and store in memory
+ * @param {Array<Object>} customDocs - Array of custom document objects
+ * @param {string} projectPath - Project path for organizing chunks
+ * @returns {Promise<Array<Object>>} Processed chunks with embeddings
+ */
+export async function processCustomDocumentsInMemory(customDocs, projectPath) {
+  if (!customDocs || customDocs.length === 0) {
+    console.log(chalk.gray('No custom documents to process'));
+    return [];
+  }
+
+  console.log(chalk.cyan(`Processing ${customDocs.length} custom documents into chunks...`));
+
+  const allChunks = [];
+
+  for (const doc of customDocs) {
+    console.log(chalk.gray(`  Chunking document: ${doc.title}`));
+
+    // Chunk the document
+    const chunks = chunkCustomDocument(doc);
+    console.log(chalk.gray(`    Created ${chunks.length} chunks`));
+
+    // Generate embeddings for each chunk
+    const chunksWithEmbeddings = await Promise.all(
+      chunks.map(async (chunk) => {
+        try {
+          const embedding = await calculateEmbedding(chunk.content);
+          return {
+            ...chunk,
+            embedding,
+            similarity: 0, // Will be calculated during search
+            type: 'custom-document-chunk',
+          };
+        } catch (error) {
+          console.error(chalk.red(`Error generating embedding for chunk ${chunk.id}: ${error.message}`));
+          return null;
+        }
+      })
+    );
+
+    // Filter out failed chunks
+    const validChunks = chunksWithEmbeddings.filter((chunk) => chunk !== null);
+    allChunks.push(...validChunks);
+
+    console.log(chalk.gray(`    Generated embeddings for ${validChunks.length}/${chunks.length} chunks`));
+  }
+
+  // Store chunks in memory organized by project path
+  customDocumentChunks.set(projectPath, allChunks);
+
+  console.log(chalk.green(`Successfully processed ${allChunks.length} custom document chunks`));
+  return allChunks;
+}
+
+/**
+ * Get existing custom document chunks for a project path
+ * @param {string} projectPath - Project path to check for existing chunks
+ * @returns {Promise<Array<Object>>} Existing chunks or empty array
+ */
+export async function getExistingCustomDocumentChunks(projectPath) {
+  try {
+    const existingChunks = customDocumentChunks.get(projectPath);
+    if (existingChunks && existingChunks.length > 0) {
+      debug(`[getExistingCustomDocumentChunks] Found ${existingChunks.length} existing chunks for project: ${projectPath}`);
+      return existingChunks;
+    }
+    debug(`[getExistingCustomDocumentChunks] No existing chunks found for project: ${projectPath}`);
+    return [];
+  } catch (error) {
+    debug(`[getExistingCustomDocumentChunks] Error checking existing chunks: ${error.message}`);
+    return [];
+  }
+}
+
+/**
+ * Find relevant custom document chunks using similarity search
+ * @param {string} queryText - The search query
+ * @param {Array<Object>} chunks - Array of custom document chunks
+ * @param {Object} options - Search options
+ * @returns {Promise<Array<Object>>} Relevant chunks sorted by similarity
+ */
+export async function findRelevantCustomDocChunks(queryText, chunks = [], options = {}) {
+  const {
+    limit = 5,
+    similarityThreshold = 0.3,
+    queryContextForReranking = null,
+    useReranking = true,
+    precomputedQueryEmbedding = null, // OPTIMIZATION: Support pre-computed query embedding
+    queryFilePath = null,
+  } = options;
+
+  if (!queryText?.trim()) {
+    console.warn(chalk.yellow('Empty query text provided for custom document search'));
+    return [];
+  }
+
+  if (!chunks || chunks.length === 0) {
+    console.log(chalk.gray('No custom document chunks available for search'));
+    return [];
+  }
+
+  console.log(chalk.cyan(`Searching ${chunks.length} custom document chunks...`));
+
+  try {
+    // OPTIMIZATION: Use pre-computed query embedding if available
+    let queryEmbedding = precomputedQueryEmbedding;
+    if (!queryEmbedding) {
+      queryEmbedding = await calculateQueryEmbedding(queryText);
+      debug(`[CACHE] Query embedding calculated for custom docs, dimensions: ${queryEmbedding?.length || 'null'}`);
+    } else {
+      debug(`[CACHE] Using pre-computed query embedding for custom docs, dimensions: ${queryEmbedding?.length || 'null'}`);
+    }
+
+    // Calculate similarity for each chunk
+    const results = chunks.map((chunk) => ({
+      ...chunk,
+      similarity: calculateCosineSimilarity(queryEmbedding, chunk.embedding),
+      reranked: false,
+    }));
+
+    // Filter by similarity threshold
+    let filteredResults = results.filter((result) => result.similarity >= similarityThreshold);
+
+    // Apply sophisticated context-aware reranking if enabled and context is available
+    if (useReranking && queryContextForReranking && filteredResults.length >= 2) {
+      console.log(chalk.cyan('Applying sophisticated contextual reranking to custom document chunks...'));
+
+      // Reranking weights similar to findRelevantDocs
+      const WEIGHT_INITIAL_SIM = 0.4;
+      const WEIGHT_DOCUMENT_TITLE_MATCH = 0.2;
+      const HEAVY_BOOST_SAME_AREA = 0.3;
+      const MODERATE_BOOST_TECH_MATCH = 0.15;
+      const HEAVY_PENALTY_AREA_MISMATCH = -0.1;
+      const PENALTY_GENERIC_DOC_LOW_CONTEXT_MATCH = -0.1;
+
+      // OPTIMIZATION: Batch calculate document title embeddings for cache misses
+      const uniqueDocTitles = new Set();
+      const docTitlesToCalculate = [];
+
+      for (const result of filteredResults) {
+        const docTitle = result.document_title;
+        if (docTitle && !uniqueDocTitles.has(docTitle)) {
+          uniqueDocTitles.add(docTitle);
+          if (!h1EmbeddingCache.has(docTitle)) {
+            docTitlesToCalculate.push(docTitle);
+          }
+        }
+      }
+
+      // Batch calculate document title embeddings for cache misses
+      if (docTitlesToCalculate.length > 0) {
+        debug(`[OPTIMIZATION] Batch calculating ${docTitlesToCalculate.length} custom document title embeddings`);
+        const titleEmbeddings = await calculateEmbeddingBatch(docTitlesToCalculate);
+        for (let i = 0; i < docTitlesToCalculate.length; i++) {
+          if (titleEmbeddings[i]) {
+            h1EmbeddingCache.set(docTitlesToCalculate[i], titleEmbeddings[i]);
+          }
+        }
+      }
+
+      // OPTIMIZATION: Parallelize reranking calculations
+      const rerankingPromises = filteredResults.map(async (result) => {
+        let chunkInitialScore = result.similarity * WEIGHT_INITIAL_SIM;
+        let contextMatchBonus = 0;
+        let titleRelevanceBonus = 0;
+        let genericDocPenalty = 0;
+        let pathSimilarityScore = 0;
+
+        const docTitle = result.document_title;
+
+        // Context matching based on area and technology
+        if (queryContextForReranking.area !== 'Unknown' && queryContextForReranking.area !== 'General') {
+          const contentLower = result.content.toLowerCase();
+          const areaLower = queryContextForReranking.area.toLowerCase();
+
+          // Check if content mentions the same area
+          if (contentLower.includes(areaLower) || contentLower.includes(areaLower.replace(/[_-]/g, ' '))) {
+            contextMatchBonus += HEAVY_BOOST_SAME_AREA;
+
+            // Technology matching bonus
+            if (queryContextForReranking.dominantTech && queryContextForReranking.dominantTech.length > 0) {
+              const techMatches = queryContextForReranking.dominantTech.some((tech) => contentLower.includes(tech.toLowerCase()));
+              if (techMatches) {
+                contextMatchBonus += MODERATE_BOOST_TECH_MATCH;
+              }
+            }
+          } else if (queryContextForReranking.area !== 'GeneralJS_TS') {
+            // Penalty for area mismatch
+            contextMatchBonus += HEAVY_PENALTY_AREA_MISMATCH;
+          }
+        }
+
+        // Keyword matching bonus
+        if (queryContextForReranking.keywords && queryContextForReranking.keywords.length > 0) {
+          const contentLower = result.content.toLowerCase();
+          const matchingKeywords = queryContextForReranking.keywords.filter((keyword) => contentLower.includes(keyword.toLowerCase()));
+          const keywordMatchRatio = matchingKeywords.length / queryContextForReranking.keywords.length;
+          contextMatchBonus += keywordMatchRatio * 0.1;
+        }
+
+        // Document title relevance using cached embeddings
+        if (docTitle && queryEmbedding) {
+          const titleEmb = h1EmbeddingCache.get(docTitle);
+          if (titleEmb) {
+            titleRelevanceBonus = calculateCosineSimilarity(queryEmbedding, titleEmb) * WEIGHT_DOCUMENT_TITLE_MATCH;
+          }
+        }
+
+        // Generic document penalty (if document seems too general)
+        const contentLength = result.content.length;
+        if (contentLength > 2000) {
+          // Large documents might be more general
+          const specificityScore =
+            (queryContextForReranking.keywords || []).length > 0
+              ? queryContextForReranking.keywords.filter((kw) => result.content.toLowerCase().includes(kw.toLowerCase())).length /
+                queryContextForReranking.keywords.length
+              : 0;
+
+          if (specificityScore < 0.3) {
+            genericDocPenalty = PENALTY_GENERIC_DOC_LOW_CONTEXT_MATCH;
+            debug(`[CustomDocRerank] Doc ${docTitle} seems generic with low specificity, applying penalty: ${genericDocPenalty}`);
+          }
+        }
+
+        // Path similarity bonus (if query file path is available)
+        if (queryFilePath && result.document_title) {
+          // Simple path similarity based on document title similarity to file path
+          const pathSim = calculatePathSimilarity(queryFilePath, result.document_title);
+          pathSimilarityScore = pathSim * 0.1;
+        }
+
+        const finalScore = chunkInitialScore + contextMatchBonus + titleRelevanceBonus + pathSimilarityScore + genericDocPenalty;
+        result.similarity = Math.max(0, Math.min(1, finalScore));
+        result.reranked = true;
+
+        return result;
+      });
+
+      // Wait for all reranking calculations to complete
+      await Promise.all(rerankingPromises);
+
+      // Log debug info for first few results
+      for (let i = 0; i < Math.min(3, filteredResults.length); i++) {
+        const result = filteredResults[i];
+        debug(`[CustomDocRerank] ${result.document_title?.substring(0, 30)}... Final=${result.similarity.toFixed(4)}`);
+      }
+
+      debug('Sophisticated contextual reranking of custom document chunks complete.');
+    }
+
+    // Sort by similarity and limit results
+    filteredResults.sort((a, b) => b.similarity - a.similarity);
+
+    if (filteredResults.length > limit) {
+      filteredResults = filteredResults.slice(0, limit);
+    }
+
+    console.log(chalk.green(`Found ${filteredResults.length} relevant custom document chunks`));
+
+    // Log top results for debugging
+    if (filteredResults.length > 0) {
+      debug(`[Custom Doc Search] Top result: ${filteredResults[0].document_title} (${filteredResults[0].similarity.toFixed(3)})`);
+    }
+
+    return filteredResults;
+  } catch (error) {
+    console.error(chalk.red(`Error searching custom document chunks: ${error.message}`));
+    return [];
+  }
+}
+
+/**
+ * Get custom document chunks for a project
+ * @param {string} projectPath - Project path
+ * @returns {Array<Object>} Custom document chunks for the project
+ */
+export function getCustomDocumentChunks(projectPath) {
+  return customDocumentChunks.get(projectPath) || [];
+}
+
+/**
+ * Clear custom document chunks for a project
+ * @param {string} projectPath - Project path
+ */
+export function clearCustomDocumentChunks(projectPath) {
+  customDocumentChunks.delete(projectPath);
+}
+
+/**
+ * Clear all custom document chunks
+ */
+export function clearAllCustomDocumentChunks() {
+  customDocumentChunks.clear();
+}
 
 /**
  * Find similar code using native LanceDB hybrid search
