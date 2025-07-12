@@ -2294,7 +2294,7 @@ export async function findRelevantCustomDocChunks(queryText, chunks = [], option
  * @param {string} projectPath - Project path
  * @returns {Array<Object>} Custom document chunks for the project
  */
-export function getCustomDocumentChunks(projectPath) {
+function getCustomDocumentChunks(projectPath) {
   return customDocumentChunks.get(projectPath) || [];
 }
 
@@ -2302,14 +2302,14 @@ export function getCustomDocumentChunks(projectPath) {
  * Clear custom document chunks for a project
  * @param {string} projectPath - Project path
  */
-export function clearCustomDocumentChunks(projectPath) {
+function clearCustomDocumentChunks(projectPath) {
   customDocumentChunks.delete(projectPath);
 }
 
 /**
  * Clear all custom document chunks
  */
-export function clearAllCustomDocumentChunks() {
+function clearAllCustomDocumentChunks() {
   customDocumentChunks.clear();
 }
 
