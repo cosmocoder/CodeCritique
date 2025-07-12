@@ -1942,7 +1942,7 @@ async function getContextForFile(filePath, content, options = {}) {
     try {
       // Use the statically imported function
       return await getExistingCustomDocumentChunks(projectPath);
-    } catch (error) {
+    } catch {
       console.log(chalk.gray('No existing custom document chunks found, will process from scratch'));
       return [];
     }
