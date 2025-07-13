@@ -1,811 +1,864 @@
 # AI Code Review Tool
 
-A self-hosted, AI-powered code review tool designed to enhance your development workflow with automated, context-aware code reviews using FastEmbed for local embeddings and Anthropic Claude for analysis. While originally built for JavaScript and TypeScript projects, it can be used with any programming language.
+A self-hosted, AI-powered code review tool using **RAG (Retrieval-Augmented Generation)** with local embeddings and Anthropic Claude for intelligent, context-aware code analysis. Supports any programming language with specialized features for JavaScript/TypeScript projects.
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [Installation](#installation)
-- [Usage](#usage)
-- [Architecture](#architecture)
-- [Customization](#customization)
-- [API Requirements](#api-requirements)
-- [Future Development](#future-development)
+- [Quick Start](#quick-start)
+- [Commands Reference](#commands-reference)
+- [RAG Architecture](#rag-architecture)
+- [Configuration](#configuration)
+- [Output Formats](#output-formats)
+- [Error Handling & Troubleshooting](#error-handling--troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Overview
 
-### Purpose and Benefits
+### How RAG Powers Intelligent Code Review
 
-The AI Code Review Tool is a powerful solution that leverages AI to provide automated, context-aware code reviews for any programming language. While it has specialized support for JavaScript and TypeScript, it can analyze code changes, apply project-specific rules, and provide actionable feedback to improve code quality in projects written in Python, Ruby, Java, C++, and more.
+The AI Code Review Tool uses **Retrieval-Augmented Generation (RAG)** to provide context-aware code analysis by combining:
 
-Key benefits include:
+- **Local embeddings** (via FastEmbed) for understanding your codebase patterns
+- **Vector similarity search** to find relevant code examples and documentation
+- **Historical PR analysis** to learn from past code review patterns
+- **Custom document integration** for project-specific guidelines
+- **LLM-powered analysis** (Anthropic Claude) with rich contextual information
 
-- **Reduced Review Time**: Automate repetitive aspects of code review, allowing developers to focus on higher-level concerns
-- **Consistent Standards**: Enforce coding standards and best practices uniformly across the codebase
-- **Context-Aware Analysis**: Leverage embeddings to understand your codebase's specific patterns and conventions
-- **Actionable Feedback**: Receive specific, constructive suggestions rather than generic warnings
-- **Seamless Integration**: Works with your existing Git workflow, CI/CD pipeline, and development environment
+This RAG-based approach provides more accurate, project-specific code reviews compared to generic static analysis tools.
 
 ### Key Features
 
-- **Intelligent Code Analysis**: Detects potential bugs, performance issues, and maintainability concerns
-- **Project-Specific Rules**: Enforces your team's coding standards and best practices
-- **Multiple Output Formats**: Supports text, JSON, and Markdown output for flexible integration
-- **Git Integration**: Analyzes changes based on git diff or specific files
-- **Customizable Rule Sets**: Adapt the tool to your project's specific needs
-- **Embedding-Based Context**: Uses FastEmbed (local embeddings) to provide context-aware recommendations
-- **LLM-Powered Analysis**: Uses Anthropic Claude for in-depth code review with context
-- **Incremental Embedding Updates**: Efficiently updates embeddings only for changed files
+- **🔍 Context-Aware Analysis**: Understands your codebase patterns and conventions
+- **🌐 Universal Language Support**: Works with any programming language
+- **⚡ Local Embeddings**: Uses FastEmbed for fast, privacy-respecting semantic search
+- **📚 Custom Guidelines**: Integrate your team's coding standards and documentation
+- **🔄 PR History Learning**: Learns from past code review patterns in your repository
+- **📊 Multiple Output Formats**: Text, JSON, and Markdown output for flexible integration
+- **🔧 Git Integration**: Analyze specific files, patterns, or branch differences
+- **🚀 Easy Setup**: Works via npx in any project type
 
-### Project Alignment
+### Benefits
 
-This tool is specifically designed to align with diverse project needs by:
-
-- Supporting analysis of multiple programming languages
-- Providing specialized support for TypeScript/JavaScript with React-specific rules
-- Integrating with Git-based workflows
-- Enforcing team coding standards and best practices
-- Providing feedback in formats compatible with various development tools
-- Scaling to handle codebases of different sizes and complexities
-- Being easily runnable in any project type via npx
+- **Reduced Review Time**: Automate repetitive aspects of code review
+- **Consistent Standards**: Enforce coding standards uniformly across the codebase
+- **Learning from History**: Leverage patterns from previous code reviews
+- **Project-Specific**: Understands your codebase's unique patterns and conventions
+- **Actionable Feedback**: Provides specific, constructive suggestions
 
 ## Installation
 
-### Dependencies and Requirements
+### Prerequisites
 
-The AI Code Review Tool requires:
+- **Node.js** v22.0.0 or higher
+- **Git** (for diff-based analysis)
+- **Anthropic API key** (for LLM analysis)
 
-- Node.js v22.0.0 or higher
-- Git (for diff-based analysis)
-- Anthropic API key (for LLM analysis with Claude)
+### API Key Setup
 
-### API Keys Setup
+Set up your Anthropic API key using one of these methods:
 
-The tool requires an API key for:
+#### Option 1: Environment Variable
 
-- **Anthropic** - Used for code analysis with Claude
+```bash
+export ANTHROPIC_API_KEY=your_anthropic_api_key
+```
 
-Note: The tool uses FastEmbed for generating embeddings locally, so no additional API key is needed for embeddings.
+#### Option 2: .env File
 
-You can provide the API key in two ways:
+Create a `.env` file in your project directory:
 
-1. **Environment Variables**:
+```env
+ANTHROPIC_API_KEY=your_anthropic_api_key
+```
 
-   ```bash
-   # Set directly in your terminal session
-   export ANTHROPIC_API_KEY=your_anthropic_api_key
+#### Option 3: Inline with Command
 
-   # Or provide inline when running the command
-   ANTHROPIC_API_KEY=your_key npx ai-code-review analyze --file app.py
-   ```
-
-2. **.env File**:
-   Create a `.env` file in your project directory:
-   ```
-   ANTHROPIC_API_KEY=your_anthropic_api_key
-   ```
+```bash
+ANTHROPIC_API_KEY=your_key npx ai-code-review analyze --file app.py
+```
 
 ### Installation Options
 
-#### Option 1: Using npx (Recommended for any project type)
+> **Note**: This tool is currently in development and not yet published to npm. You'll need to run it locally for now.
 
-You can run the tool directly using `npx` without installing it:
+#### Option 1: Run Locally (Current Method)
 
-```bash
-# With .env file in your project
-npx ai-code-review analyze --file path/to/file.py
-
-# Or with inline environment variables
-ANTHROPIC_API_KEY=your_key npx ai-code-review analyze --file path/to/file.py
-```
-
-This works in any project type (JavaScript, Python, Ruby, etc.) as long as you have Node.js installed on your system.
-
-#### Option 2: Global Installation
-
-1. **Install the package globally**:
+1. **Clone the repository**:
 
    ```bash
-   npm install -g ai-code-review
+   git clone https://github.com/your-username/ai-code-review.git
+   cd ai-code-review
    ```
 
-2. **Run the tool from any directory**:
+2. **Install dependencies**:
 
    ```bash
-   # With .env file in your project
-   ai-code-review analyze --file path/to/file.py
-
-   # Or with inline environment variables
-   ANTHROPIC_API_KEY=your_key ai-code-review analyze --file path/to/file.py
+   npm install
    ```
 
-#### Option 3: Using the Shell Script Wrapper
-
-For non-JS projects, you can use the provided shell script wrapper:
-
-1. **Copy the shell script to your project**:
+3. **Run the tool**:
 
    ```bash
-   curl -o ai-code-review.sh https://raw.githubusercontent.com/yourusername/ai-code-review/main/ai-code-review.sh
-   chmod +x ai-code-review.sh
+   # Analyze a single file
+   node src/index.js analyze --file path/to/file.py
+
+   # Or use npm script (if available)
+   npm start analyze --file path/to/file.py
    ```
 
-2. **Run the tool using the shell script**:
+   **Method B: Using Shell Script Wrapper (Recommended for non-JS projects)**
+
+For easier integration with non-JavaScript projects, you can use the provided shell script wrapper:
+
+1. **Copy the wrapper script** to your project:
 
    ```bash
-   # With .env file in your project
+   # From the ai-code-review repository
+   cp src/ai-code-review.sh /path/to/your/project/ai-code-review.sh
+   chmod +x /path/to/your/project/ai-code-review.sh
+   ```
+
+2. **Use the wrapper** (automatically handles environment setup):
+
+   ```bash
+   # The script will automatically:
+   # - Check for Node.js installation
+   # - Load .env file if present
+   # - Verify ANTHROPIC_API_KEY
+   # - Try global installation first, then fall back to npx
+
    ./ai-code-review.sh analyze --file path/to/file.py
-
-   # Or with inline environment variables
-   ANTHROPIC_API_KEY=your_key ./ai-code-review.sh analyze --file path/to/file.py
+   ./ai-code-review.sh embeddings:generate --directory src
    ```
 
-### Configuration Options
+3. **Environment setup** (the script handles this automatically):
+   - Creates/uses `.env` file in your project directory
+   - Validates Node.js v22.0.0+ requirement
+   - Provides helpful error messages for missing dependencies
 
-Create a configuration file in your project root or specify one with the `--config` flag:
-
-```json
-{
-  "ruleset": "default",
-  "ignore": ["component-naming", "style-module"],
-  "severity": ["critical", "major", "minor"],
-  "rules": [
-    {
-      "id": "component-export",
-      "enabled": true,
-      "severity": "major"
-    }
-  ]
-}
-```
-
-## Usage
-
-### Basic Command Syntax
+#### Option 2: Using npx (Future - Once Published)
 
 ```bash
-ai-code-review <command> [options]
+# This will be available once the tool is published to npm
+npx ai-code-review analyze --file path/to/file.py
 ```
 
-### Available Commands
-
-- **analyze**: Analyze code for issues
-- **embeddings:generate**: Generate embeddings for the codebase
-- **embeddings:clear**: Clear stored embeddings for the current project
-- **embeddings:clear-all**: Clear ALL stored embeddings (affects all projects)
-- **embeddings:stats**: Show statistics about stored embeddings
-
-All embedding commands support the `--directory` option to target a specific project directory.
-
-### Command Options
-
-#### Analyze Command
-
-| Option                     | Description                               | Default                     |
-| -------------------------- | ----------------------------------------- | --------------------------- |
-| `-d, --diff-with <branch>` | Branch to diff against                    | `main`                      |
-| `-f, --files <files...>`   | Specific files or patterns to review      |                             |
-| `-o, --output <format>`    | Output format (text, json, markdown)      | `text`                      |
-| `-r, --ruleset <ruleset>`  | Rule set to use (default, strict)         | `default`                   |
-| `-i, --ignore <rules>`     | Rules to ignore (comma-separated)         |                             |
-| `-s, --severity <levels>`  | Severity levels to show (comma-separated) | `critical,major,minor,info` |
-| `-c, --config <path>`      | Path to config file                       |                             |
-| `--file <file>`            | Analyze a single file without git diff    |                             |
-| `--directory <dir>`        | Process all JS/TS files in directory      |                             |
-| `--no-color`               | Disable colored output                    |                             |
-| `--verbose`                | Show verbose output                       |                             |
-| `--provider <provider>`    | LLM provider to use (anthropic, openai)   | `anthropic`                 |
-| `--static-only`            | Use only static analysis without LLM      | `false`                     |
-
-#### Embeddings:Generate Command
-
-| Option                       | Description                                        | Default |
-| ---------------------------- | -------------------------------------------------- | ------- |
-| `-d, --directory <dir>`      | Directory to process                               | `.`     |
-| `-f, --files <files...>`     | Specific files or patterns to process              |         |
-| `-c, --concurrency <number>` | Number of concurrent embedding requests            | `3`     |
-| `--verbose`                  | Show verbose output                                |         |
-| `--exclude <patterns...>`    | Patterns to exclude (e.g., "\*_/_.test.js")        |         |
-| `--exclude-file <file>`      | File containing patterns to exclude (one per line) |         |
-| `--no-gitignore`             | Disable automatic exclusion of files in .gitignore | `false` |
-
-### Example Usage Scenarios
-
-#### Using in JavaScript/TypeScript Projects
-
-**Review changes against main branch with LLM analysis**:
+#### Option 3: Global Installation (Future - Once Published)
 
 ```bash
-npx ai-code-review analyze --diff-with main
+# This will be available once the tool is published to npm
+npm install -g ai-code-review
+ai-code-review analyze --file path/to/file.py
 ```
 
-**Review specific files with static analysis only**:
+## Quick Start
+
+### Basic Usage
 
 ```bash
-npx ai-code-review analyze --files src/components/Button.tsx --static-only
+# Analyze a single file
+npx ai-code-review analyze --file src/components/Button.tsx
+
+# Analyze files matching patterns
+npx ai-code-review analyze --files "src/**/*.ts" "lib/*.js"
+
+# Analyze changes in feature-branch vs main branch (auto-detects base branch)
+npx ai-code-review analyze --diff-with feature-branch
+
+# Generate embeddings for better context
+npx ai-code-review embeddings:generate --directory src
 ```
 
-**Output results in JSON format**:
+### Using with Custom Guidelines
 
 ```bash
-npx ai-code-review analyze --output json > review-results.json
+# Include your team's coding standards
+npx ai-code-review analyze \
+  --file src/utils/validation.ts \
+  --doc "Engineering Guidelines:./docs/guidelines.md" \
+  --doc "API Standards:./docs/api-standards.md"
 ```
 
-**Use strict ruleset**:
+### Non-JavaScript Projects
 
 ```bash
-npx ai-code-review analyze --ruleset strict
-```
-
-**Analyze all files in a directory**:
-
-```bash
-npx ai-code-review analyze --directory src/components
-```
-
-**Analyze a single file**:
-
-```bash
-npx ai-code-review analyze --file frontend/src/apps/email/ui/EmailOffice365Snippet/EmailOffice365Snippet.tsx
-```
-
-#### Using in Non-JavaScript Projects (Python, Ruby, etc.)
-
-**Analyze a Python file**:
-
-```bash
-npx ai-code-review analyze --file app.py
-```
-
-**Analyze all Python files in a directory**:
-
-```bash
-npx ai-code-review analyze --files "**/*.py"
-```
-
-**Review changes in a Python project**:
-
-```bash
+# Python project
 cd /path/to/python/project
-npx ai-code-review analyze --diff-with main
+npx ai-code-review analyze --file app.py
+
+# Ruby project
+npx ai-code-review analyze --files "**/*.rb"
+
+# Any language with git diff
+npx ai-code-review analyze --diff-with feature-branch
 ```
 
-**Analyze a Ruby file**:
+## Commands Reference
+
+### analyze
+
+Analyze code using RAG (Retrieval-Augmented Generation) approach with dynamic context retrieval.
 
 ```bash
-npx ai-code-review analyze --file app.rb
+ai-code-review analyze [options]
 ```
 
-**Using with the shell script wrapper**:
+#### Options
+
+| Option                     | Description                                                                             | Default |
+| -------------------------- | --------------------------------------------------------------------------------------- | ------- |
+| `-b, --diff-with <branch>` | Analyze files changed in the specified branch compared to the base branch (main/master) | -       |
+| `-f, --files <files...>`   | Specific files or glob patterns to review                                               | -       |
+| `--file <file>`            | Analyze a single file                                                                   | -       |
+| `-d, --directory <dir>`    | Working directory for git operations (use with --diff-with)                             | -       |
+| `-o, --output <format>`    | Output format (text, json, markdown)                                                    | `text`  |
+| `--no-color`               | Disable colored output                                                                  | `false` |
+| `--verbose`                | Show verbose output                                                                     | `false` |
+
+| `--model <model>` | LLM model to use (e.g., claude-sonnet-4-20250514) | `claude-sonnet-4-20250514` |
+| `--temperature <number>` | LLM temperature | `0.2` |
+| `--max-tokens <number>` | LLM max tokens | `8192` |
+| `--similarity-threshold <number>` | Threshold for finding similar code examples | `0.6` |
+| `--max-examples <number>` | Max similar code examples to use | `5` |
+| `--concurrency <number>` | Concurrency for processing multiple files | `3` |
+| `--doc <specs...>` | Custom documents to provide to LLM (format: "Title:./path/to/file.md") | - |
+
+#### Examples
 
 ```bash
-./ai-code-review.sh analyze --file app.py
+# Analyze a single file
+ai-code-review analyze --file src/components/Button.tsx
+
+# Analyze multiple files with patterns
+ai-code-review analyze --files "src/**/*.tsx" "lib/*.js"
+
+# Analyze changes in feature-branch vs main branch (auto-detects base branch)
+ai-code-review analyze --diff-with feature-branch
+
+# Analyze with custom documentation
+ai-code-review analyze --file src/utils/validation.ts \
+  --doc "Engineering Guidelines:./docs/guidelines.md"
+
+# Analyze with custom LLM settings
+ai-code-review analyze --file app.py \
+  --temperature 0.1 \
+  --max-tokens 4096 \
+  --similarity-threshold 0.7
+
+# Analyze changes in specific directory
+ai-code-review analyze --diff-with feature-branch --directory /path/to/repo
+
+# Output as JSON
+ai-code-review analyze --files "src/**/*.ts" --output json > review.json
 ```
 
-**Generate embeddings for the codebase**:
+### embeddings:generate
+
+Generate embeddings for the codebase to enable context-aware analysis.
 
 ```bash
+ai-code-review embeddings:generate [options]
+```
+
+#### Options
+
+| Option                       | Description                                           | Default |
+| ---------------------------- | ----------------------------------------------------- | ------- |
+| `-d, --directory <dir>`      | Directory to process                                  | `.`     |
+| `-f, --files <files...>`     | Specific files or patterns to process                 | -       |
+| `-c, --concurrency <number>` | Number of concurrent embedding requests               | `10`    |
+| `--verbose`                  | Show verbose output                                   | `false` |
+| `--exclude <patterns...>`    | Patterns to exclude (e.g., "**/\*.test.js" "docs/**") | -       |
+| `--exclude-file <file>`      | File containing patterns to exclude (one per line)    | -       |
+| `--no-gitignore`             | Disable automatic exclusion of files in .gitignore    | `false` |
+
+#### Examples
+
+```bash
+# Generate embeddings for current directory
 ai-code-review embeddings:generate
-```
 
-**Generate embeddings for specific files**:
+# Generate for specific directory
+ai-code-review embeddings:generate --directory src
 
-```bash
-ai-code-review embeddings:generate --files src/components/*.tsx
-```
+# Generate for specific files
+ai-code-review embeddings:generate --files "src/**/*.tsx" "lib/*.js"
 
-**Generate embeddings with exclusion patterns**:
-
-```bash
+# Exclude test files and docs
 ai-code-review embeddings:generate --exclude "**/*.test.js" "**/*.spec.js" "docs/**"
-```
 
-**Generate embeddings using an exclusion file**:
+# Use exclusion file
+ai-code-review embeddings:generate --exclude-file exclusion-patterns.txt
 
-```bash
-ai-code-review embeddings:generate --exclude-file .embedignore
-```
-
-**Generate embeddings ignoring .gitignore files**:
-
-```bash
+# Process without gitignore exclusions
 ai-code-review embeddings:generate --no-gitignore
+
+# High concurrency for large codebases
+ai-code-review embeddings:generate --concurrency 20 --verbose
 ```
 
-**Show embedding statistics for all projects**:
+### embeddings:stats
+
+Show statistics about stored embeddings.
 
 ```bash
+ai-code-review embeddings:stats [options]
+```
+
+#### Options
+
+| Option                  | Description                                                                      | Default |
+| ----------------------- | -------------------------------------------------------------------------------- | ------- |
+| `-d, --directory <dir>` | Directory of the project to show stats for (shows all projects if not specified) | -       |
+
+#### Examples
+
+```bash
+# Show stats for all projects
 ai-code-review embeddings:stats
-```
 
-**Show embedding statistics for specific project**:
-
-```bash
+# Show stats for specific project
 ai-code-review embeddings:stats --directory /path/to/project
 ```
 
-**Clear embeddings for current project**:
+### embeddings:clear
+
+Clear stored embeddings for the current project.
 
 ```bash
-ai-code-review embeddings:clear
+ai-code-review embeddings:clear [options]
 ```
 
-**Clear embeddings for specific project**:
+#### Options
+
+| Option                  | Description                                      | Default |
+| ----------------------- | ------------------------------------------------ | ------- |
+| `-d, --directory <dir>` | Directory of the project to clear embeddings for | `.`     |
+
+#### Examples
 
 ```bash
+# Clear embeddings for current project
+ai-code-review embeddings:clear
+
+# Clear embeddings for specific project
 ai-code-review embeddings:clear --directory /path/to/project
 ```
 
-**Clear all embeddings (affects all projects)**:
+### embeddings:clear-all
+
+Clear ALL stored embeddings (affects all projects - use with caution).
 
 ```bash
 ai-code-review embeddings:clear-all
 ```
 
-## Using in Non-JavaScript Projects
+**Warning**: This command clears embeddings for all projects on the machine.
 
-The AI Code Review tool can be used in any project type, not just JavaScript or TypeScript projects. Here's how to use it effectively in non-JS projects:
+### pr-history:analyze
 
-### Quick Start for Non-JS Projects
+Analyze PR comment history for the current project or specified repository.
 
-1. **Ensure Node.js is installed** (v22.0.0 or higher)
+```bash
+ai-code-review pr-history:analyze [options]
+```
 
-2. **Set up API key**:
+#### Options
 
-   Create a `.env` file in your project directory:
+| Option                    | Description                                                         | Default |
+| ------------------------- | ------------------------------------------------------------------- | ------- |
+| `-d, --directory <dir>`   | Project directory to analyze (auto-detects GitHub repo)             | `.`     |
+| `-r, --repository <repo>` | GitHub repository in format "owner/repo" (overrides auto-detection) | -       |
+| `-t, --token <token>`     | GitHub API token (or set GITHUB_TOKEN env var)                      | -       |
+| `--since <date>`          | Only analyze PRs since this date (ISO format)                       | -       |
+| `--until <date>`          | Only analyze PRs until this date (ISO format)                       | -       |
+| `--limit <number>`        | Limit number of PRs to analyze                                      | -       |
+| `--resume`                | Resume interrupted analysis                                         | `false` |
+| `--clear`                 | Clear existing data before analysis                                 | `false` |
+| `--concurrency <number>`  | Number of concurrent requests                                       | `2`     |
+| `--batch-size <number>`   | Batch size for processing                                           | `50`    |
+| `--verbose`               | Show verbose output                                                 | `false` |
 
-   ```
-   ANTHROPIC_API_KEY=your_anthropic_api_key
-   ```
+#### Examples
 
-   Or prepare to provide it inline with the command.
+```bash
+# Analyze current project (auto-detect repo)
+ai-code-review pr-history:analyze
 
-3. **Run the tool using npx**:
+# Analyze specific repository
+ai-code-review pr-history:analyze --repository owner/repo --token ghp_xxx
 
-   ```bash
-   # Navigate to your non-JS project
-   cd /path/to/your/python/project
+# Analyze with date range
+ai-code-review pr-history:analyze --since 2024-01-01 --until 2024-12-31
 
-   # Run the tool directly with npx (using .env file)
-   npx ai-code-review analyze --file app.py
+# Clear existing data and re-analyze
+ai-code-review pr-history:analyze --clear --limit 100
 
-   # Or with inline environment variables
-   ANTHROPIC_API_KEY=your_key npx ai-code-review analyze --file app.py
-   ```
+# Resume interrupted analysis
+ai-code-review pr-history:analyze --resume
+```
 
-### Language Support
+### pr-history:status
 
-While the tool has specialized support for JavaScript and TypeScript, it can analyze code in any language including:
+Check PR analysis status for the current project or specified repository.
 
-- Python
-- Ruby
-- Java
-- C/C++
-- Go
-- PHP
-- And more
+```bash
+ai-code-review pr-history:status [options]
+```
 
-The AI-powered analysis works across all languages, providing valuable insights regardless of the programming language used.
+#### Options
 
-### Setting Up in Non-JS Projects
+| Option                    | Description                                                         | Default |
+| ------------------------- | ------------------------------------------------------------------- | ------- |
+| `-d, --directory <dir>`   | Project directory to check status for                               | `.`     |
+| `-r, --repository <repo>` | GitHub repository in format "owner/repo" (overrides auto-detection) | -       |
 
-For regular use in a non-JS project, you can:
+#### Examples
 
-1. **Add the shell script to your project**:
+```bash
+# Check status for current project
+ai-code-review pr-history:status
 
-   ```bash
-   # Download the shell script
-   curl -o ai-code-review.sh https://raw.githubusercontent.com/yourusername/ai-code-review/main/ai-code-review.sh
-   chmod +x ai-code-review.sh
+# Check status for specific repository
+ai-code-review pr-history:status --repository owner/repo
+```
 
-   # Add to .gitignore (optional)
-   echo "ai-code-review.sh" >> .gitignore
-   ```
+### pr-history:clear
 
-2. **Create a simple alias in your project's Makefile** (if applicable):
+Clear PR analysis data for the current project or specified repository.
 
-   ```makefile
-   # In your Makefile
-   code-review:
-       npx ai-code-review analyze --diff-with main
+```bash
+ai-code-review pr-history:clear [options]
+```
 
-   code-review-file:
-       npx ai-code-review analyze --file $(FILE)
-   ```
+#### Options
 
-3. **Add to your project's README** for team awareness:
+| Option                    | Description                                                         | Default |
+| ------------------------- | ------------------------------------------------------------------- | ------- |
+| `-d, --directory <dir>`   | Project directory to clear data for                                 | `.`     |
+| `-r, --repository <repo>` | GitHub repository in format "owner/repo" (overrides auto-detection) | -       |
+| `--force`                 | Skip confirmation prompts                                           | `false` |
 
-   ````markdown
-   ## Code Review
+#### Examples
 
-   This project uses AI-powered code review. To run:
+```bash
+# Clear data for current project (with confirmation)
+ai-code-review pr-history:clear
 
-   ```bash
-   npx ai-code-review analyze --diff-with main
-   ```
-   ````
+# Clear data for specific repository without confirmation
+ai-code-review pr-history:clear --repository owner/repo --force
+```
 
-   ```
+## RAG Architecture
 
-   ```
+### How RAG Works
 
-### Output Formats and Interpretation
+The Retrieval-Augmented Generation (RAG) approach enhances traditional AI code review by providing rich context:
 
-The tool supports three output formats:
+```mermaid
+graph TD
+    A[Code Input] --> B[File Analysis]
+    B --> C[Context Retrieval]
+    C --> D[Similar Code Examples]
+    C --> E[Relevant Documentation]
+    C --> F[PR History Patterns]
+    C --> G[Custom Guidelines]
+    D --> H[LLM Analysis]
+    E --> H
+    F --> H
+    G --> H
+    H --> I[Contextualized Review]
+```
 
-**Text (default)**:
+### Components
+
+1. **Embedding Engine**: Uses FastEmbed to generate vector representations of code and documentation
+2. **Vector Database**: LanceDB stores embeddings for fast similarity search
+3. **Context Retrieval**: Finds relevant code examples, documentation, and historical patterns
+4. **LLM Integration**: Anthropic Claude analyzes code with rich contextual information
+5. **PR History Analyzer**: Learns from past code review patterns in your repository
+
+### Benefits of RAG
+
+- **Project-Specific**: Understands your codebase's unique patterns
+- **Learning**: Improves recommendations based on historical data
+- **Comprehensive**: Considers code, docs, and review history together
+- **Efficient**: Local embeddings provide fast context retrieval
+- **Privacy**: Embeddings are stored locally, code never leaves your machine
+
+## Configuration
+
+### Custom Documents
+
+Integrate your team's guidelines and documentation:
+
+```bash
+ai-code-review analyze --file src/component.tsx \
+  --doc "Engineering Guidelines:./docs/engineering.md" \
+  --doc "React Standards:./docs/react-guide.md" \
+  --doc "API Guidelines:./docs/api-standards.md"
+```
+
+Document format: `"Title:./path/to/file.md"`
+
+### Embedding Exclusions
+
+#### Using exclusion files
+
+Create a file containing exclusion patterns (one per line) and reference it with `--exclude-file`:
+
+```
+# Example: exclusion-patterns.txt
+# Exclude test files
+**/*.test.js
+**/*.spec.js
+**/*.test.ts
+**/*.spec.ts
+
+# Exclude build outputs
+dist/
+build/
+*.min.js
+
+# Exclude dependencies
+node_modules/
+vendor/
+```
+
+#### Using command-line exclusions
+
+```bash
+ai-code-review embeddings:generate \
+  --exclude "**/*.test.js" "dist/**" "node_modules/**"
+```
+
+### Environment Variables
+
+```env
+# Required
+ANTHROPIC_API_KEY=your_anthropic_api_key
+
+# Optional for PR history analysis
+GITHUB_TOKEN=your_github_token
+
+# Optional debugging
+DEBUG=true
+VERBOSE=true
+```
+
+## Output Formats
+
+### Text (Default)
+
+Human-readable colored output for terminal usage:
 
 ```
 ===== AI Code Review Summary =====
-Files analyzed: 3
-Total issues: 7
+Files Analyzed: 3
+Files with Issues: 2
+Total Issues Found: 5
 
-Issues by severity:
-  Critical: 1
-  Major: 3
-  Minor: 2
-  Info: 1
-
-Issues by category:
-  naming: 2
-  structure: 3
-  react: 2
-
-===== Detailed Issues =====
-
-src/components/Button.tsx
-  [MAJOR] component-naming: Component name 'ButtonComponent' doesn't match filename 'Button'
-    Location: Line 5, Column 0
-    Suggestion: Rename component to 'Button' or update the file name to match
-
-===== AI-Powered Code Review Results =====
-
-File: src/components/Button.tsx
-Summary: The component has several issues including naming inconsistency, missing prop validation, and potential performance optimizations.
+===== Review for src/components/Button.tsx =====
+Summary: Component has naming inconsistency and missing prop validation
 
 Issues:
-1. Component name 'ButtonComponent' doesn't match the filename 'Button'
-2. Missing prop type validation
-3. Unnecessary re-renders due to inline function definitions
-...
+  [MAJOR] (Lines: 5) Component name 'ButtonComponent' doesn't match filename 'Button'
+    Suggestion: Rename component to 'Button' or update file name
+
+  [MINOR] (Lines: 12-15) Missing prop type validation
+    Suggestion: Add PropTypes or TypeScript interface
+
+Positives:
+  - Good use of semantic HTML elements
+  - Proper accessibility attributes
 ```
 
-**JSON**:
+### JSON
+
+Structured output for programmatic processing:
 
 ```json
 {
   "summary": {
-    "totalFiles": 3,
-    "totalIssues": 7,
-    "issuesBySeverity": {
-      "critical": 1,
-      "major": 3,
-      "minor": 2,
-      "info": 1
-    },
-    "issuesByCategory": {
-      "naming": 2,
-      "structure": 3,
-      "react": 2
-    }
+    "totalFilesReviewed": 3,
+    "filesWithIssues": 2,
+    "totalIssues": 5,
+    "skippedFiles": 0,
+    "errorFiles": 0
   },
-  "results": [
-    {
-      "file": "src/components/Button.tsx",
-      "issues": [
-        {
-          "rule": "component-naming",
-          "severity": "major",
-          "message": "Component name 'ButtonComponent' doesn't match filename 'Button'",
-          "location": {
-            "line": 5,
-            "column": 0
-          },
-          "suggestion": "Rename component to 'Button' or update the file name to match"
-        }
-      ]
-    }
-  ],
-  "llmReviews": [
+  "details": [
     {
       "filePath": "src/components/Button.tsx",
-      "analysis": "The component has several issues including naming inconsistency, missing prop validation, and potential performance optimizations...",
-      "model": "claude-3-sonnet-20240229"
+      "success": true,
+      "language": "typescript",
+      "review": {
+        "summary": "Component has naming inconsistency and missing prop validation",
+        "issues": [
+          {
+            "severity": "major",
+            "description": "Component name 'ButtonComponent' doesn't match filename 'Button'",
+            "lineNumbers": [5],
+            "suggestion": "Rename component to 'Button' or update file name"
+          }
+        ],
+        "positives": ["Good use of semantic HTML elements", "Proper accessibility attributes"]
+      }
     }
   ]
 }
 ```
 
-## Architecture
+### Markdown
 
-### Overview of Components
+Documentation-friendly format:
 
-The AI Code Review Tool consists of several key components that work together:
+```markdown
+# AI Code Review Results (RAG Approach)
 
-1. **Command Line Interface (index.js)**: The entry point that handles user input and orchestrates the review process
-2. **Code Analyzer (analyzer.js)**: Parses and analyzes code to extract structure and identify potential issues
-3. **Rules Engine (rules.js)**: Defines and applies rules to the analyzed code
-4. **Prompt Manager (prompts.js)**: Constructs prompts for AI-powered analysis
-5. **Embeddings System (embeddings.js)**: Generates and manages code embeddings using FastEmbed for context-aware analysis
-6. **LLM Integration (llm.js)**: Handles communication with Anthropic Claude for in-depth code analysis
+## Summary
 
-### How Components Work Together
+- **Files Analyzed:** 3
+- **Files with Issues:** 2
+- **Total Issues Found:** 5
 
-The tool follows this workflow:
+## Detailed Review per File
 
-1. The CLI parses command-line arguments and identifies files to analyze
-2. The embeddings system provides context from the broader codebase
-3. The analyzer parses each file and extracts its structure (functions, classes, imports, etc.)
-4. The rules engine applies project-specific rules to the analyzed code
-5. The prompt manager constructs prompts for AI analysis
-6. The LLM integration sends prompts to Claude and processes responses
-7. Results are formatted and displayed according to the specified output format
+### src/components/Button.tsx
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│    CLI      │────▶│  Analyzer   │────▶│ Rules Engine│
-└─────────────┘     └─────────────┘     └─────────────┘
-       │                   ▲                   │
-       │                   │                   ▼
-       │             ┌─────────────┐     ┌─────────────┐
-       └────────────▶│ Embeddings  │◀────│   Prompt    │
-                     │   System    │     │   Manager   │
-                     └─────────────┘     └─────────────┘
-                           │                   │
-                           ▼                   ▼
-                     ┌─────────────┐     ┌─────────────┐
-                     │  LanceDB    │     │    LLM      │
-                     │  Storage    │     │ Integration  │
-                     └─────────────┘     └─────────────┘
+**Summary:** Component has naming inconsistency and missing prop validation
+
+**Issues Found (2):**
+
+- **[MAJOR] 🔥 (Lines: 5)**: Component name 'ButtonComponent' doesn't match filename 'Button'
+- **[MINOR] 💡 (Lines: 12-15)**: Missing prop type validation
+
+**Positives Found (2):**
+
+- Good use of semantic HTML elements
+- Proper accessibility attributes
 ```
 
-### Embedding System Explanation
+## Error Handling & Troubleshooting
 
-The embedding system is a key innovation that enables context-aware code reviews:
+### Common Issues
 
-1. **Code Representation**: Converts code into numerical vectors (embeddings) using FastEmbed's bge-small-en-v1.5 model
-2. **Similarity Search**: Finds related code patterns across the codebase using LanceDB
-3. **Context Building**: Provides relevant context to the analyzer and LLM
-4. **Incremental Updates**: Efficiently updates embeddings only for changed files
-5. **File Exclusion**: Intelligently excludes files based on patterns and .gitignore rules
+#### API Key Issues
 
-The system uses a hierarchical approach:
+**Error**: `ANTHROPIC_API_KEY not found in environment variables`
 
-- **File-level embeddings**: Capture overall purpose and structure
-- **Function/Class-level embeddings**: Capture component behavior
-- **Code block-level embeddings**: Capture implementation details
-
-#### File Exclusion Capabilities
-
-The embedding system supports several ways to exclude files from processing:
-
-1. **Gitignore Integration**: Automatically respects all patterns in `.gitignore` files
-2. **Custom Exclusion Patterns**: Supports glob patterns for excluding specific files or directories
-3. **Exclusion Files**: Allows defining exclusion patterns in a dedicated file (similar to `.gitignore`)
-4. **Nested Gitignore Support**: Correctly handles nested `.gitignore` files in subdirectories
-
-Example exclusion file (`.embedignore`):
-
-```
-# Exclude test files
-**/*.test.js
-**/*.spec.js
-
-# Exclude documentation
-docs/**
-
-# Exclude large generated files
-**/generated/*.json
-
-# Exclude specific directories
-node_modules/
-dist/
-build/
-```
-
-## API Requirements
-
-### Anthropic API
-
-The tool uses Anthropic's API for code analysis:
-
-- **Model**: claude-3-sonnet-20240229
-- **API Key**: Required in the `.env` file as `ANTHROPIC_API_KEY`
-- **Usage**: Analyzes code and provides detailed feedback
-- **Pricing**: Check [Anthropic's pricing page](https://www.anthropic.com/pricing) for current rates
-
-### Embeddings
-
-The tool uses FastEmbed for generating embeddings locally:
-
-- **Model**: bge-small-en-v1.5 (384 dimensions)
-- **API Key**: No API key required - runs locally
-- **Usage**: Generates embeddings for code files and queries to provide context-aware analysis
-- **Cost**: Free - no external API calls for embeddings
-- **Cache Location**: Model files are cached in `~/.ai-review-fastembed-cache` (user's home directory)
-- **Database Location**: Embeddings database stored in `~/.ai-review-lancedb` (user's home directory)
-- **First Run**: The model (~100MB) will be downloaded automatically on first use
-- **Project Isolation**: Each project's embeddings are stored separately and can be cleared independently
-
-#### Project-Specific Embedding Management
-
-The tool maintains separate embeddings for each project while sharing the same global database:
-
-- **Generate**: `ai-code-review embeddings:generate` - Creates embeddings for the current project
-- **Search**: Similarity searches automatically filter results to the current project only
-- **Clear Project**: `ai-code-review embeddings:clear` - Removes only the current project's embeddings
-- **Clear All**: `ai-code-review embeddings:clear-all` - Removes embeddings for all projects (use with caution)
-- **Stats**: `ai-code-review embeddings:stats` - Shows statistics for all projects combined
-
-#### How Project Isolation Works
-
-1. **File Path Storage**: Each embedding stores the relative path from the project root
-2. **Project Identification**: The tool identifies project boundaries using:
-   - The `--directory` option if specified
-   - The current working directory if no `--directory` option
-3. **Automatic Filtering**: All similarity searches automatically filter results to the current project
-4. **Project Structure**: Each project gets its own project structure embedding with a unique identifier
-
-#### CLI Usage Scenarios
-
-**Scenario 1: Tool used via npm/npx in consumer project**
+**Solution**:
 
 ```bash
-cd /path/to/my-project
-npx ai-code-review analyze --file src/app.py
-# Project path: /path/to/my-project (from process.cwd())
+# Set environment variable
+export ANTHROPIC_API_KEY=your_api_key
+
+# Or create .env file
+echo "ANTHROPIC_API_KEY=your_api_key" > .env
 ```
 
-**Scenario 2: Tool executed locally from its own folder**
+#### Git Repository Issues
+
+**Error**: `Not a git repository`
+
+**Solution**: Ensure you're in a git repository when using `--diff-with`:
 
 ```bash
-cd /path/to/ai-code-review
-node index.js analyze --directory /path/to/my-project --file src/app.py
-# Project path: /path/to/my-project (from --directory option)
+git init  # If needed
+git add .
+git commit -m "Initial commit"
 ```
 
-**Scenario 3: Global installation targeting specific project**
+#### File Not Found
+
+**Error**: `File not found: path/to/file.js`
+
+**Solution**: Check file path and ensure it exists:
 
 ```bash
-ai-code-review analyze --directory /path/to/my-project --file src/app.py
-# Project path: /path/to/my-project (from --directory option)
+# Use absolute path
+ai-code-review analyze --file /full/path/to/file.js
+
+# Or relative from current directory
+ls path/to/file.js  # Verify file exists
 ```
 
-This approach allows you to:
+#### Embedding Generation Issues
 
-- Work on multiple projects without interference between their embeddings
-- Get relevant results only from the current project when analyzing code
-- Clear embeddings for one project without affecting others
-- Share the embedding model and database infrastructure globally for efficiency
+**Error**: `Failed to generate embeddings`
 
-### Rate Limiting and Cost Management
+**Solutions**:
 
-The tool implements several strategies to manage API usage and costs:
+```bash
+# Clear existing embeddings and regenerate
+ai-code-review embeddings:clear
+ai-code-review embeddings:generate --verbose
 
-1. **Incremental Embedding Updates**: Only regenerates embeddings for modified files
-2. **Batch Processing**: Processes embeddings in batches to optimize API calls
-3. **Caching**: Caches embeddings to avoid redundant API calls
-4. **Concurrency Control**: Limits the number of concurrent API requests
-5. **Static Analysis Fallback**: Provides an option to use only static analysis without LLM
+# Reduce concurrency for memory issues
+ai-code-review embeddings:generate --concurrency 5
 
-## Customization
-
-### Adding Custom Rules
-
-You can add custom rules by creating a configuration file:
-
-```json
-{
-  "rules": [
-    {
-      "id": "custom-rule-id",
-      "name": "Custom Rule Name",
-      "description": "Description of what the rule checks for",
-      "category": "best-practice",
-      "severity": "major",
-      "enabled": true
-    }
-  ]
-}
+# Exclude problematic files
+ai-code-review embeddings:generate --exclude "large-files/**"
 ```
 
-For more complex rules, you can extend the rules engine in your own fork of the tool.
+#### Memory Issues
 
-### Modifying Prompt Templates
+**Error**: `JavaScript heap out of memory`
 
-The tool uses prompt templates for AI-powered analysis. You can modify these templates in `prompts.js` and `llm.js`:
+**Solutions**:
 
-```javascript
-// Example of customizing the React component review prompt
-const CUSTOM_REACT_COMPONENT_REVIEW_PROMPT = `
-You are an expert React developer with deep knowledge of our team's best practices.
-Review the following React component and provide constructive feedback:
+```bash
+# Increase Node.js memory limit
+export NODE_OPTIONS="--max-old-space-size=4096"
 
-COMPONENT:
-{code}
+# Process fewer files at once
+ai-code-review embeddings:generate --concurrency 3
 
-DIFF:
-{diff}
-
-Please analyze the component for:
-1. Component structure and organization
-2. Props usage and validation
-3. State management
-4. Performance optimizations
-5. Our team's specific conventions:
-   - PascalCase for component names
-   - One component per file
-   - Props interface should be exported
-   - ...
-
-Focus on providing actionable feedback with specific suggestions for improvement.
-`;
+# Exclude large files
+ai-code-review embeddings:generate --exclude "**/*.min.js" "dist/**"
 ```
 
-### Configuring Severity Levels
+### Debugging
 
-You can configure severity levels for rules in your configuration file:
+Enable verbose output for detailed logging:
 
-```json
-{
-  "rules": [
-    {
-      "id": "component-naming",
-      "severity": "critical"
-    },
-    {
-      "id": "prop-validation",
-      "severity": "minor"
-    }
-  ]
-}
+```bash
+ai-code-review analyze --file app.py --verbose
 ```
 
-The available severity levels are:
+Enable debug mode:
 
-- **critical**: Must be fixed immediately (e.g., security issues, broken builds)
-- **major**: Should be fixed soon (e.g., performance issues, bad practices)
-- **minor**: Should be fixed when convenient (e.g., style issues, minor optimizations)
-- **info**: Informational only (e.g., suggestions, best practices)
+```bash
+DEBUG=true ai-code-review analyze --file app.py
+```
 
-## Future Development
+### Performance Optimization
 
-### Planned Features and Enhancements
+1. **Generate embeddings first** for better context:
 
-The AI Code Review Tool roadmap includes:
+   ```bash
+   ai-code-review embeddings:generate
+   ai-code-review analyze --files "src/**/*.ts"
+   ```
 
-1. **Enhanced Language Support**: Expand beyond JavaScript/TypeScript to support additional languages
-2. **Improved Context Awareness**: Enhance the embedding system to better understand project-specific patterns
-3. **Performance Optimization**: Improve analysis speed and resource efficiency
-4. **Rule Suggestion**: Automatically suggest new rules based on codebase patterns
-5. **Interactive Reviews**: Add support for interactive reviews with developer feedback
-6. **Historical Analysis**: Track code quality trends over time
+2. **Use exclusion patterns** to skip irrelevant files:
 
-### Integration with AI Models
+   ```bash
+   ai-code-review embeddings:generate --exclude "**/*.test.js" "dist/**"
+   ```
 
-Future versions will include:
+3. **Adjust concurrency** based on system resources:
 
-- **Additional LLM Providers**: Integration with other AI providers like Google and Cohere
-- **Self-Hosted LLM Options**: Support for running local LLMs for enhanced privacy
-- **Fine-Tuning Capabilities**: Allow fine-tuning models on your codebase for better results
-- **Multi-Modal Analysis**: Support for analyzing code alongside documentation and tests
+   ```bash
+   # For powerful machines
+   ai-code-review embeddings:generate --concurrency 20
 
-### Potential Workflow Integrations
+   # For resource-constrained environments
+   ai-code-review embeddings:generate --concurrency 3
+   ```
 
-We plan to integrate with:
+## Dependencies
 
-- **IDE Extensions**: Direct integration with VS Code, WebStorm, and other IDEs
-- **CI/CD Pipelines**: Enhanced GitHub Actions, GitLab CI, and Jenkins integration
-- **Code Review Platforms**: Direct integration with GitHub PR reviews, GitLab MR reviews
-- **Team Collaboration Tools**: Integration with Slack, Microsoft Teams, etc.
-- **MCP Server Implementation**: Function as an MCP (Model Context Protocol) server for integration with AI assistants
+### Core Dependencies
 
----
+- **[@anthropic-ai/sdk](https://www.npmjs.com/package/@anthropic-ai/sdk)** `0.55.0` - Anthropic Claude API integration
+- **[@lancedb/lancedb](https://www.npmjs.com/package/@lancedb/lancedb)** `0.19.0` - Vector database for embeddings
+- **[fastembed](https://www.npmjs.com/package/fastembed)** `^1.14.4` - Local embedding generation
+- **[commander](https://www.npmjs.com/package/commander)** `^11.0.0` - CLI framework
+- **[chalk](https://www.npmjs.com/package/chalk)** `^5.3.0` - Terminal colors
+- **[glob](https://www.npmjs.com/package/glob)** `^10.3.0` - File pattern matching
+
+### Optional Dependencies
+
+- **[@octokit/rest](https://www.npmjs.com/package/@octokit/rest)** `21.1.1` - GitHub API (for PR history analysis)
+- **[dotenv](https://www.npmjs.com/package/dotenv)** `16.5.0` - Environment variable loading
+
+### Development Dependencies
+
+- **[eslint](https://www.npmjs.com/package/eslint)** `9.29.0` - Code linting
+- **[prettier](https://www.npmjs.com/package/prettier)** `3.5.3` - Code formatting
+- **[typescript](https://www.npmjs.com/package/typescript)** `5.8.3` - TypeScript support
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+We welcome contributions! Please follow these guidelines:
+
+### Development Setup
+
+1. **Clone the repository**:
+
+   ```bash
+   git clone https://github.com/your-username/ai-code-review.git
+   cd ai-code-review
+   ```
+
+2. **Install dependencies**:
+
+   ```bash
+   npm install
+   ```
+
+3. **Set up environment**:
+
+   ```bash
+   cp .env.example .env
+   # Add your API keys to .env
+   ```
+
+4. **Run locally**:
+   ```bash
+   node src/index.js analyze --file test-file.js
+   ```
+
+### Code Standards
+
+- **ESLint**: Follow the configured ESLint rules
+- **Prettier**: Code is automatically formatted
+- **TypeScript**: Type definitions for better code quality
+
+### Testing
+
+```bash
+# Run linting
+npm run lint
+
+# Run formatting
+npm run prettier
+
+# Check for unused dependencies
+npm run knip
+```
+
+### Submitting Changes
+
+1. **Fork the repository**
+2. **Create a feature branch**: `git checkout -b feature/amazing-feature`
+3. **Make your changes**
+4. **Run tests**: `npm run lint && npm run prettier:ci`
+5. **Commit your changes**: `git commit -m 'Add amazing feature'`
+6. **Push to the branch**: `git push origin feature/amazing-feature`
+7. **Open a Pull Request**
+
+### Areas for Contribution
+
+- **Language Support**: Add specialized rules for new programming languages
+- **LLM Providers**: Integrate additional LLM providers (OpenAI, etc.)
+- **Output Formats**: Add new output formats (XML, SARIF, etc.)
+- **Performance**: Optimize embedding generation and search
+- **Documentation**: Improve documentation and examples
+- **Testing**: Add comprehensive test coverage
+
+### Reporting Issues
+
+Please use GitHub Issues to report bugs or request features. Include:
+
+- **System information** (OS, Node.js version)
+- **Command used** and **full error message**
+- **Expected vs actual behavior**
+- **Minimal reproduction case**
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License - see [LICENSE](LICENSE) file for details.

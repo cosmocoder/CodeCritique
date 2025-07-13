@@ -45,7 +45,6 @@ program
   .option('-o, --output <format>', 'Output format (text, json, markdown)', 'text')
   .option('--no-color', 'Disable colored output')
   .option('--verbose', 'Show verbose output')
-  .option('--provider <provider>', 'LLM provider to use (anthropic, openai)', 'anthropic')
   .option('--model <model>', 'LLM model to use (e.g., claude-sonnet-4-20250514)')
   .option('--temperature <number>', 'LLM temperature', parseFloat, 0.2)
   .option('--max-tokens <number>', 'LLM max tokens', parseInt, 8192)
@@ -309,7 +308,6 @@ async function runCodeReview(options) {
   // Consolidate review options to pass down
   const reviewOptions = {
     verbose: options.verbose,
-    provider: options.provider,
     model: options.model,
     temperature: options.temperature,
     maxTokens: options.maxTokens,
@@ -974,7 +972,7 @@ function outputJson(reviewResults) {
  * @param {Object} cliOptions - Command line options
  */
 function outputMarkdown(reviewResults) {
-  console.log('# AI Code Review Results (CAG Approach)\n');
+  console.log('# AI Code Review Results (RAG Approach)\n');
 
   const totalFiles = reviewResults.length;
   const filesWithIssues = reviewResults.filter((r) => r.success && !r.skipped && r.results?.issues?.length > 0).length;
