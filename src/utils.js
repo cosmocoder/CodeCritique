@@ -1251,6 +1251,100 @@ function getFileContentFromGit(filePath, branchOrCommit, workingDir) {
 
 // --- END Git Helper Functions ---
 
+// ============================================================================
+// GENERIC DOCUMENT DETECTION UTILITIES
+// ============================================================================
+
+/**
+ * Regex pattern for detecting generic documentation files
+ * Shared between cag-analyzer.js and embeddings.js for consistency
+ */
+const GENERIC_DOC_REGEX = /(README|RUNBOOK|CONTRIBUTING|CHANGELOG|LICENSE|SETUP|INSTALL)(\.md|$)/i;
+
+/**
+ * Check if a document is a generic documentation file (README, RUNBOOK, etc.)
+ * @param {string} docPath - Document file path
+ * @param {string} docH1 - Document H1 title (optional)
+ * @returns {boolean} - True if document is generic
+ */
+function isGenericDocument(docPath, docH1 = null) {
+  if (!docPath) return false;
+
+  // Check filename pattern
+  if (GENERIC_DOC_REGEX.test(docPath)) {
+    return true;
+  }
+
+  // Check H1 title if provided
+  if (docH1) {
+    const lowerH1 = docH1.toLowerCase();
+    const genericTitlePatterns = ['readme', 'runbook', 'changelog', 'contributing', 'license', 'setup', 'installation', 'getting started'];
+
+    return genericTitlePatterns.some((pattern) => lowerH1.includes(pattern));
+  }
+
+  return false;
+}
+
+/**
+ * Get pre-computed context for generic documents to avoid expensive inference
+ * @param {string} docPath - Document file path
+ * @param {string} docH1 - Document H1 title (optional)
+ * @returns {Object} - Pre-computed generic document context
+ */
+function getGenericDocumentContext(docPath) {
+  const fileName = path.basename(docPath).toLowerCase();
+
+  const baseContext = {
+    area: 'General',
+    dominantTech: [],
+    isGeneralPurposeReadmeStyle: true,
+    fastPath: true, // Mark as optimized fast-path
+    docPath: docPath,
+  };
+
+  // Customize context based on document type
+  if (fileName.includes('readme')) {
+    return {
+      ...baseContext,
+      area: 'Documentation',
+      dominantTech: ['markdown', 'documentation'],
+    };
+  } else if (fileName.includes('runbook')) {
+    return {
+      ...baseContext,
+      area: 'Operations',
+      dominantTech: ['operations', 'deployment', 'devops'],
+    };
+  } else if (fileName.includes('changelog')) {
+    return {
+      ...baseContext,
+      area: 'Documentation',
+      dominantTech: ['versioning', 'releases'],
+    };
+  } else if (fileName.includes('contributing')) {
+    return {
+      ...baseContext,
+      area: 'Development',
+      dominantTech: ['git', 'development', 'contribution'],
+    };
+  } else if (fileName.includes('license')) {
+    return {
+      ...baseContext,
+      area: 'Legal',
+      dominantTech: ['licensing'],
+    };
+  } else if (fileName.includes('setup') || fileName.includes('install')) {
+    return {
+      ...baseContext,
+      area: 'Setup',
+      dominantTech: ['installation', 'setup', 'configuration'],
+    };
+  }
+
+  return baseContext;
+}
+
 export {
   debug,
   detectLanguageFromExtension,
@@ -1266,4 +1360,7 @@ export {
   findBaseBranch,
   getChangedLinesInfo,
   getFileContentFromGit,
+  
+  isGenericDocument,
+  getGenericDocumentContext,
 };

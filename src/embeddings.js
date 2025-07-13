@@ -32,6 +32,8 @@ import {
   isDocumentationFile,
   slugify,
   shouldProcessFile as utilsShouldProcessFile,
+  isGenericDocument,
+  getGenericDocumentContext,
 } from './utils.js';
 
 // Load environment variables from .env file in current working directory
@@ -77,6 +79,8 @@ let tableInitializationPromise = null; // Promise to prevent concurrent table in
 
 // Cache for document contexts to avoid re-inferring for multiple chunks from the same doc
 const documentContextCache = new Map();
+// Promise cache to handle concurrent access to the same document (prevents duplicate calculations)
+const documentContextPromiseCache = new Map();
 // Cache for H1 embeddings to avoid re-calculating for H1 relevance bonus
 const h1EmbeddingCache = new Map();
 // Cache for embedding results to avoid redundant calculations
@@ -232,11 +236,6 @@ export async function calculateEmbedding(text) {
     }
     embeddingCache.set(cacheKey, embedding);
 
-    // Only log in debug mode and less frequently
-    if (embeddingCache.size % 10 === 0) {
-      debug(`Embedding cache size: ${embeddingCache.size}, latest dimensions: ${embedding.length}`);
-    }
-
     return embedding;
   } catch (error) {
     console.error(chalk.red(`Error calculating embedding: ${error.message}`), error);
@@ -328,11 +327,6 @@ export async function calculateQueryEmbedding(text) {
         embeddingCache.delete(firstKey);
       }
       embeddingCache.set(cacheKey, embedding);
-
-      // Only log in debug mode and less frequently
-      if (embeddingCache.size % 10 === 0) {
-        debug(`Query embedding cache size: ${embeddingCache.size}, latest dimensions: ${embedding.length}`);
-      }
 
       return embedding;
     } else {
@@ -1587,7 +1581,7 @@ function calculatePathSimilarity(path1, path2) {
 // +++ END NEW HELPER FUNCTION +++
 
 /**
- * Find similar documentation using native LanceDB hybrid search
+ * Find similar documentation using native LanceDB hybrid search with comprehensive optimization
  * @param {string} queryText - The text query
  * @param {Object} options - Search options
  * @returns {Promise<Array<object>>} Search results
@@ -1603,15 +1597,15 @@ export const findRelevantDocs = async (queryText, options = {}) => {
     precomputedQueryEmbedding = null,
   } = options;
 
-  console.log(
-    chalk.cyan(`Native hybrid documentation search - limit: ${limit}, threshold: ${similarityThreshold}, reranking: ${useReranking}`)
-  );
-
   try {
     if (!queryText?.trim()) {
       console.warn(chalk.yellow('Empty query text provided for documentation search'));
       return [];
     }
+
+    console.log(
+      chalk.cyan(`Native hybrid documentation search - limit: ${limit}, threshold: ${similarityThreshold}, reranking: ${useReranking}`)
+    );
 
     await getDB();
     const tableName = DOCUMENT_CHUNK_TABLE;
@@ -1621,7 +1615,6 @@ export const findRelevantDocs = async (queryText, options = {}) => {
       console.warn(chalk.yellow(`Documentation table ${tableName} not found`));
       return [];
     }
-
     console.log(chalk.cyan('Performing native hybrid search for documentation...'));
     let query = table.search(queryText).nearestToText(queryText);
 
@@ -1639,7 +1632,7 @@ export const findRelevantDocs = async (queryText, options = {}) => {
     const results = await query.limit(Math.max(limit * 3, 20)).toArray();
     console.log(chalk.green(`Native hybrid search returned ${results.length} documentation results`));
 
-    // OPTIMIZATION: Batch file existence checks for better performance
+    // OPTIMIZATION: Enhanced batch file existence checks with parallel processing
     const docsToCheck = [];
     const docProjectMatchMap = new Map();
 
@@ -1677,7 +1670,7 @@ export const findRelevantDocs = async (queryText, options = {}) => {
       }
     }
 
-    // Batch check file existence for better performance
+    // Enhanced batch check file existence with improved error handling
     if (docsToCheck.length > 0) {
       debug(`[OPTIMIZATION] Batch checking existence of ${docsToCheck.length} documentation files`);
       const existencePromises = docsToCheck.map(async ({ index, absolutePath, filePath }) => {
@@ -1700,7 +1693,6 @@ export const findRelevantDocs = async (queryText, options = {}) => {
     const projectFilteredResults = results.filter((result, index) => docProjectMatchMap.get(index) === true);
 
     console.log(chalk.blue(`Filtered to ${projectFilteredResults.length} documentation results from current project`));
-
     let finalResults = projectFilteredResults.map((result) => {
       let similarity;
       if (result._distance !== undefined) {
@@ -1738,13 +1730,8 @@ export const findRelevantDocs = async (queryText, options = {}) => {
       const PENALTY_GENERIC_DOC_LOW_CONTEXT_MATCH = -0.1;
 
       queryEmbedding = precomputedQueryEmbedding || (await calculateQueryEmbedding(queryText));
-      if (precomputedQueryEmbedding) {
-        debug(`[CACHE] Using pre-computed query embedding for reranking, dimensions: ${queryEmbedding?.length || 'null'}`);
-      } else {
-        debug(`[CACHE] Query embedding calculated for reranking, dimensions: ${queryEmbedding?.length || 'null'}`);
-      }
 
-      // OPTIMIZATION 1: Batch calculate missing H1 embeddings
+      // OPTIMIZATION 1: Enhanced batch calculate missing H1 embeddings with cache tracking
       const uniqueH1Titles = new Set();
       const h1TitlesToCalculate = [];
 
@@ -1769,40 +1756,112 @@ export const findRelevantDocs = async (queryText, options = {}) => {
         }
       }
 
-      // OPTIMIZATION 2: Batch calculate missing document contexts
-      const uniqueDocPaths = new Set();
+      // OPTIMIZATION 2: Cross-file document context caching for multi-file PRs
+
       const docContextsToCalculate = [];
 
+      // Check cache for ALL documents (no uniqueDocPaths filter to allow cross-file caching)
+      const documentPathsInThisQuery = new Set();
       for (const result of finalResults) {
         const docPath = result.path;
-        if (docPath && !uniqueDocPaths.has(docPath)) {
-          uniqueDocPaths.add(docPath);
-          if (!documentContextCache.has(docPath)) {
-            docContextsToCalculate.push({ docPath, docH1: result.document_title, result });
+        // Use normalized path for better cache hits (resolve relative to target project)
+        const normalizedPath = path.resolve(resolvedProjectPath, docPath);
+
+        if (docPath && !documentPathsInThisQuery.has(normalizedPath)) {
+          documentPathsInThisQuery.add(normalizedPath);
+
+          // Need to calculate document context
+          if (!documentContextCache.has(normalizedPath) && !documentContextPromiseCache.has(normalizedPath)) {
+            docContextsToCalculate.push({
+              docPath: normalizedPath,
+              originalPath: docPath,
+              docH1: result.document_title,
+              result,
+            });
           }
         }
       }
 
-      // Batch calculate document contexts for cache misses
+      // Optimize context calculation with concurrency limits and fast-path detection
       if (docContextsToCalculate.length > 0) {
-        debug(`[OPTIMIZATION] Batch calculating ${docContextsToCalculate.length} document contexts`);
-        const contextPromises = docContextsToCalculate.map(async ({ docPath, docH1, result }) => {
-          const context = await inferContextFromDocumentContent(
-            docPath,
-            docH1,
-            [result],
-            queryContextForReranking.language || 'typescript'
-          );
-          return { docPath, context };
-        });
+        debug(`[OPTIMIZATION] Batch calculating ${docContextsToCalculate.length} document contexts with concurrency limit`);
 
-        const contextResults = await Promise.all(contextPromises);
+        // Process in smaller batches to avoid memory issues and improve responsiveness
+        const CONTEXT_BATCH_SIZE = 3; // Limit concurrent context calculations
+        const contextResults = [];
+
+        for (let i = 0; i < docContextsToCalculate.length; i += CONTEXT_BATCH_SIZE) {
+          const batch = docContextsToCalculate.slice(i, i + CONTEXT_BATCH_SIZE);
+
+          const batchPromises = batch.map(async ({ docPath, originalPath, docH1, result }) => {
+            // Check if there's already a promise for this document
+            if (documentContextPromiseCache.has(docPath)) {
+              const context = await documentContextPromiseCache.get(docPath);
+              return { docPath, context };
+            }
+
+            // Create a new promise for this document calculation
+            const contextPromise = (async () => {
+              try {
+                let context;
+
+                // FAST-PATH OPTIMIZATION: Check for generic documents first
+                if (isGenericDocument(originalPath, docH1)) {
+                  // Use pre-computed context for generic documents (README, RUNBOOK, etc.)
+                  context = getGenericDocumentContext(originalPath, docH1);
+                  debug(`[FAST-PATH] Using pre-computed context for generic document: ${originalPath}`);
+                } else {
+                  // Use the expensive inference for non-generic documents
+                  context = await inferContextFromDocumentContent(
+                    originalPath,
+                    docH1,
+                    [result],
+                    queryContextForReranking.language || 'typescript'
+                  );
+                }
+
+                return context;
+              } catch (error) {
+                debug(`[ERROR] Failed to get context for ${originalPath}: ${error.message}`);
+                // Return a fallback context to avoid breaking the pipeline
+                return {
+                  area: 'Unknown',
+                  dominantTech: [],
+                  isGeneralPurposeReadmeStyle: true,
+                };
+              }
+            })();
+
+            // Store the promise in the cache
+            documentContextPromiseCache.set(docPath, contextPromise);
+
+            // Wait for the result
+            const context = await contextPromise;
+
+            // Store the result in the regular cache and remove the promise
+            documentContextCache.set(docPath, context);
+            documentContextPromiseCache.delete(docPath);
+
+            return { docPath, context };
+          });
+
+          const batchResults = await Promise.all(batchPromises);
+          contextResults.push(...batchResults);
+
+          // Add a small delay between batches to prevent overwhelming the system
+          if (i + CONTEXT_BATCH_SIZE < docContextsToCalculate.length) {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
+        }
+
+        // Cache all results with normalized paths (consistent with lookup keys)
         for (const { docPath, context } of contextResults) {
           documentContextCache.set(docPath, context);
         }
       }
 
-      // OPTIMIZATION 3: Parallelize main reranking calculations
+      // OPTIMIZATION 3: Enhanced parallelize main reranking calculations with memory monitoring
+
       const rerankingPromises = finalResults.map(async (result) => {
         let chunkInitialScore = result.similarity * WEIGHT_INITIAL_SIM;
         let contextMatchBonus = 0;
@@ -1814,7 +1873,8 @@ export const findRelevantDocs = async (queryText, options = {}) => {
         const docH1 = result.document_title;
 
         // Context should now be cached from batch operation above
-        const chunkParentDocContext = documentContextCache.get(docPath);
+        const normalizedDocPath = path.resolve(resolvedProjectPath, docPath);
+        const chunkParentDocContext = documentContextCache.get(normalizedDocPath);
 
         if (
           chunkParentDocContext &&
@@ -1874,8 +1934,6 @@ export const findRelevantDocs = async (queryText, options = {}) => {
       }
 
       finalResults.sort((a, b) => b.similarity - a.similarity);
-      debug(`[CACHE STATS] Document context cache size: ${documentContextCache.size}`);
-      debug(`[CACHE STATS] H1 embedding cache size: ${h1EmbeddingCache.size}`);
       debug('Sophisticated contextual reranking of documentation complete.');
     }
 
@@ -1885,9 +1943,11 @@ export const findRelevantDocs = async (queryText, options = {}) => {
     }
 
     console.log(chalk.green(`Returning ${finalResults.length} documentation results`));
+
     return finalResults;
   } catch (error) {
-    console.error(chalk.red(`Error in findSimilarDocumentation: ${error.message}`), error);
+    console.error(chalk.red(`Error in findRelevantDocs: ${error.message}`), error);
+
     return [];
   }
 };
@@ -2117,9 +2177,6 @@ export async function findRelevantCustomDocChunks(queryText, chunks = [], option
     let queryEmbedding = precomputedQueryEmbedding;
     if (!queryEmbedding) {
       queryEmbedding = await calculateQueryEmbedding(queryText);
-      debug(`[CACHE] Query embedding calculated for custom docs, dimensions: ${queryEmbedding?.length || 'null'}`);
-    } else {
-      debug(`[CACHE] Using pre-computed query embedding for custom docs, dimensions: ${queryEmbedding?.length || 'null'}`);
     }
 
     // OPTIMIZATION: Vectorized similarity calculation for better performance
@@ -2290,30 +2347,6 @@ export async function findRelevantCustomDocChunks(queryText, chunks = [], option
 }
 
 /**
- * Get custom document chunks for a project
- * @param {string} projectPath - Project path
- * @returns {Array<Object>} Custom document chunks for the project
- */
-function getCustomDocumentChunks(projectPath) {
-  return customDocumentChunks.get(projectPath) || [];
-}
-
-/**
- * Clear custom document chunks for a project
- * @param {string} projectPath - Project path
- */
-function clearCustomDocumentChunks(projectPath) {
-  customDocumentChunks.delete(projectPath);
-}
-
-/**
- * Clear all custom document chunks
- */
-function clearAllCustomDocumentChunks() {
-  customDocumentChunks.clear();
-}
-
-/**
  * Find similar code using native LanceDB hybrid search
  * Optimized implementation using LanceDB's built-in vector + FTS + RRF
  * @param {string} queryText - The text query
@@ -2376,7 +2409,7 @@ export const findSimilarCode = async (queryText, options = {}) => {
 
     // Exclude the file being reviewed if queryFilePath is provided
     if (queryFilePath) {
-      const normalizedQueryPath = path.resolve(queryFilePath);
+      const normalizedQueryPath = path.resolve(resolvedProjectPath, queryFilePath);
       // Add condition to exclude the file being reviewed
       const escapedPath = normalizedQueryPath.replace(/'/g, "''");
       conditions.push(`path != '${escapedPath}'`);
@@ -2543,15 +2576,6 @@ export const findSimilarCode = async (queryText, options = {}) => {
               // PERFORMANCE FIX: Use pre-computed query embedding if available, otherwise calculate once
               if (!queryEmbedding) {
                 queryEmbedding = precomputedQueryEmbedding || (await calculateQueryEmbedding(queryText));
-                if (precomputedQueryEmbedding) {
-                  debug(
-                    `[CACHE] Using pre-computed query embedding for project structure, dimensions: ${queryEmbedding?.length || 'null'}`
-                  );
-                } else {
-                  debug(`[CACHE] Query embedding calculated for project structure, dimensions: ${queryEmbedding?.length || 'null'}`);
-                }
-              } else {
-                debug(`[CACHE] Query embedding reused from reranking for project structure`);
               }
               if (queryEmbedding) {
                 const similarity = calculateCosineSimilarity(queryEmbedding, Array.from(structureRecord.vector));
@@ -2652,14 +2676,16 @@ function clearCaches() {
   const docCacheSize = documentContextCache.size;
   const h1CacheSize = h1EmbeddingCache.size;
   const embeddingCacheSize = embeddingCache.size;
+  const promiseCacheSize = documentContextPromiseCache.size;
 
   documentContextCache.clear();
+  documentContextPromiseCache.clear();
   h1EmbeddingCache.clear();
   embeddingCache.clear();
 
   console.log(
     chalk.yellow(
-      `[CACHE] Cleared caches - Document contexts: ${docCacheSize}, H1 embeddings: ${h1CacheSize}, Embeddings: ${embeddingCacheSize}`
+      `[CACHE] Cleared caches - Document contexts: ${docCacheSize}, Promise: ${promiseCacheSize}, H1 embeddings: ${h1CacheSize}, Embeddings: ${embeddingCacheSize}`
     )
   );
 }

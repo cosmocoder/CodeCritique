@@ -30,6 +30,8 @@ import {
   inferContextFromDocumentContent,
   isTestFile,
   shouldProcessFile,
+  isGenericDocument,
+  getGenericDocumentContext,
 } from './utils.js';
 
 // Constants for content processing
@@ -1997,11 +1999,18 @@ async function getContextForFile(filePath, content, options = {}) {
   }
 
   const scoredDocuments = [];
-  const GENERIC_DOC_REGEX = /(README|RUNBOOK|CONTRIBUTING|CHANGELOG|LICENSE|SETUP|INSTALL)(\\.md|$)/i;
 
   for (const [docPath, docChunks] of chunksByDocument.entries()) {
     const docH1 = docChunks[0]?.document_title || path.basename(docPath, path.extname(docPath));
-    const candidateDocFullContext = await inferContextFromDocumentContent(docPath, docH1, docChunks, language);
+
+    // FAST-PATH OPTIMIZATION: Use shared utility for generic documents
+    let candidateDocFullContext;
+    if (isGenericDocument(docPath, docH1)) {
+      candidateDocFullContext = getGenericDocumentContext(docPath, docH1);
+      debug(`[FAST-PATH] Using pre-computed context for generic document in CAG: ${docPath}`);
+    } else {
+      candidateDocFullContext = await inferContextFromDocumentContent(docPath, docH1, docChunks, language);
+    }
     const relevantChunksForDoc = docChunks.filter((c) => c.similarity >= RELEVANT_CHUNK_THRESHOLD);
     if (relevantChunksForDoc.length === 0) continue;
 
@@ -2037,7 +2046,7 @@ async function getContextForFile(filePath, content, options = {}) {
       }
     }
 
-    const isGenericByName = GENERIC_DOC_REGEX.test(docPath);
+    const isGenericByName = isGenericDocument(docPath, docH1);
     let genericDocPenaltyFactor = 1.0;
     if (candidateDocFullContext.isGeneralPurposeReadmeStyle || isGenericByName) {
       if (reviewedSnippetContext.area !== 'DevOps' && (docLevelContextMatchScore < 0.8 || isGenericByName)) {
@@ -2105,10 +2114,10 @@ async function getContextForFile(filePath, content, options = {}) {
 
   const uniqueCandidates = [];
   const seenPaths = new Set();
-  const normalizedReviewPath = path.resolve(filePath);
+  const normalizedReviewPath = path.resolve(projectPath, filePath);
 
   for (const candidate of codeExampleCandidates || []) {
-    const normalizedCandidatePath = path.resolve(candidate.path);
+    const normalizedCandidatePath = path.resolve(projectPath, candidate.path);
     if (normalizedCandidatePath !== normalizedReviewPath && !candidate.isDocumentation && !seenPaths.has(candidate.path)) {
       uniqueCandidates.push(candidate);
       seenPaths.add(candidate.path);
