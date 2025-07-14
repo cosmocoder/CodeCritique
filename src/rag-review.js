@@ -8,7 +8,7 @@
 
 import path from 'path';
 import chalk from 'chalk';
-import { runAnalysis, gatherUnifiedContextForPR } from './cag-analyzer.js';
+import { runAnalysis, gatherUnifiedContextForPR } from './rag-analyzer.js';
 import {
   detectFileType,
   detectLanguageFromExtension,

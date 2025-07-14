@@ -15,7 +15,6 @@ import chalk from 'chalk';
 import { Spinner } from 'cli-spinner';
 import { program } from 'commander';
 import { glob } from 'glob';
-import { reviewFile, reviewFiles, reviewPullRequest } from './cag-review.js';
 import * as embeddings from './embeddings.js';
 import { PRHistoryAnalyzer } from './pr-history/analyzer.js';
 import {
@@ -27,6 +26,7 @@ import {
   validateGitHubToken,
 } from './pr-history/cli-utils.js';
 import { cleanupClassifier, clearPRComments, getPRCommentsStats, hasPRComments } from './pr-history/database.js';
+import { reviewFile, reviewFiles, reviewPullRequest } from './rag-review.js';
 import { ensureBranchExists, findBaseBranch } from './utils.js';
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
