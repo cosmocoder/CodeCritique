@@ -712,8 +712,6 @@ function extractMarkdownChunks(filePath, content, relativePath) {
 }
 // --- END Moved Functions ---
 
-// --- Context Inference Helpers (Moved from cag-analyzer.js) ---
-
 // TODO: Implement more robustly. This is a starting heuristic.
 function inferContextFromCodeContent(codeContent, language) {
   const context = {
@@ -1360,7 +1358,6 @@ export {
   findBaseBranch,
   getChangedLinesInfo,
   getFileContentFromGit,
-  
   isGenericDocument,
   getGenericDocumentContext,
 };

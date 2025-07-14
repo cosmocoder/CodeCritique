@@ -3,7 +3,7 @@
 /**
  * AI Code Review Tool - Command Line Interface
  *
- * Main entry point for the AI code review tool using the CAG approach.
+ * Main entry point for the AI code review tool using the RAG approach.
  */
 
 import { execSync } from 'child_process';
@@ -15,7 +15,7 @@ import chalk from 'chalk';
 import { Spinner } from 'cli-spinner';
 import { program } from 'commander';
 import { glob } from 'glob';
-import { reviewFile as cagReviewFile, reviewFiles as cagReviewFiles, reviewPullRequest as cagReviewPullRequest } from './cag-review.js';
+import { reviewFile, reviewFiles, reviewPullRequest } from './cag-review.js';
 import * as embeddings from './embeddings.js';
 import { PRHistoryAnalyzer } from './pr-history/analyzer.js';
 import {
@@ -32,12 +32,12 @@ import { ensureBranchExists, findBaseBranch } from './utils.js';
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 // Configure command-line interface
-program.name('ai-code-review').description('CLI tool for AI-powered code review using the CAG approach').version(packageJson.version);
+program.name('ai-code-review').description('CLI tool for AI-powered code review using the RAG approach').version(packageJson.version);
 
 // Analyze command (restored from previous state if necessary, or kept as is)
 program
   .command('analyze')
-  .description('Analyze code using dynamic context (CAG approach)')
+  .description('Analyze code using dynamic context (RAG approach)')
   .option('-b, --diff-with <branch>', 'Analyze files changed compared to a branch (triggers PR review mode)')
   .option('-f, --files <files...>', 'Specific files or glob patterns to review')
   .option('--file <file>', 'Analyze a single file')
@@ -321,7 +321,7 @@ async function runCodeReview(options) {
   };
 
   try {
-    console.log(chalk.bold.blue('AI Code Review (CAG Approach) - Starting analysis...'));
+    console.log(chalk.bold.blue('AI Code Review (RAG Approach) - Starting analysis...'));
 
     // Determine the review mode based on options
     // Only support: single file, specific files, or diff with branch
@@ -340,13 +340,13 @@ async function runCodeReview(options) {
         actualBranch: options.diffWith,
         diffWith: options.diffWith,
       };
-      reviewTask = cagReviewPullRequest(changedFiles, enhancedReviewOptions);
+      reviewTask = reviewPullRequest(changedFiles, enhancedReviewOptions);
     } else if (options.file) {
       operationDescription = `single file: ${options.file}`;
       if (!fs.existsSync(options.file)) {
         throw new Error(`File not found: ${options.file}`);
       }
-      reviewTask = cagReviewFile(options.file, reviewOptions);
+      reviewTask = reviewFile(options.file, reviewOptions);
     } else if (options.files && options.files.length > 0) {
       const filesToAnalyze = await expandFilePatterns(options.files);
       if (filesToAnalyze.length === 0) {
@@ -354,7 +354,7 @@ async function runCodeReview(options) {
         return;
       }
       operationDescription = `${filesToAnalyze.length} specific files/patterns`;
-      reviewTask = cagReviewFiles(filesToAnalyze, reviewOptions);
+      reviewTask = reviewFiles(filesToAnalyze, reviewOptions);
     } else {
       // No valid options provided - show error and exit
       console.error(chalk.red('Error: You must specify one of the following:'));

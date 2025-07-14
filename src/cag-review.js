@@ -1,5 +1,5 @@
 /**
- * CAG Review Module
+ * RAG Review Module
  *
  * This module serves as the main entry point for the dynamic, context-augmented
  * code review process. It coordinates file discovery and analysis,
@@ -19,7 +19,7 @@ import {
 } from './utils.js';
 
 /**
- * Review a single file using CAG approach
+ * Review a single file using RAG approach
  *
  * @param {string} filePath - Path to the file to review
  * @param {object} options - Review options
@@ -29,7 +29,7 @@ async function reviewFile(filePath, options = {}) {
   try {
     console.log(chalk.blue(`Reviewing file: ${filePath}`));
 
-    // Analyze the file using the CAG analyzer
+    // Analyze the file using the RAG analyzer
     const analyzeResult = await runAnalysis(filePath, options);
 
     // If analysis successful, return the result

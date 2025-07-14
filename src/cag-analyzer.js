@@ -1,8 +1,8 @@
 /**
- * CAG Analyzer Module
+ * RAG Analyzer Module
  *
- * This module provides functionality for analyzing code using the cached context
- * in the Cache Augmented Generation (CAG) approach for code review.
+ * This module provides functionality for analyzing code using context
+ * extracted by the Retrieval Augmented Generation (RAG) approach for code review.
  * It identifies patterns, best practices, and generates review comments.
  */
 
@@ -155,7 +155,7 @@ function createTestGuidelineQueryForLLMRetrieval(codeSnippet, reviewedSnippetCon
 }
 
 /**
- * Run an analysis using the CAG approach (single file or holistic PR)
+ * Run an analysis using the RAG approach (single file or holistic PR)
  *
  * @param {string} filePath - Path to the file to analyze, or a special marker for PR reviews
  * @param {Object} options - Analysis options
@@ -2007,7 +2007,7 @@ async function getContextForFile(filePath, content, options = {}) {
     let candidateDocFullContext;
     if (isGenericDocument(docPath, docH1)) {
       candidateDocFullContext = getGenericDocumentContext(docPath, docH1);
-      debug(`[FAST-PATH] Using pre-computed context for generic document in CAG: ${docPath}`);
+      debug(`[FAST-PATH] Using pre-computed context for generic document in RAG: ${docPath}`);
     } else {
       candidateDocFullContext = await inferContextFromDocumentContent(docPath, docH1, docChunks, language);
     }
