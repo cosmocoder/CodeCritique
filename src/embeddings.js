@@ -2933,7 +2933,6 @@ export function getProjectEmbeddings(projectPath = process.cwd()) {
 
 /**
  * Get PR Comments table from database
- * @param {string} projectPath - Project path for context
  * @returns {Promise<lancedb.Table|null>} PR comments table or null
  */
 export async function getPRCommentsTable() {

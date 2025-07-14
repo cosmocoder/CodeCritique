@@ -31,7 +31,7 @@ export async function storePRCommentsBatch(commentsData, projectPath = process.c
   const resolvedProjectPath = path.resolve(projectPath);
 
   try {
-    const table = await getPRCommentsTable(projectPath);
+    const table = await getPRCommentsTable();
 
     if (!table) {
       throw new Error(`Table ${PR_COMMENTS_TABLE} not found`);
@@ -119,7 +119,7 @@ export async function storePRCommentsBatch(commentsData, projectPath = process.c
  */
 export async function getPRCommentsStats(repository = null, projectPath = process.cwd()) {
   try {
-    const table = await getPRCommentsTable(projectPath);
+    const table = await getPRCommentsTable();
 
     const defaultStats = {
       total_comments: 0,
@@ -260,7 +260,7 @@ export async function getPRCommentsStats(repository = null, projectPath = proces
  */
 export async function getProcessedPRDateRange(repository, projectPath = process.cwd()) {
   try {
-    const table = await getPRCommentsTable(projectPath);
+    const table = await getPRCommentsTable();
 
     if (!table) {
       return { oldestPR: null, newestPR: null };
@@ -333,7 +333,7 @@ export function shouldSkipPR(pr, oldestPR, newestPR) {
  */
 export async function clearPRComments(repository, projectPath = process.cwd()) {
   try {
-    const table = await getPRCommentsTable(projectPath);
+    const table = await getPRCommentsTable();
 
     if (!table) {
       return 0;
@@ -361,7 +361,7 @@ export async function clearPRComments(repository, projectPath = process.cwd()) {
  */
 export async function hasPRComments(repository, projectPath = process.cwd()) {
   try {
-    const table = await getPRCommentsTable(projectPath);
+    const table = await getPRCommentsTable();
 
     if (!table) {
       return false;
@@ -390,7 +390,7 @@ export async function hasPRComments(repository, projectPath = process.cwd()) {
  */
 export async function getLastAnalysisTimestamp(repository, projectPath) {
   try {
-    const table = await getPRCommentsTable(projectPath);
+    const table = await getPRCommentsTable();
 
     if (!table) {
       return null;
@@ -649,10 +649,16 @@ export async function findRelevantPRComments(reviewFileContent, options = {}) {
     );
 
     // --- Step 2: Search for relevant historical comments for each chunk ---
-    const mainTable = await getPRCommentsTable(projectPath);
+    const mainTable = await getPRCommentsTable();
     if (!mainTable) throw new Error('Main PR comments table not found.');
 
     const candidateMatches = new Map();
+
+    // Create project-specific WHERE clause for filtering
+    const resolvedProjectPath = path.resolve(projectPath);
+    const projectWhereClause = `project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`;
+
+    console.log(chalk.blue(`🔒 Project isolation: filtering by project_path = '${resolvedProjectPath}'`));
 
     const searchPromises = chunkEmbeddings.map((chunk) => {
       if (!chunk.vector) return Promise.resolve([]);
@@ -660,6 +666,7 @@ export async function findRelevantPRComments(reviewFileContent, options = {}) {
         mainTable
           .search(chunk.vector)
           .column('combined_embedding')
+          .where(projectWhereClause) // Add project-specific filtering
           .limit(15) // Get 15 potential candidates for each chunk
           .toArray()
           // Attach the chunk that was used for the search to each result
