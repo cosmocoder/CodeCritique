@@ -271,12 +271,13 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
       codeExamples: deduplicatedCodeExamples,
       guidelines: deduplicatedGuidelines,
       prComments: deduplicatedPRComments,
+      customDocChunks: deduplicatedCustomDocChunks,
     } = await gatherUnifiedContextForPR(prFiles, options);
 
     if (verbose) {
       console.log(
         chalk.green(
-          `De-duplicated context: ${deduplicatedCodeExamples.length} code examples, ${deduplicatedGuidelines.length} guidelines, ${deduplicatedPRComments.length} PR comments`
+          `De-duplicated context: ${deduplicatedCodeExamples.length} code examples, ${deduplicatedGuidelines.length} guidelines, ${deduplicatedPRComments.length} PR comments, ${deduplicatedCustomDocChunks.length} custom doc chunks`
         )
       );
     }
@@ -317,6 +318,7 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
           codeExamples: deduplicatedCodeExamples,
           guidelines: deduplicatedGuidelines,
           prComments: deduplicatedPRComments,
+          customDocChunks: deduplicatedCustomDocChunks,
         },
         prContext: prContext,
       };
@@ -373,6 +375,7 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
             codeExamples: deduplicatedCodeExamples.length,
             guidelines: deduplicatedGuidelines.length,
             prComments: deduplicatedPRComments.length,
+            customDocChunks: deduplicatedCustomDocChunks.length,
           },
         };
       });
@@ -396,6 +399,7 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
             codeExamples: deduplicatedCodeExamples.length,
             guidelines: deduplicatedGuidelines.length,
             prComments: deduplicatedPRComments.length,
+            customDocChunks: deduplicatedCustomDocChunks.length,
           },
         },
       };
@@ -463,6 +467,7 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
           codeExamples: deduplicatedCodeExamples.length,
           guidelines: deduplicatedGuidelines.length,
           prComments: deduplicatedPRComments.length,
+          customDocChunks: deduplicatedCustomDocChunks.length,
         },
       };
     }
