@@ -156,7 +156,57 @@ ai-code-review analyze --file path/to/file.py
 
 ## Quick Start
 
-### Basic Usage
+Follow this three-step workflow for optimal code review results:
+
+### Step 1: Generate Embeddings (Required)
+
+**Generate embeddings for your codebase first** - this is essential for context-aware analysis:
+
+```bash
+# Generate embeddings for current directory
+npx ai-code-review embeddings:generate --directory src
+
+# Generate for specific files or patterns
+npx ai-code-review embeddings:generate --files "src/**/*.ts" "lib/*.js"
+
+# Generate with exclusions (recommended for large codebases)
+npx ai-code-review embeddings:generate --directory src --exclude "**/*.test.js" "**/*.spec.js"
+```
+
+### Step 2: Analyze PR History (Optional)
+
+**Enhance reviews with historical context** by analyzing past PR comments. This step requires a GitHub token:
+
+#### Prerequisites for PR History Analysis
+
+You must set a `GITHUB_TOKEN` environment variable with repository access permissions:
+
+```bash
+# Set GitHub token (required for PR history analysis)
+export GITHUB_TOKEN=your_github_token_here
+
+# Or add to .env file
+echo "GITHUB_TOKEN=your_github_token_here" >> .env
+```
+
+#### Run PR History Analysis
+
+```bash
+# Analyze PR history for current project (auto-detects GitHub repo)
+npx ai-code-review pr-history:analyze
+
+# Analyze specific repository
+npx ai-code-review pr-history:analyze --repository owner/repo
+
+# Analyze with date range
+npx ai-code-review pr-history:analyze --since 2024-01-01 --until 2024-12-31
+```
+
+### Step 3: Analyze Code (Final Step)
+
+**Now perform the actual code review** with rich context from embeddings and PR history:
+
+#### Basic Analysis
 
 ```bash
 # Analyze a single file
@@ -167,12 +217,9 @@ npx ai-code-review analyze --files "src/**/*.ts" "lib/*.js"
 
 # Analyze changes in feature-branch vs main branch (auto-detects base branch)
 npx ai-code-review analyze --diff-with feature-branch
-
-# Generate embeddings for better context
-npx ai-code-review embeddings:generate --directory src
 ```
 
-### Using with Custom Guidelines
+#### Using with Custom Guidelines
 
 ```bash
 # Include your team's coding standards
@@ -182,7 +229,7 @@ npx ai-code-review analyze \
   --doc "API Standards:./docs/api-standards.md"
 ```
 
-### Non-JavaScript Projects
+#### Non-JavaScript Projects
 
 ```bash
 # Python project
