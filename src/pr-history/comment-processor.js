@@ -6,8 +6,11 @@
  */
 
 import chalk from 'chalk';
-import { calculateEmbedding } from '../embeddings.js';
+import { getDefaultEmbeddingsSystem } from '../embeddings/factory.js';
 import { filterBotComments } from './bot-detector.js';
+
+// Create embeddings system instance
+const embeddingsSystem = getDefaultEmbeddingsSystem();
 
 export class PRCommentProcessor {
   constructor() {
@@ -326,7 +329,7 @@ export class PRCommentProcessor {
    * @returns {Promise<Array<number>>} Comment embedding
    */
   async generateCommentEmbedding(text) {
-    const embedding = await calculateEmbedding(text);
+    const embedding = await embeddingsSystem.calculateEmbedding(text);
     if (!embedding || embedding.length !== 384) {
       throw new Error(`Invalid embedding dimensions: expected 384, got ${embedding?.length}`);
     }
@@ -339,7 +342,7 @@ export class PRCommentProcessor {
    * @returns {Promise<Array<number>>} Code embedding
    */
   async generateCodeEmbedding(code) {
-    const embedding = await calculateEmbedding(code);
+    const embedding = await embeddingsSystem.calculateEmbedding(code);
     if (!embedding || embedding.length !== 384) {
       throw new Error(`Invalid embedding dimensions: expected 384, got ${embedding?.length}`);
     }
@@ -361,7 +364,7 @@ export class PRCommentProcessor {
     const combinedText = [commentText, codeText].filter(Boolean).join('\n\n--- CODE CONTEXT ---\n\n');
 
     // Generate embedding from the concatenated text
-    const combinedEmbedding = await calculateEmbedding(combinedText);
+    const combinedEmbedding = await embeddingsSystem.calculateEmbedding(combinedText);
     if (!combinedEmbedding || combinedEmbedding.length !== 384) {
       throw new Error(`Invalid combined embedding dimensions: expected 384, got ${combinedEmbedding?.length}`);
     }

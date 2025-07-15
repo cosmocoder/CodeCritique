@@ -15,7 +15,7 @@ import chalk from 'chalk';
 import { Spinner } from 'cli-spinner';
 import { program } from 'commander';
 import { glob } from 'glob';
-import * as embeddings from './embeddings.js';
+import { getDefaultEmbeddingsSystem } from './embeddings/factory.js';
 import { PRHistoryAnalyzer } from './pr-history/analyzer.js';
 import {
   displayAnalysisResults,
@@ -28,6 +28,9 @@ import {
 import { cleanupClassifier, clearPRComments, getPRCommentsStats, hasPRComments } from './pr-history/database.js';
 import { reviewFile, reviewFiles, reviewPullRequest } from './rag-review.js';
 import { ensureBranchExists, findBaseBranch } from './utils.js';
+
+// Create a default embeddings system instance
+const embeddingsSystem = getDefaultEmbeddingsSystem();
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -83,13 +86,13 @@ program
     try {
       console.log(chalk.red('WARNING: This will clear embeddings for ALL projects on this machine!'));
       console.log(chalk.cyan('Clearing all embeddings...'));
-      await embeddings.clearAllEmbeddings();
+      await embeddingsSystem.clearAllEmbeddings();
       console.log(chalk.green('All embeddings have been cleared.'));
-      await embeddings.cleanup();
+      await embeddingsSystem.databaseManager.cleanup();
     } catch (err) {
       console.error(chalk.red('Error clearing all embeddings:'), err.message);
       try {
-        await embeddings.cleanup();
+        await embeddingsSystem.databaseManager.cleanup();
       } catch (cleanupErr) {
         console.error(chalk.red('Error during cleanup:'), cleanupErr.message);
       }
@@ -197,14 +200,14 @@ process.on('SIGINT', async () => {
   }, 10000); // 10 seconds timeout
 
   try {
-    console.log(chalk.cyan('SIGINT handler: Attempting embeddings.cleanup()...'));
-    await embeddings.cleanup();
-    console.log(chalk.green('embeddings.cleanup() completed.'));
+    console.log(chalk.cyan('SIGINT handler: Attempting embeddingsSystem.cleanup()...'));
+    await embeddingsSystem.cleanup();
+    console.log(chalk.green('embeddingsSystem.cleanup() completed.'));
     clearTimeout(forceExitTimeout); // Cleanup finished, clear the timeout
     console.log(chalk.cyan('SIGINT handler: Exiting normally (code 0).'));
     process.exit(0); // Exit normally
   } catch (err) {
-    console.error(chalk.red('Error during embeddings.cleanup():'), err.message);
+    console.error(chalk.red('Error during embeddingsSystem.cleanup():'), err.message);
     clearTimeout(forceExitTimeout);
     console.log(chalk.cyan('SIGINT handler: Exiting after error (code 1).'));
     process.exit(1); // Exit with error code
@@ -220,14 +223,14 @@ process.on('SIGTERM', async () => {
   }, 10000);
 
   try {
-    console.log(chalk.cyan('SIGTERM handler: Attempting embeddings.cleanup()...'));
-    await embeddings.cleanup();
-    console.log(chalk.green('embeddings.cleanup() completed.'));
+    console.log(chalk.cyan('SIGTERM handler: Attempting embeddingsSystem.cleanup()...'));
+    await embeddingsSystem.cleanup();
+    console.log(chalk.green('embeddingsSystem.cleanup() completed.'));
     clearTimeout(forceExitTimeout); // Cleanup finished, clear the timeout
     console.log(chalk.cyan('SIGTERM handler: Exiting normally (code 0).'));
     process.exit(0); // Exit normally
   } catch (err) {
-    console.error(chalk.red('Error during embeddings.cleanup():'), err.message);
+    console.error(chalk.red('Error during embeddingsSystem.cleanup():'), err.message);
     clearTimeout(forceExitTimeout);
     console.log(chalk.cyan('SIGTERM handler: Exiting after error (code 1).'));
     process.exit(1); // Exit with error code
@@ -420,7 +423,7 @@ async function runCodeReview(options) {
     // Clean up resources
     console.log(chalk.cyan('Cleaning up resources...'));
     try {
-      await embeddings.cleanup();
+      await embeddingsSystem.cleanup();
       await cleanupClassifier();
       console.log(chalk.green('All resources cleaned up successfully'));
     } catch (cleanupErr) {
@@ -432,7 +435,7 @@ async function runCodeReview(options) {
     console.error(err.stack);
     // Clean up resources even on error
     try {
-      await embeddings.cleanup();
+      await embeddingsSystem.cleanup();
       await cleanupClassifier();
       console.log(chalk.green('All resources cleaned up successfully'));
     } catch (cleanupErr) {
@@ -465,7 +468,7 @@ async function generateEmbeddings(options) {
 
     // Get the project embeddings interface with the correct project directory
     console.log(chalk.cyan('Initializing project embeddings interface...'));
-    const projectEmbeddings = embeddings.getProjectEmbeddings(projectDir);
+    const projectEmbeddings = embeddingsSystem.getProjectEmbeddings(projectDir);
     console.log(chalk.green('Embeddings interface initialized.'));
 
     // Process exclusion patterns BEFORE file discovery
@@ -559,7 +562,7 @@ async function generateEmbeddings(options) {
     // Start the progress update interval
     const progressInterval = setInterval(updateSpinner, 100);
 
-    const results = await projectEmbeddings.generateEmbeddings(filesToProcess, {
+    const results = await embeddingsSystem.processBatchEmbeddings(filesToProcess, {
       concurrency,
       verbose: options.verbose,
       excludePatterns,
@@ -598,7 +601,7 @@ async function generateEmbeddings(options) {
 
     // Clean up resources to allow the process to exit naturally
     console.log(chalk.cyan('Cleaning up resources...'));
-    await embeddings.cleanup();
+    await embeddingsSystem.cleanup();
     console.log(chalk.green('Cleanup successful.'));
   } catch (err) {
     console.error(chalk.red('Error generating embeddings:'), err.message);
@@ -606,7 +609,7 @@ async function generateEmbeddings(options) {
     // Clean up resources even on error
     try {
       console.log(chalk.cyan('Cleaning up resources after error...'));
-      await embeddings.cleanup();
+      await embeddingsSystem.cleanup();
       console.log(chalk.green('Cleanup successful.'));
     } catch (cleanupErr) {
       console.error(chalk.red('Error during cleanup:'), cleanupErr.message);
@@ -627,19 +630,19 @@ async function clearEmbeddings(options) {
     console.log(chalk.cyan(`Clearing embeddings for project: ${projectDir}`));
 
     // Call clearEmbeddings() with the determined project directory
-    await embeddings.clearEmbeddings(projectDir);
+    await embeddingsSystem.clearEmbeddings(projectDir);
 
     console.log(chalk.green('Project embeddings have been cleared.'));
 
-    // Clean up resources
+    // Clean up resources (only database connection since we skipped full initialization)
     console.log(chalk.cyan('Cleaning up resources...'));
-    await embeddings.cleanup();
+    await embeddingsSystem.databaseManager.cleanup();
   } catch (err) {
     console.error(chalk.red('Error clearing embeddings:'), err.message);
     console.error(err.stack);
-    // Clean up resources even on error
+    // Clean up resources even on error (only database connection)
     try {
-      await embeddings.cleanup();
+      await embeddingsSystem.databaseManager.cleanup();
     } catch (cleanupErr) {
       console.error(chalk.red('Error during cleanup:'), cleanupErr.message);
     }
@@ -663,7 +666,7 @@ async function showEmbeddingStats(options) {
       console.log(chalk.cyan('Fetching embedding statistics for all projects...'));
     }
 
-    const projectEmbeddings = embeddings.getProjectEmbeddings(projectDir);
+    const projectEmbeddings = embeddingsSystem.getProjectEmbeddings(projectDir);
     const stats = await projectEmbeddings.getStats();
 
     console.log(chalk.bold.blue('\nEmbedding Statistics:'));
@@ -688,13 +691,13 @@ async function showEmbeddingStats(options) {
 
     // Clean up resources
     // console.log(chalk.cyan('Cleaning up resources...'));
-    // await embeddings.cleanup();
+    // await embeddingsSystem.cleanup();
   } catch (err) {
     console.error(chalk.red('Error fetching embedding statistics:'), err.message);
     console.error(err.stack);
     // Clean up resources even on error
     // try {
-    //   await embeddings.cleanup();
+    //   await embeddingsSystem.cleanup();
     // } catch (cleanupErr) {
     //   console.error(chalk.red('Error during cleanup:'), cleanupErr.message);
     // }

@@ -10,10 +10,15 @@ import path from 'node:path';
 import { pipeline } from '@huggingface/transformers';
 import chalk from 'chalk';
 import stopwords from 'stopwords-iso/stopwords-iso.json' with { type: 'json' };
-import { calculateQueryEmbedding, CONSTANTS, getPRCommentsTable, updatePRCommentsIndex } from '../embeddings.js';
+import { EMBEDDING_DIMENSIONS, TABLE_NAMES } from '../embeddings/constants.js';
+import { getDefaultEmbeddingsSystem } from '../embeddings/factory.js';
+
+// Create embeddings system instance
+const embeddingsSystem = getDefaultEmbeddingsSystem();
 
 // Import constants from embeddings.js to avoid duplication
-const { EMBEDDING_DIMENSIONS, PR_COMMENTS_TABLE } = CONSTANTS;
+const { PR_COMMENTS } = TABLE_NAMES;
+const PR_COMMENTS_TABLE = PR_COMMENTS;
 
 /**
  * Store multiple PR comments in batch
@@ -31,7 +36,7 @@ export async function storePRCommentsBatch(commentsData, projectPath = process.c
   const resolvedProjectPath = path.resolve(projectPath);
 
   try {
-    const table = await getPRCommentsTable();
+    const table = await embeddingsSystem.getPRCommentsTable();
 
     if (!table) {
       throw new Error(`Table ${PR_COMMENTS_TABLE} not found`);
@@ -102,7 +107,7 @@ export async function storePRCommentsBatch(commentsData, projectPath = process.c
       }
     }
     if (successCount > 0) {
-      await updatePRCommentsIndex();
+      await embeddingsSystem.updatePRCommentsIndex();
     }
   } catch (error) {
     console.error(chalk.red(`Error in batch storage: ${error.message}`));
@@ -119,7 +124,7 @@ export async function storePRCommentsBatch(commentsData, projectPath = process.c
  */
 export async function getPRCommentsStats(repository = null, projectPath = process.cwd()) {
   try {
-    const table = await getPRCommentsTable();
+    const table = await embeddingsSystem.getPRCommentsTable();
 
     const defaultStats = {
       total_comments: 0,
@@ -260,7 +265,7 @@ export async function getPRCommentsStats(repository = null, projectPath = proces
  */
 export async function getProcessedPRDateRange(repository, projectPath = process.cwd()) {
   try {
-    const table = await getPRCommentsTable();
+    const table = await embeddingsSystem.getPRCommentsTable();
 
     if (!table) {
       return { oldestPR: null, newestPR: null };
@@ -333,7 +338,7 @@ export function shouldSkipPR(pr, oldestPR, newestPR) {
  */
 export async function clearPRComments(repository, projectPath = process.cwd()) {
   try {
-    const table = await getPRCommentsTable();
+    const table = await embeddingsSystem.getPRCommentsTable();
 
     if (!table) {
       return 0;
@@ -361,7 +366,7 @@ export async function clearPRComments(repository, projectPath = process.cwd()) {
  */
 export async function hasPRComments(repository, projectPath = process.cwd()) {
   try {
-    const table = await getPRCommentsTable();
+    const table = await embeddingsSystem.getPRCommentsTable();
 
     if (!table) {
       return false;
@@ -390,7 +395,7 @@ export async function hasPRComments(repository, projectPath = process.cwd()) {
  */
 export async function getLastAnalysisTimestamp(repository, projectPath) {
   try {
-    const table = await getPRCommentsTable();
+    const table = await embeddingsSystem.getPRCommentsTable();
 
     if (!table) {
       return null;
@@ -643,13 +648,13 @@ export async function findRelevantPRComments(reviewFileContent, options = {}) {
 
     const chunkEmbeddings = await Promise.all(
       codeChunks.map(async (chunk) => ({
-        vector: await calculateQueryEmbedding(chunk.code),
+        vector: await embeddingsSystem.calculateQueryEmbedding(chunk.code),
         ...chunk,
       }))
     );
 
     // --- Step 2: Search for relevant historical comments for each chunk ---
-    const mainTable = await getPRCommentsTable();
+    const mainTable = await embeddingsSystem.getPRCommentsTable();
     if (!mainTable) throw new Error('Main PR comments table not found.');
 
     const candidateMatches = new Map();
