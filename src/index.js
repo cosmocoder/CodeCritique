@@ -466,11 +466,6 @@ async function generateEmbeddings(options) {
     console.log(chalk.cyan(`Project directory for embeddings: ${projectDir}`));
     console.log(chalk.cyan(`Base directory for file processing: ${baseDir}`));
 
-    // Get the project embeddings interface with the correct project directory
-    console.log(chalk.cyan('Initializing project embeddings interface...'));
-    const projectEmbeddings = embeddingsSystem.getProjectEmbeddings(projectDir);
-    console.log(chalk.green('Embeddings interface initialized.'));
-
     // Process exclusion patterns BEFORE file discovery
     console.log(chalk.cyan('Processing exclusion patterns...'));
     let excludePatterns = options.exclude || [];
