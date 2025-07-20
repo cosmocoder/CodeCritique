@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import chalk from 'chalk';
 import dotenv from 'dotenv';
 import { EmbeddingModel, FlagEmbedding } from 'fastembed';
-import { debug } from '../utils.js';
+import { debug } from '../utils/logging.js';
 import { EMBEDDING_DIMENSIONS, MODEL_NAME_STRING, MAX_RETRIES } from './constants.js';
 import { FASTEMBED_CACHE_DIR } from './constants.js';
 import { createModelInitializationError, createEmbeddingGenerationError } from './errors.js';

@@ -7,7 +7,7 @@
  */
 
 import path from 'node:path';
-import { debug } from '../utils.js';
+import { debug } from '../utils/logging.js';
 
 /**
  * Calculate cosine similarity between two vectors

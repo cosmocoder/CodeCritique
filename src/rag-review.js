@@ -9,14 +9,9 @@
 import path from 'path';
 import chalk from 'chalk';
 import { runAnalysis, gatherUnifiedContextForPR } from './rag-analyzer.js';
-import {
-  detectFileType,
-  detectLanguageFromExtension,
-  findBaseBranch,
-  getChangedLinesInfo,
-  shouldProcessFile,
-  getFileContentFromGit,
-} from './utils.js';
+import { shouldProcessFile } from './utils/file-validation.js';
+import { findBaseBranch, getChangedLinesInfo, getFileContentFromGit } from './utils/git.js';
+import { detectFileType, detectLanguageFromExtension } from './utils/language-detection.js';
 
 /**
  * Review a single file using RAG approach

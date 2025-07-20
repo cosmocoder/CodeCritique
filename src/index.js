@@ -27,8 +27,8 @@ import {
 } from './pr-history/cli-utils.js';
 import { cleanupClassifier, clearPRComments, getPRCommentsStats, hasPRComments } from './pr-history/database.js';
 import { reviewFile, reviewFiles, reviewPullRequest } from './rag-review.js';
-import { execGitSafe } from './utils.js';
-import { ensureBranchExists, findBaseBranch } from './utils.js';
+import { execGitSafe } from './utils/command.js';
+import { ensureBranchExists, findBaseBranch } from './utils/git.js';
 
 // Create a default embeddings system instance
 const embeddingsSystem = getDefaultEmbeddingsSystem();
