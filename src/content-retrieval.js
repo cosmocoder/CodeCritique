@@ -20,8 +20,10 @@ import { DatabaseManager } from './embeddings/database.js';
 import { EmbeddingError } from './embeddings/errors.js';
 import { ModelManager } from './embeddings/model-manager.js';
 import { calculateCosineSimilarity, calculatePathSimilarity } from './embeddings/similarity-calculator.js';
-import { debug } from './utils.js';
-import { isDocumentationFile, isGenericDocument, getGenericDocumentContext, inferContextFromDocumentContent } from './utils.js';
+import { inferContextFromDocumentContent } from './utils/context-inference.js';
+import { isGenericDocument, getGenericDocumentContext } from './utils/document-detection.js';
+import { isDocumentationFile } from './utils/file-validation.js';
+import { debug } from './utils/logging.js';
 
 const FILE_EMBEDDINGS_TABLE = TABLE_NAMES.FILE_EMBEDDINGS;
 const DOCUMENT_CHUNK_TABLE = TABLE_NAMES.DOCUMENT_CHUNK;

@@ -17,14 +17,11 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import chalk from 'chalk';
-import {
-  debug,
-  detectLanguageFromExtension,
-  extractMarkdownChunks,
-  isDocumentationFile,
-  shouldProcessFile as utilsShouldProcessFile,
-  slugify,
-} from '../utils.js';
+import { isDocumentationFile, shouldProcessFile as utilsShouldProcessFile } from '../utils/file-validation.js';
+import { detectLanguageFromExtension } from '../utils/language-detection.js';
+import { debug } from '../utils/logging.js';
+import { extractMarkdownChunks } from '../utils/markdown.js';
+import { slugify } from '../utils/string-utils.js';
 import { TABLE_NAMES, LANCEDB_DIR_NAME, FASTEMBED_CACHE_DIR_NAME } from './constants.js';
 import { createFileProcessingError } from './errors.js';
 

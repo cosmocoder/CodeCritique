@@ -18,8 +18,8 @@ import { CacheManager } from './embeddings/cache-manager.js';
 import { EmbeddingError, ValidationError } from './embeddings/errors.js';
 import { ModelManager } from './embeddings/model-manager.js';
 import { calculateCosineSimilarity, calculatePathSimilarity } from './embeddings/similarity-calculator.js';
-import { debug } from './utils.js';
-import { slugify } from './utils.js';
+import { debug } from './utils/logging.js';
+import { slugify } from './utils/string-utils.js';
 
 /**
  * CustomDocumentProcessor class for advanced document processing

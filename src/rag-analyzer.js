@@ -13,17 +13,11 @@ import { getDefaultEmbeddingsSystem } from './embeddings/factory.js';
 import { calculateCosineSimilarity } from './embeddings/similarity-calculator.js';
 import * as llm from './llm.js';
 import { findRelevantPRComments } from './pr-history/database.js';
-import {
-  debug,
-  detectFileType,
-  detectLanguageFromExtension,
-  inferContextFromCodeContent,
-  inferContextFromDocumentContent,
-  isTestFile,
-  shouldProcessFile,
-  isGenericDocument,
-  getGenericDocumentContext,
-} from './utils.js';
+import { inferContextFromCodeContent, inferContextFromDocumentContent } from './utils/context-inference.js';
+import { isGenericDocument, getGenericDocumentContext } from './utils/document-detection.js';
+import { isTestFile, shouldProcessFile } from './utils/file-validation.js';
+import { detectFileType, detectLanguageFromExtension } from './utils/language-detection.js';
+import { debug } from './utils/logging.js';
 
 // Constants for content processing
 const MAX_QUERY_CONTEXT_LENGTH = 1500;

@@ -23,7 +23,7 @@ import path from 'node:path';
 import * as lancedb from '@lancedb/lancedb';
 import { Field, FixedSizeList, Float32, Int32, Schema, Utf8 } from 'apache-arrow';
 import chalk from 'chalk';
-import { debug } from '../utils.js';
+import { debug } from '../utils/logging.js';
 import { EMBEDDING_DIMENSIONS, TABLE_NAMES } from './constants.js';
 import { LANCEDB_PATH } from './constants.js';
 import { createDatabaseError, ERROR_CODES } from './errors.js';
