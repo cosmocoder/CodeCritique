@@ -14,6 +14,34 @@ import { minimatch } from 'minimatch';
 import { openClassifier } from './zero-shot-classifier-open.js';
 
 /**
+ * Safely escape shell arguments to prevent command injection
+ * @param {string} arg - The argument to escape
+ * @returns {string} - The safely escaped argument
+ */
+function escapeShellArg(arg) {
+  if (!arg || typeof arg !== 'string') {
+    return "''";
+  }
+
+  // For POSIX shells, single quotes preserve everything literally
+  // We escape single quotes by ending the quoted string, adding an escaped quote, and starting a new quoted string
+  return "'" + arg.replace(/'/g, "'\\''") + "'";
+}
+
+/**
+ * Safely execute git commands by escaping all arguments
+ * @param {string} baseCommand - The base git command (e.g., 'git show')
+ * @param {Array<string>} args - Array of arguments to escape and append
+ * @param {Object} options - Options to pass to execSync
+ * @returns {string} - The command output
+ */
+function execGitSafe(baseCommand, args = [], options = {}) {
+  const escapedArgs = args.map((arg) => escapeShellArg(arg)).join(' ');
+  const fullCommand = escapedArgs ? `${baseCommand} ${escapedArgs}` : baseCommand;
+  return execSync(fullCommand, options);
+}
+
+/**
  * Debug function for logging
  * @param {string} message - Debug message to log
  */
@@ -557,7 +585,7 @@ function shouldProcessFile(filePath, _, options = {}) {
       // Use git check-ignore to determine if a file is ignored
       // This is the most accurate way to check as it uses Git's own ignore logic
       // Use baseDir as cwd to ensure git runs in the correct context
-      execSync(`git check-ignore -q "${relativePath}"`, {
+      execGitSafe('git check-ignore', ['-q', relativePath], {
         stdio: 'ignore',
         cwd: baseDir,
       });
@@ -1061,7 +1089,7 @@ async function inferContextFromDocumentContent(docPath, h1Content, chunksSample 
  */
 function checkBranchExists(branchName, workingDir = process.cwd()) {
   try {
-    execSync(`git show-ref --verify --quiet refs/heads/${branchName}`, { cwd: workingDir });
+    execGitSafe('git show-ref', ['--verify', '--quiet', `refs/heads/${branchName}`], { cwd: workingDir });
     return true;
   } catch {
     // Command returns non-zero exit code if branch doesn't exist
@@ -1087,7 +1115,7 @@ function ensureBranchExists(branchName, workingDir = process.cwd()) {
 
     // Try to fetch the branch from origin
     try {
-      execSync(`git fetch origin ${branchName}:${branchName}`, { stdio: 'pipe', cwd: workingDir });
+      execGitSafe('git fetch', ['origin', `${branchName}:${branchName}`], { stdio: 'pipe', cwd: workingDir });
       console.log(chalk.green(`Successfully fetched branch '${branchName}' from origin`));
     } catch {
       // If direct fetch fails, try fetching all branches and then checking
@@ -1096,9 +1124,9 @@ function ensureBranchExists(branchName, workingDir = process.cwd()) {
 
       // Check if branch exists on remote
       try {
-        execSync(`git show-ref --verify --quiet refs/remotes/origin/${branchName}`, { cwd: workingDir });
+        execGitSafe('git show-ref', ['--verify', '--quiet', `refs/remotes/origin/${branchName}`], { cwd: workingDir });
         // Create local tracking branch
-        execSync(`git checkout -b ${branchName} origin/${branchName}`, { stdio: 'pipe', cwd: workingDir });
+        execGitSafe('git checkout', ['-b', branchName, `origin/${branchName}`], { stdio: 'pipe', cwd: workingDir });
         console.log(chalk.green(`Successfully created local branch '${branchName}' tracking origin/${branchName}`));
       } catch {
         throw new Error(`Branch '${branchName}' not found locally or on remote origin`);
@@ -1126,7 +1154,7 @@ function findBaseBranch(workingDir = process.cwd()) {
 
     // Also check if it exists on remote
     try {
-      execSync(`git show-ref --verify --quiet refs/remotes/origin/${branch}`, { cwd: workingDir });
+      execGitSafe('git show-ref', ['--verify', '--quiet', `refs/remotes/origin/${branch}`], { cwd: workingDir });
       return branch;
     } catch {
       // Branch doesn't exist on remote either, continue to next candidate
@@ -1232,8 +1260,8 @@ function getFileContentFromGit(filePath, branchOrCommit, workingDir) {
     const gitPath = relativePath.split(path.sep).join('/');
 
     // Command: git show <branch>:<path>
-    const command = `git show ${branchOrCommit}:${gitPath}`;
-    return execSync(command, { cwd: workingDir, encoding: 'utf8' });
+    // Use safe execution to prevent command injection
+    return execGitSafe('git show', [`${branchOrCommit}:${gitPath}`], { cwd: workingDir, encoding: 'utf8' });
   } catch (error) {
     // Handle cases where the file might not exist in that commit (e.g., a new file in a feature branch)
     if (error.stderr && error.stderr.includes('exists on disk, but not in')) {
@@ -1360,4 +1388,6 @@ export {
   getFileContentFromGit,
   isGenericDocument,
   getGenericDocumentContext,
+  escapeShellArg,
+  execGitSafe,
 };

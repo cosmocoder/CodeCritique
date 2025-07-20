@@ -27,6 +27,7 @@ import {
 } from './pr-history/cli-utils.js';
 import { cleanupClassifier, clearPRComments, getPRCommentsStats, hasPRComments } from './pr-history/database.js';
 import { reviewFile, reviewFiles, reviewPullRequest } from './rag-review.js';
+import { execGitSafe } from './utils.js';
 import { ensureBranchExists, findBaseBranch } from './utils.js';
 
 // Create a default embeddings system instance
@@ -901,7 +902,7 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
     // Use three-dot notation to get changes in branch compared to base
     // This shows commits that are in 'branch' but not in 'baseBranch'
     // By adding --diff-filter=d, we exclude deleted files from the list.
-    const gitOutput = execSync(`git diff --name-only --diff-filter=d ${baseBranch}...${branch}`, { cwd: gitRoot }).toString();
+    const gitOutput = execGitSafe('git diff', ['--name-only', '--diff-filter=d', `${baseBranch}...${branch}`], { cwd: gitRoot }).toString();
 
     // Split, filter empty lines, resolve paths, and check existence
     const changedFiles = gitOutput
