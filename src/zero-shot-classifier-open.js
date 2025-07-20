@@ -135,7 +135,7 @@ class OpenZeroShotClassifier {
     const patterns = [
       /\b(\w+\.js)\b/gi, // Matches *.js frameworks
       /\b(\w+\.py)\b/gi, // Matches *.py libraries
-      /\b([A-Z][a-zA-Z]+(?:[A-Z][a-zA-Z]+)*)\b/g, // CamelCase (React, FastAPI)
+      /\b([A-Z](?:[a-z]*[A-Z])*[a-z]*)\b/g, // CamelCase (React, FastAPI)
       /\b([a-z]+(?:-[a-z]+)+)\b/gi, // kebab-case (scikit-learn, styled-components)
     ];
 
