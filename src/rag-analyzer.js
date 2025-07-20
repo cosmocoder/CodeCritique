@@ -9,17 +9,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import chalk from 'chalk';
-import {
-  calculateCosineSimilarity,
-  calculateEmbedding,
-  calculateQueryEmbedding,
-  findRelevantDocs,
-  findSimilarCode,
-  initializeTables,
-  processCustomDocumentsInMemory,
-  findRelevantCustomDocChunks,
-  getExistingCustomDocumentChunks,
-} from './embeddings.js';
+import { getDefaultEmbeddingsSystem } from './embeddings/factory.js';
+import { calculateCosineSimilarity } from './embeddings/similarity-calculator.js';
 import * as llm from './llm.js';
 import { findRelevantPRComments } from './pr-history/database.js';
 import {
@@ -40,6 +31,9 @@ const MAX_EMBEDDING_CONTENT_LENGTH = 10000;
 const DEFAULT_TRUNCATE_LINES = 300;
 const GUIDELINE_TRUNCATE_LINES = 400;
 const MAX_PR_COMMENTS_FOR_CONTEXT = 15;
+
+// Create embeddings system instance
+const embeddingsSystem = getDefaultEmbeddingsSystem();
 
 // Helper function for truncating content with line count
 function truncateContent(content, maxLines = DEFAULT_TRUNCATE_LINES) {
@@ -1825,7 +1819,7 @@ async function getContextForFile(filePath, content, options = {}) {
   // --- Stage 0: Initialize Tables (ONE-TIME SETUP) ---
   // Note: This may be called concurrently. `initializeTables` should be idempotent.
   try {
-    await initializeTables();
+    await embeddingsSystem.initialize();
   } catch (initError) {
     console.warn(chalk.yellow(`Database initialization warning: ${initError.message}`));
   }
@@ -1843,9 +1837,9 @@ async function getContextForFile(filePath, content, options = {}) {
   let guidelineQueryEmbedding = null;
 
   if (content.trim().length > 0) {
-    analyzedFileEmbedding = await calculateEmbedding(content.substring(0, MAX_EMBEDDING_CONTENT_LENGTH));
+    analyzedFileEmbedding = await embeddingsSystem.calculateEmbedding(content.substring(0, MAX_EMBEDDING_CONTENT_LENGTH));
     const queryContent = isTestFile ? `${content}\\n// Looking for similar test files and testing patterns` : content;
-    fileContentQueryEmbedding = await calculateQueryEmbedding(queryContent);
+    fileContentQueryEmbedding = await embeddingsSystem.calculateQueryEmbedding(queryContent);
   }
 
   const guidelineQuery = isTestFile
@@ -1853,7 +1847,7 @@ async function getContextForFile(filePath, content, options = {}) {
     : createGuidelineQueryForLLMRetrieval(content, reviewedSnippetContext, language);
 
   if (guidelineQuery && guidelineQuery.trim().length > 0) {
-    guidelineQueryEmbedding = await calculateQueryEmbedding(guidelineQuery);
+    guidelineQueryEmbedding = await embeddingsSystem.calculateQueryEmbedding(guidelineQuery);
   }
 
   console.log(chalk.blue('� Starting parallel context retrieval...'));
@@ -1864,7 +1858,7 @@ async function getContextForFile(filePath, content, options = {}) {
       console.log(chalk.blue(`📄 Using preprocessed custom document chunks (${options.preprocessedCustomDocChunks.length} available)`));
 
       // Use the guideline query for finding relevant custom document chunks
-      const relevantChunks = await findRelevantCustomDocChunks(guidelineQuery, options.preprocessedCustomDocChunks, {
+      const relevantChunks = await embeddingsSystem.findRelevantCustomDocChunks(guidelineQuery, options.preprocessedCustomDocChunks, {
         limit: 5,
         similarityThreshold: 0.3,
         queryContextForReranking: reviewedSnippetContext,
@@ -1902,14 +1896,14 @@ async function getContextForFile(filePath, content, options = {}) {
       if (!processedChunks || processedChunks.length === 0) {
         console.log(chalk.cyan('📄 Custom documents not yet processed for this project, processing now...'));
         // Process custom documents into chunks (only if not already processed)
-        processedChunks = await processCustomDocumentsInMemory(options.customDocs, projectPath);
+        processedChunks = await embeddingsSystem.processCustomDocumentsInMemory(options.customDocs, projectPath);
       } else {
         console.log(chalk.green(`📄 Reusing ${processedChunks.length} already processed custom document chunks`));
       }
 
       if (processedChunks.length > 0) {
         // Use the guideline query for finding relevant custom document chunks
-        const relevantChunks = await findRelevantCustomDocChunks(guidelineQuery, processedChunks, {
+        const relevantChunks = await embeddingsSystem.findRelevantCustomDocChunks(guidelineQuery, processedChunks, {
           limit: 5,
           similarityThreshold: 0.3,
           queryContextForReranking: reviewedSnippetContext,
@@ -1943,7 +1937,7 @@ async function getContextForFile(filePath, content, options = {}) {
   const checkExistingCustomDocumentChunks = async (projectPath) => {
     try {
       // Use the statically imported function
-      return await getExistingCustomDocumentChunks(projectPath);
+      return await embeddingsSystem.getExistingCustomDocumentChunks(projectPath);
     } catch {
       console.log(chalk.gray('No existing custom document chunks found, will process from scratch'));
       return [];
@@ -1960,7 +1954,7 @@ async function getContextForFile(filePath, content, options = {}) {
       timeout: options.prTimeout || 300000,
       repository: options.repository || null,
     }),
-    findRelevantDocs(guidelineQuery, {
+    embeddingsSystem.findRelevantDocs(guidelineQuery, {
       ...options,
       projectPath,
       precomputedQueryEmbedding: guidelineQueryEmbedding,
@@ -1969,7 +1963,7 @@ async function getContextForFile(filePath, content, options = {}) {
       useReranking: true,
       queryContextForReranking: reviewedSnippetContext,
     }),
-    findSimilarCode(isTestFile ? `${content}\\n// Looking for similar test files and testing patterns` : content, {
+    embeddingsSystem.findSimilarCode(isTestFile ? `${content}\\n// Looking for similar test files and testing patterns` : content, {
       ...options,
       projectPath,
       isTestFile,
@@ -2040,7 +2034,7 @@ async function getContextForFile(filePath, content, options = {}) {
 
     let docH1RelevanceToReviewedFile = 0;
     if (docH1 && analyzedFileEmbedding) {
-      const docH1Embedding = await calculateEmbedding(docH1);
+      const docH1Embedding = await embeddingsSystem.calculateEmbedding(docH1);
       if (docH1Embedding) {
         docH1RelevanceToReviewedFile = calculateCosineSimilarity(analyzedFileEmbedding, docH1Embedding);
       }
@@ -2153,11 +2147,11 @@ async function gatherUnifiedContextForPR(prFiles, options = {}) {
 
     try {
       // Check if custom documents are already processed for this project
-      let processedChunks = await getExistingCustomDocumentChunks(projectPath);
+      let processedChunks = await embeddingsSystem.getExistingCustomDocumentChunks(projectPath);
 
       if (!processedChunks || processedChunks.length === 0) {
         console.log(chalk.cyan('📄 Custom documents not yet processed for this project, processing now...'));
-        processedChunks = await processCustomDocumentsInMemory(options.customDocs, projectPath);
+        processedChunks = await embeddingsSystem.processCustomDocumentsInMemory(options.customDocs, projectPath);
       } else {
         console.log(chalk.green(`📄 Reusing ${processedChunks.length} already processed custom document chunks`));
       }
