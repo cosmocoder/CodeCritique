@@ -28,8 +28,19 @@ class OpenZeroShotClassifier {
       ttl: 1000 * 60 * 60, // 1 hour TTL
     });
     this.isInitialized = false;
-    this._isDisabled = false; // Private flag for intentional disabling vs failed init
     this._initializationComplete = false; // Track if initialization has been attempted
+
+    // Private flags (make state immutable after initialization)
+    Object.defineProperty(this, '_isDisabled', {
+      value: false,
+      writable: true,
+      configurable: false,
+    });
+
+    // Debug logging flags to reduce verbosity
+    this._disabledLogged = false;
+    this._notInitializedLogged = false;
+    this._failedInitLogged = false;
 
     // Common words to exclude from technology detection
     // Use English stopwords from stopwords-iso
@@ -128,22 +139,26 @@ class OpenZeroShotClassifier {
    */
   _ensureClassifierAvailable() {
     if (this.isDisabled) {
-      if (process.env.DEBUG) {
-        console.log('[DEBUG] Zero-shot classifier intentionally disabled (M1 compatibility)');
+      // Reduce debug verbosity - only log on first check
+      if (process.env.DEBUG && !this._disabledLogged) {
+        console.error('[DEBUG] Zero-shot classifier intentionally disabled (M1 compatibility)');
+        this._disabledLogged = true;
       }
       return { available: false, reason: 'disabled', debug: 'Intentionally disabled on M1 for threading compatibility' };
     }
 
     if (!this.isInitialized) {
-      if (process.env.DEBUG) {
-        console.log('[DEBUG] Zero-shot classifier not initialized');
+      if (process.env.DEBUG && !this._notInitializedLogged) {
+        console.error('[DEBUG] Zero-shot classifier not initialized');
+        this._notInitializedLogged = true;
       }
       return { available: false, reason: 'not_initialized', debug: 'Classifier initialization not completed' };
     }
 
     if (!this.classifier) {
-      if (process.env.DEBUG) {
-        console.log('[DEBUG] Zero-shot classifier failed to initialize');
+      if (process.env.DEBUG && !this._failedInitLogged) {
+        console.error('[DEBUG] Zero-shot classifier failed to initialize');
+        this._failedInitLogged = true;
       }
       return { available: false, reason: 'failed_initialization', debug: 'Classifier object is null after initialization' };
     }
@@ -156,7 +171,8 @@ class OpenZeroShotClassifier {
     const isM1Chip = (() => {
       try {
         const cpuInfo = execSync('sysctl -n machdep.cpu.brand_string', { encoding: 'utf8', timeout: 1000 }).trim();
-        return cpuInfo.includes('M1');
+        // More precise M1 detection - check for Apple M1 specifically
+        return /Apple M1/.test(cpuInfo);
       } catch {
         return false;
       }
@@ -168,6 +184,12 @@ class OpenZeroShotClassifier {
       this.isInitialized = false;
       this._isDisabled = true; // Clearly indicate this is intentionally disabled
       this._initializationComplete = true; // Mark initialization as complete (even though disabled)
+      // Make the disabled state immutable after being set
+      Object.defineProperty(this, '_isDisabled', {
+        value: true,
+        writable: false,
+        configurable: false,
+      });
       return;
     }
 
@@ -176,17 +198,31 @@ class OpenZeroShotClassifier {
 
       this.classifier = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', {
         quantized: true,
-        dtype: 'q4',
+        // Use fp32 for better precision (consistent with other classifier initializations)
+        // q4 quantization can cause accuracy loss in classification tasks
+        dtype: 'fp32',
         device: 'cpu',
       });
 
       this.isInitialized = true;
       this._initializationComplete = true;
+      // Make the disabled state immutable after successful initialization
+      Object.defineProperty(this, '_isDisabled', {
+        value: false,
+        writable: false,
+        configurable: false,
+      });
       console.log('Open-ended zero-shot classifier initialized successfully');
     } catch (error) {
       console.error('Error initializing classifier:', error);
       this.isInitialized = false;
       this._initializationComplete = true; // Mark as complete even on failure
+      // Make the disabled state immutable after failed initialization
+      Object.defineProperty(this, '_isDisabled', {
+        value: false,
+        writable: false,
+        configurable: false,
+      });
       throw error;
     }
   }

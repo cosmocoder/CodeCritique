@@ -465,8 +465,10 @@ function createCodeChunks(codeContent, chunkSize = HYBRID_SEARCH_CONFIG.CHUNK_SI
   return chunks;
 }
 
-// Initialize the classifier with better error handling and configuration
-// Detect M1 chips specifically and disable classifiers completely due to mutex threading issues
+/**
+ * Initialize the classifier with better error handling and configuration.
+ * Detect M1 chips specifically and disable classifiers completely due to mutex threading issues.
+ */
 let isM1ChipCached = null;
 const detectM1Chip = () => {
   if (isM1ChipCached !== null) return isM1ChipCached;
@@ -479,7 +481,8 @@ const detectM1Chip = () => {
     }
 
     const cpuInfo = execSync('sysctl -n machdep.cpu.brand_string', { encoding: 'utf8', timeout: 1000 }).trim();
-    isM1ChipCached = cpuInfo.includes('M1');
+    // More precise M1 detection - check for Apple M1 specifically
+    isM1ChipCached = /Apple M1/.test(cpuInfo);
   } catch (error) {
     // Log the error for debugging but don't crash
     if (process.env.DEBUG) {
@@ -497,6 +500,9 @@ let classifier = null;
 if (isM1Chip) {
   console.log(chalk.yellow('⚠ Detected M1 chip - disabling HuggingFace classifiers due to mutex threading issues'));
   console.log(chalk.yellow('⚠ PR comment verification will fall back to assuming all candidates are relevant'));
+  console.log(chalk.cyan('ℹ  Impact: Zero-shot classification for PR comment relevance will be bypassed'));
+  console.log(chalk.cyan('ℹ  This means all potential PR comments will be included in context (may include some irrelevant comments)'));
+  console.log(chalk.cyan('ℹ  Core functionality remains fully operational - only comment filtering precision is affected'));
 } else {
   try {
     classifier = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', {

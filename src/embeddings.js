@@ -45,7 +45,8 @@ dotenv.config();
 const isM1Chip = (() => {
   try {
     const cpuInfo = execSync('sysctl -n machdep.cpu.brand_string', { encoding: 'utf8', timeout: 1000 }).trim();
-    return cpuInfo.includes('M1');
+    // More precise M1 detection - check for Apple M1 specifically
+    return /Apple M1/.test(cpuInfo);
   } catch {
     return false;
   }
@@ -90,11 +91,12 @@ const FASTEMBED_CACHE_DIR = path.join(process.env.HOME || process.env.USERPROFIL
 let embeddingModelLock = null;
 
 // M1 Threading Fix: Add cleanup handling to prevent mutex errors during process exit
-let cleanupScheduled = false;
+// Use atomic counter to prevent race conditions in cleanup scheduling
+let cleanupScheduled = 0;
 
 function scheduleCleanup() {
-  if (cleanupScheduled) return;
-  cleanupScheduled = true;
+  // Atomic increment - if result is 1, we're the first caller and should proceed
+  if (++cleanupScheduled > 1) return;
 
   // Synchronous cleanup for exit handler (no async operations allowed)
   const syncCleanup = () => {
