@@ -15,7 +15,6 @@
  * - Public API Functions
  */
 
-import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -39,28 +38,6 @@ import {
 
 // Load environment variables from .env file in current working directory
 dotenv.config();
-
-// M1 Threading Fix: Set environment variables to help with native library threading issues
-// Use specific M1 detection instead of broad ARM64 check
-const isM1Chip = (() => {
-  try {
-    const cpuInfo = execSync('sysctl -n machdep.cpu.brand_string', { encoding: 'utf8', timeout: 1000 }).trim();
-    // More precise M1 detection - check for Apple M1 specifically
-    return /Apple M1/.test(cpuInfo);
-  } catch {
-    return false;
-  }
-})();
-
-if (isM1Chip) {
-  // Disable OpenMP threading which can cause issues on M1
-  process.env.OMP_NUM_THREADS = '1';
-  process.env.OPENBLAS_NUM_THREADS = '1';
-  process.env.MKL_NUM_THREADS = '1';
-  process.env.VECLIB_MAXIMUM_THREADS = '1';
-  // Force single threading for ONNX Runtime
-  process.env.ORT_NUM_THREADS = '1';
-}
 
 // Get __dirname equivalent in ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -86,96 +63,6 @@ const PR_COMMENTS_TABLE = 'pr_comments'; // Add PR comments table
 
 // FastEmbed Cache Directory
 const FASTEMBED_CACHE_DIR = path.join(process.env.HOME || process.env.USERPROFILE || __dirname, '.ai-review-fastembed-cache');
-
-// M1 Threading Fix: Add initialization locks to prevent concurrent native library access
-let embeddingModelLock = null;
-
-// M1 Threading Fix: Add cleanup handling to prevent mutex errors during process exit
-// Use atomic counter to prevent race conditions in cleanup scheduling
-let cleanupScheduled = 0;
-
-function scheduleCleanup() {
-  // Atomic increment - if result is 1, we're the first caller and should proceed
-  if (++cleanupScheduled > 1) return;
-
-  // Synchronous cleanup for exit handler (no async operations allowed)
-  const syncCleanup = () => {
-    try {
-      // Clear model references to help GC
-      if (embeddingModel) {
-        embeddingModel = null;
-        modelInitialized = false;
-      }
-
-      // Clear initialization locks
-      embeddingModelLock = null;
-
-      // Clear database connection reference (can't close async in exit handler)
-      if (dbConnection) {
-        dbConnection = null;
-      }
-
-      if (process.env.DEBUG) {
-        console.error('[DEBUG] Synchronous cleanup completed');
-      }
-    } catch (error) {
-      // Log cleanup errors to stderr for debugging, but don't crash
-      if (process.env.DEBUG) {
-        console.error('[DEBUG] Sync cleanup error:', error.message);
-      }
-    }
-  };
-
-  // Async cleanup for signal handlers (can handle proper async cleanup)
-  const asyncCleanup = async () => {
-    try {
-      // Attempt proper async cleanup for signals
-      if (dbConnection) {
-        try {
-          await dbConnection.close();
-          if (process.env.DEBUG) {
-            console.error('[DEBUG] Database connection closed properly');
-          }
-        } catch (closeError) {
-          if (process.env.DEBUG) {
-            console.error('[DEBUG] Error closing database connection:', closeError.message);
-          }
-        }
-        dbConnection = null;
-      }
-
-      // Clear other resources
-      syncCleanup();
-
-      process.exit(0);
-    } catch (error) {
-      if (process.env.DEBUG) {
-        console.error('[DEBUG] Async cleanup error:', error.message);
-      }
-      process.exit(1);
-    }
-  };
-
-  // Use process.once() to ensure handlers are only registered once
-  process.once('exit', syncCleanup); // Must be synchronous
-  process.once('SIGINT', asyncCleanup); // Can be async
-  process.once('SIGTERM', asyncCleanup); // Can be async
-  process.once('SIGPIPE', () => {
-    // Handle SIGPIPE (broken pipe) gracefully - common when piping to head/tail
-    if (process.env.DEBUG) {
-      console.error('[DEBUG] SIGPIPE received - output pipe closed');
-    }
-    syncCleanup(); // Use sync cleanup for pipe closure
-    process.exit(0); // Exit cleanly for SIGPIPE
-  });
-  process.once('uncaughtException', (error) => {
-    if (process.env.DEBUG) {
-      console.error('[DEBUG] Uncaught exception during cleanup:', error.message);
-    }
-    syncCleanup(); // Fallback to sync cleanup
-    process.exit(1);
-  });
-}
 
 // ============================================================================
 // STATE & CACHES
@@ -245,13 +132,8 @@ async function initEmbeddingModel() {
     return await modelInitializationPromise;
   }
 
-  // M1 Threading Fix: Serialize embedding model initialization to prevent mutex conflicts
-  if (embeddingModelLock) {
-    await embeddingModelLock;
-  }
-
   // Start initialization and store the promise
-  embeddingModelLock = modelInitializationPromise = (async () => {
+  modelInitializationPromise = (async () => {
     const modelIdentifier = EmbeddingModel.BGESmallENV15;
 
     // Only print logs if we haven't initialized before
@@ -277,8 +159,6 @@ async function initEmbeddingModel() {
           if (!modelInitialized) {
             console.log(chalk.green('FastEmbed model initialized successfully.'));
             modelInitialized = true;
-            // M1 Threading Fix: Schedule cleanup to prevent exit mutex errors
-            scheduleCleanup();
           }
           break; // Exit loop on success
         } catch (initError) {
@@ -293,12 +173,10 @@ async function initEmbeddingModel() {
 
       // Clear the initialization promise since we're done
       modelInitializationPromise = null;
-      embeddingModelLock = null;
       return embeddingModel;
     } catch (err) {
       // Clear the initialization promise on error
       modelInitializationPromise = null;
-      embeddingModelLock = null;
       console.error(chalk.red(`Fatal: Failed to initialize fastembed model: ${err.message}`), err);
       throw err; // Re-throw critical error
     }
@@ -500,11 +378,6 @@ export async function initializeTables() {
   if (tableInitializationPromise) {
     await tableInitializationPromise;
     return;
-  }
-
-  // M1 Threading Fix: Serialize database initialization after embedding model
-  if (embeddingModelLock) {
-    await embeddingModelLock;
   }
 
   // Start initialization and store the promise.
