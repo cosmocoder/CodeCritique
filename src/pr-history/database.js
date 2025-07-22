@@ -6,6 +6,7 @@
  * All database connection, table management, and indexing is handled by embeddings.js.
  */
 
+import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { pipeline } from '@huggingface/transformers';
 import chalk from 'chalk';
@@ -465,28 +466,44 @@ function createCodeChunks(codeContent, chunkSize = HYBRID_SEARCH_CONFIG.CHUNK_SI
 }
 
 // Initialize the classifier with better error handling and configuration
-let classifier;
-try {
-  classifier = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', {
-    quantized: true,
-    // Reduce precision to avoid dimension issues
-    dtype: 'fp32',
-    device: 'cpu',
-  });
-  console.log(chalk.green('✓ Local MobileBERT classifier initialized successfully'));
-} catch {
-  console.warn(chalk.yellow('⚠ Failed to initialize MobileBERT, trying fallback model...'));
+// Detect M1 chips specifically and disable classifiers completely due to mutex threading issues
+const isM1Chip = (() => {
   try {
-    // Fallback to a smaller, more stable model
-    classifier = await pipeline('zero-shot-classification', 'Xenova/distilbert-base-uncased-mnli', {
+    const cpuInfo = execSync('sysctl -n machdep.cpu.brand_string', { encoding: 'utf8' }).trim();
+    return cpuInfo.includes('M1');
+  } catch {
+    return false;
+  }
+})();
+
+let classifier = null;
+
+if (isM1Chip) {
+  console.log(chalk.yellow('⚠ Detected M1 chip - disabling HuggingFace classifiers due to mutex threading issues'));
+  console.log(chalk.yellow('⚠ PR comment verification will fall back to assuming all candidates are relevant'));
+} else {
+  try {
+    classifier = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', {
       quantized: true,
-      dtype: 'fp32',
+      // Reduce precision to avoid dimension issues
+      dtype: 'q4',
       device: 'cpu',
     });
-    console.log(chalk.green('✓ Local DistilBERT classifier initialized successfully (fallback)'));
-  } catch (fallbackError) {
-    console.warn(chalk.yellow('⚠ Failed to initialize any local classifier:'), fallbackError.message);
-    classifier = null;
+    console.log(chalk.green('✓ Local MobileBERT classifier initialized successfully'));
+  } catch {
+    console.warn(chalk.yellow('⚠ Failed to initialize MobileBERT, trying fallback model...'));
+    try {
+      // Fallback to a smaller, more stable model
+      classifier = await pipeline('zero-shot-classification', 'Xenova/distilbert-base-uncased-mnli', {
+        quantized: true,
+        dtype: 'q4',
+        device: 'cpu',
+      });
+      console.log(chalk.green('✓ Local DistilBERT classifier initialized successfully (fallback)'));
+    } catch (fallbackError) {
+      console.warn(chalk.yellow('⚠ Failed to initialize any local classifier:'), fallbackError.message);
+      classifier = null;
+    }
   }
 }
 

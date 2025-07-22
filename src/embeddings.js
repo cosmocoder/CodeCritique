@@ -39,6 +39,17 @@ import {
 // Load environment variables from .env file in current working directory
 dotenv.config();
 
+// M1 Threading Fix: Set environment variables to help with native library threading issues
+if (process.arch === 'arm64') {
+  // Disable OpenMP threading which can cause issues on M1
+  process.env.OMP_NUM_THREADS = '1';
+  process.env.OPENBLAS_NUM_THREADS = '1'; 
+  process.env.MKL_NUM_THREADS = '1';
+  process.env.VECLIB_MAXIMUM_THREADS = '1';
+  // Force single threading for ONNX Runtime
+  process.env.ORT_NUM_THREADS = '1';
+}
+
 // Get __dirname equivalent in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,6 +74,41 @@ const PR_COMMENTS_TABLE = 'pr_comments'; // Add PR comments table
 
 // FastEmbed Cache Directory
 const FASTEMBED_CACHE_DIR = path.join(process.env.HOME || process.env.USERPROFILE || __dirname, '.ai-review-fastembed-cache');
+
+// M1 Threading Fix: Add global initialization lock to prevent concurrent native library access
+let globalInitializationLock = null;
+
+// M1 Threading Fix: Add cleanup handling to prevent mutex errors during process exit
+let cleanupScheduled = false;
+
+function scheduleCleanup() {
+  if (cleanupScheduled) return;
+  cleanupScheduled = true;
+
+  const cleanup = async () => {
+    try {
+      // Clear model reference to help GC
+      if (embeddingModel) {
+        embeddingModel = null;
+        modelInitialized = false;
+      }
+      
+      // Clear database connection
+      if (dbConnection) {
+        await dbConnection.close();
+        dbConnection = null;
+      }
+    } catch {
+      // Silent cleanup - don't log errors during shutdown
+    }
+  };
+
+  // Schedule cleanup on various exit scenarios
+  process.on('exit', cleanup);
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
+  process.on('uncaughtException', cleanup);
+}
 
 // ============================================================================
 // STATE & CACHES
@@ -132,8 +178,13 @@ async function initEmbeddingModel() {
     return await modelInitializationPromise;
   }
 
+  // M1 Threading Fix: Serialize all native library initialization to prevent mutex conflicts
+  if (globalInitializationLock) {
+    await globalInitializationLock;
+  }
+
   // Start initialization and store the promise
-  modelInitializationPromise = (async () => {
+  globalInitializationLock = modelInitializationPromise = (async () => {
     const modelIdentifier = EmbeddingModel.BGESmallENV15;
 
     // Only print logs if we haven't initialized before
@@ -159,6 +210,8 @@ async function initEmbeddingModel() {
           if (!modelInitialized) {
             console.log(chalk.green('FastEmbed model initialized successfully.'));
             modelInitialized = true;
+            // M1 Threading Fix: Schedule cleanup to prevent exit mutex errors
+            scheduleCleanup();
           }
           break; // Exit loop on success
         } catch (initError) {
@@ -173,10 +226,12 @@ async function initEmbeddingModel() {
 
       // Clear the initialization promise since we're done
       modelInitializationPromise = null;
+      globalInitializationLock = null;
       return embeddingModel;
     } catch (err) {
       // Clear the initialization promise on error
       modelInitializationPromise = null;
+      globalInitializationLock = null;
       console.error(chalk.red(`Fatal: Failed to initialize fastembed model: ${err.message}`), err);
       throw err; // Re-throw critical error
     }
@@ -380,8 +435,13 @@ export async function initializeTables() {
     return;
   }
 
+  // M1 Threading Fix: Serialize database initialization after embedding model
+  if (globalInitializationLock) {
+    await globalInitializationLock;
+  }
+
   // Start initialization and store the promise.
-  tableInitializationPromise = (async () => {
+  globalInitializationLock = tableInitializationPromise = (async () => {
     try {
       console.log(chalk.blue('Initializing database tables and indices...'));
       const db = await getDBConnection();
@@ -395,6 +455,7 @@ export async function initializeTables() {
     } finally {
       // The initialization attempt is over, clear the promise
       tableInitializationPromise = null;
+      globalInitializationLock = null;
     }
   })();
 

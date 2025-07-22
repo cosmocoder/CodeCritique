@@ -5,6 +5,7 @@
  * allowing it to detect any technology or framework mentioned in the text.
  */
 
+import { execSync } from 'node:child_process';
 import { env, pipeline } from '@huggingface/transformers';
 import * as linguistLanguages from 'linguist-languages';
 import { LRUCache } from 'lru-cache';
@@ -112,11 +113,30 @@ class OpenZeroShotClassifier {
   }
 
   async _doInitialize() {
+    // Detect M1 chips specifically and disable classifiers completely due to mutex threading issues
+    const isM1Chip = (() => {
+      try {
+        const cpuInfo = execSync('sysctl -n machdep.cpu.brand_string', { encoding: 'utf8' }).trim();
+        return cpuInfo.includes('M1');
+      } catch {
+        return false;
+      }
+    })();
+
+    if (isM1Chip) {
+      console.log('⚠ Detected M1 chip - disabling HuggingFace zero-shot classifier due to mutex threading issues');
+      this.classifier = null;
+      this.isInitialized = false; // Keep as false to indicate disabled
+      return;
+    }
+
     try {
       console.log('Initializing open-ended zero-shot classifier...');
 
       this.classifier = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', {
         quantized: true,
+        dtype: 'q4',
+        device: 'cpu',
       });
 
       this.isInitialized = true;
@@ -247,6 +267,11 @@ class OpenZeroShotClassifier {
       await this.initialize();
     }
 
+    // If classifier is still null after initialization (e.g., on M1), return empty results
+    if (!this.classifier) {
+      return [];
+    }
+
     const cacheKey = `tech:${text.substring(0, 100)}`;
     const cached = this.cache.get(cacheKey);
     if (cached) {
@@ -302,6 +327,11 @@ class OpenZeroShotClassifier {
   async classifyDomain(text, minConfidence = 0.3) {
     if (!this.isInitialized) {
       await this.initialize();
+    }
+
+    // If classifier is still null after initialization (e.g., on M1), return empty results
+    if (!this.classifier) {
+      return [];
     }
 
     const cacheKey = `domain:${text.substring(0, 100)}`;
