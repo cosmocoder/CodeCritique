@@ -501,8 +501,8 @@ if (isM1Chip) {
   try {
     classifier = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', {
       quantized: true,
-      // Reduce precision to avoid dimension issues
-      dtype: 'q4',
+      // Use fp32 for better precision (q4 quantization can cause accuracy loss)
+      dtype: 'fp32',
       device: 'cpu',
     });
     console.log(chalk.green('✓ Local MobileBERT classifier initialized successfully'));
@@ -512,7 +512,8 @@ if (isM1Chip) {
       // Fallback to a smaller, more stable model
       classifier = await pipeline('zero-shot-classification', 'Xenova/distilbert-base-uncased-mnli', {
         quantized: true,
-        dtype: 'q4',
+        // Use fp32 for better precision (consistent with primary model)
+        dtype: 'fp32',
         device: 'cpu',
       });
       console.log(chalk.green('✓ Local DistilBERT classifier initialized successfully (fallback)'));

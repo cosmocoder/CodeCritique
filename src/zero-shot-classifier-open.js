@@ -28,7 +28,8 @@ class OpenZeroShotClassifier {
       ttl: 1000 * 60 * 60, // 1 hour TTL
     });
     this.isInitialized = false;
-    this.isDisabled = false; // Separate flag for intentional disabling vs failed init
+    this._isDisabled = false; // Private flag for intentional disabling vs failed init
+    this._initializationComplete = false; // Track if initialization has been attempted
 
     // Common words to exclude from technology detection
     // Use English stopwords from stopwords-iso
@@ -101,6 +102,14 @@ class OpenZeroShotClassifier {
   }
 
   /**
+   * Get the disabled state (read-only after initialization)
+   * @returns {boolean} True if classifier is intentionally disabled
+   */
+  get isDisabled() {
+    return this._isDisabled;
+  }
+
+  /**
    * Initialize the zero-shot classification pipeline
    */
   async initialize() {
@@ -115,25 +124,38 @@ class OpenZeroShotClassifier {
 
   /**
    * Check if classifier is available and ready to use
-   * @returns {boolean} True if classifier is available, false if disabled or not initialized
+   * @returns {object} Status object with availability and reason
    */
   _ensureClassifierAvailable() {
     if (this.isDisabled) {
-      return false; // Intentionally disabled on M1
+      if (process.env.DEBUG) {
+        console.log('[DEBUG] Zero-shot classifier intentionally disabled (M1 compatibility)');
+      }
+      return { available: false, reason: 'disabled', debug: 'Intentionally disabled on M1 for threading compatibility' };
     }
 
-    if (!this.isInitialized || !this.classifier) {
-      return false; // Not initialized or failed to initialize
+    if (!this.isInitialized) {
+      if (process.env.DEBUG) {
+        console.log('[DEBUG] Zero-shot classifier not initialized');
+      }
+      return { available: false, reason: 'not_initialized', debug: 'Classifier initialization not completed' };
     }
 
-    return true;
+    if (!this.classifier) {
+      if (process.env.DEBUG) {
+        console.log('[DEBUG] Zero-shot classifier failed to initialize');
+      }
+      return { available: false, reason: 'failed_initialization', debug: 'Classifier object is null after initialization' };
+    }
+
+    return { available: true, reason: 'ready', debug: 'Classifier is ready for use' };
   }
 
   async _doInitialize() {
     // Detect M1 chips specifically and disable classifiers completely due to mutex threading issues
     const isM1Chip = (() => {
       try {
-        const cpuInfo = execSync('sysctl -n machdep.cpu.brand_string', { encoding: 'utf8' }).trim();
+        const cpuInfo = execSync('sysctl -n machdep.cpu.brand_string', { encoding: 'utf8', timeout: 1000 }).trim();
         return cpuInfo.includes('M1');
       } catch {
         return false;
@@ -144,7 +166,8 @@ class OpenZeroShotClassifier {
       console.log('⚠ Detected M1 chip - disabling HuggingFace zero-shot classifier due to mutex threading issues');
       this.classifier = null;
       this.isInitialized = false;
-      this.isDisabled = true; // Clearly indicate this is intentionally disabled
+      this._isDisabled = true; // Clearly indicate this is intentionally disabled
+      this._initializationComplete = true; // Mark initialization as complete (even though disabled)
       return;
     }
 
@@ -158,10 +181,12 @@ class OpenZeroShotClassifier {
       });
 
       this.isInitialized = true;
+      this._initializationComplete = true;
       console.log('Open-ended zero-shot classifier initialized successfully');
     } catch (error) {
       console.error('Error initializing classifier:', error);
       this.isInitialized = false;
+      this._initializationComplete = true; // Mark as complete even on failure
       throw error;
     }
   }
@@ -286,7 +311,8 @@ class OpenZeroShotClassifier {
     }
 
     // Check if classifier is available (handles both disabled and failed initialization)
-    if (!this._ensureClassifierAvailable()) {
+    const status = this._ensureClassifierAvailable();
+    if (!status.available) {
       return [];
     }
 
@@ -348,7 +374,8 @@ class OpenZeroShotClassifier {
     }
 
     // Check if classifier is available (handles both disabled and failed initialization)
-    if (!this._ensureClassifierAvailable()) {
+    const status = this._ensureClassifierAvailable();
+    if (!status.available) {
       return [];
     }
 

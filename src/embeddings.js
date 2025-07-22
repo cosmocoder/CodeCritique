@@ -44,7 +44,7 @@ dotenv.config();
 // Use specific M1 detection instead of broad ARM64 check
 const isM1Chip = (() => {
   try {
-    const cpuInfo = execSync('sysctl -n machdep.cpu.brand_string', { encoding: 'utf8' }).trim();
+    const cpuInfo = execSync('sysctl -n machdep.cpu.brand_string', { encoding: 'utf8', timeout: 1000 }).trim();
     return cpuInfo.includes('M1');
   } catch {
     return false;
@@ -86,8 +86,8 @@ const PR_COMMENTS_TABLE = 'pr_comments'; // Add PR comments table
 // FastEmbed Cache Directory
 const FASTEMBED_CACHE_DIR = path.join(process.env.HOME || process.env.USERPROFILE || __dirname, '.ai-review-fastembed-cache');
 
-// M1 Threading Fix: Add global initialization lock to prevent concurrent native library access
-let globalInitializationLock = null;
+// M1 Threading Fix: Add initialization locks to prevent concurrent native library access
+let embeddingModelLock = null;
 
 // M1 Threading Fix: Add cleanup handling to prevent mutex errors during process exit
 let cleanupScheduled = false;
@@ -96,32 +96,83 @@ function scheduleCleanup() {
   if (cleanupScheduled) return;
   cleanupScheduled = true;
 
-  const cleanup = () => {
+  // Synchronous cleanup for exit handler (no async operations allowed)
+  const syncCleanup = () => {
     try {
-      // Clear model reference to help GC
+      // Clear model references to help GC
       if (embeddingModel) {
         embeddingModel = null;
         modelInitialized = false;
       }
 
-      // Clear database connection (synchronous close only)
+      // Clear initialization locks
+      embeddingModelLock = null;
+
+      // Clear database connection reference (can't close async in exit handler)
       if (dbConnection) {
-        // Note: Can't use async operations in exit handler
         dbConnection = null;
+      }
+
+      if (process.env.DEBUG) {
+        console.error('[DEBUG] Synchronous cleanup completed');
       }
     } catch (error) {
       // Log cleanup errors to stderr for debugging, but don't crash
       if (process.env.DEBUG) {
-        console.error('[DEBUG] Cleanup error:', error.message);
+        console.error('[DEBUG] Sync cleanup error:', error.message);
       }
     }
   };
 
+  // Async cleanup for signal handlers (can handle proper async cleanup)
+  const asyncCleanup = async () => {
+    try {
+      // Attempt proper async cleanup for signals
+      if (dbConnection) {
+        try {
+          await dbConnection.close();
+          if (process.env.DEBUG) {
+            console.error('[DEBUG] Database connection closed properly');
+          }
+        } catch (closeError) {
+          if (process.env.DEBUG) {
+            console.error('[DEBUG] Error closing database connection:', closeError.message);
+          }
+        }
+        dbConnection = null;
+      }
+
+      // Clear other resources
+      syncCleanup();
+
+      process.exit(0);
+    } catch (error) {
+      if (process.env.DEBUG) {
+        console.error('[DEBUG] Async cleanup error:', error.message);
+      }
+      process.exit(1);
+    }
+  };
+
   // Use process.once() to ensure handlers are only registered once
-  process.once('exit', cleanup);
-  process.once('SIGINT', cleanup);
-  process.once('SIGTERM', cleanup);
-  process.once('uncaughtException', cleanup);
+  process.once('exit', syncCleanup); // Must be synchronous
+  process.once('SIGINT', asyncCleanup); // Can be async
+  process.once('SIGTERM', asyncCleanup); // Can be async
+  process.once('SIGPIPE', () => {
+    // Handle SIGPIPE (broken pipe) gracefully - common when piping to head/tail
+    if (process.env.DEBUG) {
+      console.error('[DEBUG] SIGPIPE received - output pipe closed');
+    }
+    syncCleanup(); // Use sync cleanup for pipe closure
+    process.exit(0); // Exit cleanly for SIGPIPE
+  });
+  process.once('uncaughtException', (error) => {
+    if (process.env.DEBUG) {
+      console.error('[DEBUG] Uncaught exception during cleanup:', error.message);
+    }
+    syncCleanup(); // Fallback to sync cleanup
+    process.exit(1);
+  });
 }
 
 // ============================================================================
@@ -192,13 +243,13 @@ async function initEmbeddingModel() {
     return await modelInitializationPromise;
   }
 
-  // M1 Threading Fix: Serialize all native library initialization to prevent mutex conflicts
-  if (globalInitializationLock) {
-    await globalInitializationLock;
+  // M1 Threading Fix: Serialize embedding model initialization to prevent mutex conflicts
+  if (embeddingModelLock) {
+    await embeddingModelLock;
   }
 
   // Start initialization and store the promise
-  globalInitializationLock = modelInitializationPromise = (async () => {
+  embeddingModelLock = modelInitializationPromise = (async () => {
     const modelIdentifier = EmbeddingModel.BGESmallENV15;
 
     // Only print logs if we haven't initialized before
@@ -240,12 +291,12 @@ async function initEmbeddingModel() {
 
       // Clear the initialization promise since we're done
       modelInitializationPromise = null;
-      globalInitializationLock = null;
+      embeddingModelLock = null;
       return embeddingModel;
     } catch (err) {
       // Clear the initialization promise on error
       modelInitializationPromise = null;
-      globalInitializationLock = null;
+      embeddingModelLock = null;
       console.error(chalk.red(`Fatal: Failed to initialize fastembed model: ${err.message}`), err);
       throw err; // Re-throw critical error
     }
@@ -450,12 +501,12 @@ export async function initializeTables() {
   }
 
   // M1 Threading Fix: Serialize database initialization after embedding model
-  if (globalInitializationLock) {
-    await globalInitializationLock;
+  if (embeddingModelLock) {
+    await embeddingModelLock;
   }
 
   // Start initialization and store the promise.
-  globalInitializationLock = tableInitializationPromise = (async () => {
+  tableInitializationPromise = (async () => {
     try {
       console.log(chalk.blue('Initializing database tables and indices...'));
       const db = await getDBConnection();
@@ -469,7 +520,6 @@ export async function initializeTables() {
     } finally {
       // The initialization attempt is over, clear the promise
       tableInitializationPromise = null;
-      globalInitializationLock = null;
     }
   })();
 
