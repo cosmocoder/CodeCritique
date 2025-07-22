@@ -467,15 +467,31 @@ function createCodeChunks(codeContent, chunkSize = HYBRID_SEARCH_CONFIG.CHUNK_SI
 
 // Initialize the classifier with better error handling and configuration
 // Detect M1 chips specifically and disable classifiers completely due to mutex threading issues
-const isM1Chip = (() => {
-  try {
-    const cpuInfo = execSync('sysctl -n machdep.cpu.brand_string', { encoding: 'utf8' }).trim();
-    return cpuInfo.includes('M1');
-  } catch {
-    return false;
-  }
-})();
+let isM1ChipCached = null;
+const detectM1Chip = () => {
+  if (isM1ChipCached !== null) return isM1ChipCached;
 
+  try {
+    // Only try on macOS systems
+    if (process.platform !== 'darwin') {
+      isM1ChipCached = false;
+      return false;
+    }
+
+    const cpuInfo = execSync('sysctl -n machdep.cpu.brand_string', { encoding: 'utf8', timeout: 1000 }).trim();
+    isM1ChipCached = cpuInfo.includes('M1');
+  } catch (error) {
+    // Log the error for debugging but don't crash
+    if (process.env.DEBUG) {
+      console.warn(chalk.yellow(`[DEBUG] M1 detection failed: ${error.message}`));
+    }
+    isM1ChipCached = false;
+  }
+
+  return isM1ChipCached;
+};
+
+const isM1Chip = detectM1Chip();
 let classifier = null;
 
 if (isM1Chip) {

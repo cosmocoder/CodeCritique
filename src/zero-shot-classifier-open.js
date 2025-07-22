@@ -28,6 +28,7 @@ class OpenZeroShotClassifier {
       ttl: 1000 * 60 * 60, // 1 hour TTL
     });
     this.isInitialized = false;
+    this.isDisabled = false; // Separate flag for intentional disabling vs failed init
 
     // Common words to exclude from technology detection
     // Use English stopwords from stopwords-iso
@@ -112,6 +113,22 @@ class OpenZeroShotClassifier {
     await this.initializationPromise;
   }
 
+  /**
+   * Check if classifier is available and ready to use
+   * @returns {boolean} True if classifier is available, false if disabled or not initialized
+   */
+  _ensureClassifierAvailable() {
+    if (this.isDisabled) {
+      return false; // Intentionally disabled on M1
+    }
+
+    if (!this.isInitialized || !this.classifier) {
+      return false; // Not initialized or failed to initialize
+    }
+
+    return true;
+  }
+
   async _doInitialize() {
     // Detect M1 chips specifically and disable classifiers completely due to mutex threading issues
     const isM1Chip = (() => {
@@ -126,7 +143,8 @@ class OpenZeroShotClassifier {
     if (isM1Chip) {
       console.log('⚠ Detected M1 chip - disabling HuggingFace zero-shot classifier due to mutex threading issues');
       this.classifier = null;
-      this.isInitialized = false; // Keep as false to indicate disabled
+      this.isInitialized = false;
+      this.isDisabled = true; // Clearly indicate this is intentionally disabled
       return;
     }
 
@@ -267,8 +285,8 @@ class OpenZeroShotClassifier {
       await this.initialize();
     }
 
-    // If classifier is still null after initialization (e.g., on M1), return empty results
-    if (!this.classifier) {
+    // Check if classifier is available (handles both disabled and failed initialization)
+    if (!this._ensureClassifierAvailable()) {
       return [];
     }
 
@@ -329,8 +347,8 @@ class OpenZeroShotClassifier {
       await this.initialize();
     }
 
-    // If classifier is still null after initialization (e.g., on M1), return empty results
-    if (!this.classifier) {
+    // Check if classifier is available (handles both disabled and failed initialization)
+    if (!this._ensureClassifierAvailable()) {
       return [];
     }
 

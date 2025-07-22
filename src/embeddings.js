@@ -15,6 +15,7 @@
  * - Public API Functions
  */
 
+import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,10 +41,20 @@ import {
 dotenv.config();
 
 // M1 Threading Fix: Set environment variables to help with native library threading issues
-if (process.arch === 'arm64') {
+// Use specific M1 detection instead of broad ARM64 check
+const isM1Chip = (() => {
+  try {
+    const cpuInfo = execSync('sysctl -n machdep.cpu.brand_string', { encoding: 'utf8' }).trim();
+    return cpuInfo.includes('M1');
+  } catch {
+    return false;
+  }
+})();
+
+if (isM1Chip) {
   // Disable OpenMP threading which can cause issues on M1
   process.env.OMP_NUM_THREADS = '1';
-  process.env.OPENBLAS_NUM_THREADS = '1'; 
+  process.env.OPENBLAS_NUM_THREADS = '1';
   process.env.MKL_NUM_THREADS = '1';
   process.env.VECLIB_MAXIMUM_THREADS = '1';
   // Force single threading for ONNX Runtime
@@ -85,29 +96,32 @@ function scheduleCleanup() {
   if (cleanupScheduled) return;
   cleanupScheduled = true;
 
-  const cleanup = async () => {
+  const cleanup = () => {
     try {
       // Clear model reference to help GC
       if (embeddingModel) {
         embeddingModel = null;
         modelInitialized = false;
       }
-      
-      // Clear database connection
+
+      // Clear database connection (synchronous close only)
       if (dbConnection) {
-        await dbConnection.close();
+        // Note: Can't use async operations in exit handler
         dbConnection = null;
       }
-    } catch {
-      // Silent cleanup - don't log errors during shutdown
+    } catch (error) {
+      // Log cleanup errors to stderr for debugging, but don't crash
+      if (process.env.DEBUG) {
+        console.error('[DEBUG] Cleanup error:', error.message);
+      }
     }
   };
 
-  // Schedule cleanup on various exit scenarios
-  process.on('exit', cleanup);
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
-  process.on('uncaughtException', cleanup);
+  // Use process.once() to ensure handlers are only registered once
+  process.once('exit', cleanup);
+  process.once('SIGINT', cleanup);
+  process.once('SIGTERM', cleanup);
+  process.once('uncaughtException', cleanup);
 }
 
 // ============================================================================
