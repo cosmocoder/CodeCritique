@@ -5,6 +5,7 @@
  * allowing it to detect any technology or framework mentioned in the text.
  */
 
+import { execSync } from 'node:child_process';
 import { env, pipeline } from '@huggingface/transformers';
 import * as linguistLanguages from 'linguist-languages';
 import { LRUCache } from 'lru-cache';
@@ -27,6 +28,19 @@ class OpenZeroShotClassifier {
       ttl: 1000 * 60 * 60, // 1 hour TTL
     });
     this.isInitialized = false;
+    this._initializationComplete = false; // Track if initialization has been attempted
+
+    // Private flags (make state immutable after initialization)
+    Object.defineProperty(this, '_isDisabled', {
+      value: false,
+      writable: true,
+      configurable: false,
+    });
+
+    // Debug logging flags to reduce verbosity
+    this._disabledLogged = false;
+    this._notInitializedLogged = false;
+    this._failedInitLogged = false;
 
     // Common words to exclude from technology detection
     // Use English stopwords from stopwords-iso
@@ -99,6 +113,14 @@ class OpenZeroShotClassifier {
   }
 
   /**
+   * Get the disabled state (read-only after initialization)
+   * @returns {boolean} True if classifier is intentionally disabled
+   */
+  get isDisabled() {
+    return this._isDisabled;
+  }
+
+  /**
    * Initialize the zero-shot classification pipeline
    */
   async initialize() {
@@ -111,19 +133,96 @@ class OpenZeroShotClassifier {
     await this.initializationPromise;
   }
 
+  /**
+   * Check if classifier is available and ready to use
+   * @returns {object} Status object with availability and reason
+   */
+  _ensureClassifierAvailable() {
+    if (this.isDisabled) {
+      // Reduce debug verbosity - only log on first check
+      if (process.env.DEBUG && !this._disabledLogged) {
+        console.error('[DEBUG] Zero-shot classifier intentionally disabled (M1 compatibility)');
+        this._disabledLogged = true;
+      }
+      return { available: false, reason: 'disabled', debug: 'Intentionally disabled on M1 for threading compatibility' };
+    }
+
+    if (!this.isInitialized) {
+      if (process.env.DEBUG && !this._notInitializedLogged) {
+        console.error('[DEBUG] Zero-shot classifier not initialized');
+        this._notInitializedLogged = true;
+      }
+      return { available: false, reason: 'not_initialized', debug: 'Classifier initialization not completed' };
+    }
+
+    if (!this.classifier) {
+      if (process.env.DEBUG && !this._failedInitLogged) {
+        console.error('[DEBUG] Zero-shot classifier failed to initialize');
+        this._failedInitLogged = true;
+      }
+      return { available: false, reason: 'failed_initialization', debug: 'Classifier object is null after initialization' };
+    }
+
+    return { available: true, reason: 'ready', debug: 'Classifier is ready for use' };
+  }
+
   async _doInitialize() {
+    // Detect M1 chips specifically and disable classifiers completely due to mutex threading issues
+    const isM1Chip = (() => {
+      try {
+        const cpuInfo = execSync('sysctl -n machdep.cpu.brand_string', { encoding: 'utf8', timeout: 1000 }).trim();
+        // More precise M1 detection - check for Apple M1 specifically
+        return /Apple M1/.test(cpuInfo);
+      } catch {
+        return false;
+      }
+    })();
+
+    if (isM1Chip) {
+      console.log('⚠ Detected M1 chip - disabling HuggingFace zero-shot classifier due to mutex threading issues');
+      this.classifier = null;
+      this.isInitialized = false;
+      this._isDisabled = true; // Clearly indicate this is intentionally disabled
+      this._initializationComplete = true; // Mark initialization as complete (even though disabled)
+      // Make the disabled state immutable after being set
+      Object.defineProperty(this, '_isDisabled', {
+        value: true,
+        writable: false,
+        configurable: false,
+      });
+      return;
+    }
+
     try {
       console.log('Initializing open-ended zero-shot classifier...');
 
       this.classifier = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', {
         quantized: true,
+        // Use fp32 for better precision (consistent with other classifier initializations)
+        // q4 quantization can cause accuracy loss in classification tasks
+        dtype: 'fp32',
+        device: 'cpu',
       });
 
       this.isInitialized = true;
+      this._initializationComplete = true;
+      // Make the disabled state immutable after successful initialization
+      Object.defineProperty(this, '_isDisabled', {
+        value: false,
+        writable: false,
+        configurable: false,
+      });
       console.log('Open-ended zero-shot classifier initialized successfully');
     } catch (error) {
       console.error('Error initializing classifier:', error);
       this.isInitialized = false;
+      this._initializationComplete = true; // Mark as complete even on failure
+      // Make the disabled state immutable after failed initialization
+      Object.defineProperty(this, '_isDisabled', {
+        value: false,
+        writable: false,
+        configurable: false,
+      });
       throw error;
     }
   }
@@ -247,6 +346,12 @@ class OpenZeroShotClassifier {
       await this.initialize();
     }
 
+    // Check if classifier is available (handles both disabled and failed initialization)
+    const status = this._ensureClassifierAvailable();
+    if (!status.available) {
+      return [];
+    }
+
     const cacheKey = `tech:${text.substring(0, 100)}`;
     const cached = this.cache.get(cacheKey);
     if (cached) {
@@ -302,6 +407,12 @@ class OpenZeroShotClassifier {
   async classifyDomain(text, minConfidence = 0.3) {
     if (!this.isInitialized) {
       await this.initialize();
+    }
+
+    // Check if classifier is available (handles both disabled and failed initialization)
+    const status = this._ensureClassifierAvailable();
+    if (!status.available) {
+      return [];
     }
 
     const cacheKey = `domain:${text.substring(0, 100)}`;
