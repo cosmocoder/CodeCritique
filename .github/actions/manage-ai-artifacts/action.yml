@@ -1,0 +1,357 @@
+name: 'Manage AI Code Review Artifacts'
+description: 'Shared action to manage LanceDB embeddings and FastEmbed cache artifacts'
+author: 'AI Code Review Team'
+
+branding:
+  icon: 'database'
+  color: 'blue'
+
+inputs:
+  # Operation Configuration
+  operation:
+    description: 'Operation to perform (download, upload, setup, cleanup)'
+    required: true
+    default: 'download'
+
+  # Artifact Configuration
+  embeddings-pattern:
+    description: 'Pattern to match embedding artifacts'
+    required: false
+    default: ''
+
+  cache-pattern:
+    description: 'Pattern to match cache artifacts'
+    required: false
+    default: ''
+
+  # Upload Configuration
+  retention-days:
+    description: 'Number of days to retain uploaded artifacts'
+    required: false
+    default: '30'
+
+  # Authentication
+  github-token:
+    description: 'GitHub token for repository access'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  # Download Results
+  embeddings-found:
+    description: 'Whether embedding artifacts were found and downloaded'
+    value: ${{ steps.download-embeddings.outcome == 'success' }}
+
+  cache-found:
+    description: 'Whether cache artifacts were found and downloaded'
+    value: ${{ steps.download-cache.outcome == 'success' }}
+
+  embeddings-restored:
+    description: 'Whether embeddings were successfully restored'
+    value: ${{ steps.setup-embeddings.outputs.restored }}
+
+  cache-restored:
+    description: 'Whether cache was successfully restored'
+    value: ${{ steps.setup-cache.outputs.restored }}
+
+  # Upload Results
+  embeddings-uploaded:
+    description: 'Whether embeddings were successfully uploaded'
+    value: ${{ steps.upload-embeddings.outcome == 'success' }}
+
+  cache-uploaded:
+    description: 'Whether cache was successfully uploaded'
+    value: ${{ steps.upload-cache.outcome == 'success' }}
+
+  # Artifact Names
+  embeddings-artifact-name:
+    description: 'Name of the embeddings artifact'
+    value: ${{ steps.upload-embeddings.outputs.artifact-id || steps.get-artifact-names.outputs.embeddings-name }}
+
+  cache-artifact-name:
+    description: 'Name of the cache artifact'
+    value: ${{ steps.upload-cache.outputs.artifact-id || steps.get-artifact-names.outputs.cache-name }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate Operation
+      shell: bash
+      run: |
+        echo "🔍 Validating artifact management operation..."
+
+        VALID_OPERATIONS="download upload setup cleanup"
+        if [[ ! " $VALID_OPERATIONS " =~ " ${{ inputs.operation }} " ]]; then
+          echo "❌ Error: Invalid operation '${{ inputs.operation }}'. Valid options: $VALID_OPERATIONS"
+          exit 1
+        fi
+
+        echo "✅ Operation validated: ${{ inputs.operation }}"
+
+    - name: Generate Artifact Names
+      id: get-artifact-names
+      shell: bash
+      run: |
+        echo "📋 Generating artifact names..."
+
+        REPO_NAME="${{ github.event.repository.name }}"
+        REPO_OWNER="${{ github.repository_owner }}"
+        RUN_ID="${{ github.run_id }}"
+
+        # Generate default patterns if not provided
+        EMBEDDINGS_PATTERN="${{ inputs.embeddings-pattern }}"
+        if [ -z "$EMBEDDINGS_PATTERN" ]; then
+          EMBEDDINGS_PATTERN="ai-code-review-embeddings-${REPO_OWNER}-${REPO_NAME}-*"
+        fi
+
+        CACHE_PATTERN="${{ inputs.cache-pattern }}"
+        if [ -z "$CACHE_PATTERN" ]; then
+          CACHE_PATTERN="ai-fastembed-cache-${REPO_OWNER}-${REPO_NAME}-*"
+        fi
+
+        # Generate upload names
+        EMBEDDINGS_NAME="ai-code-review-embeddings-${REPO_OWNER}-${REPO_NAME}-${RUN_ID}"
+        CACHE_NAME="ai-fastembed-cache-${REPO_OWNER}-${REPO_NAME}-${RUN_ID}"
+
+        echo "embeddings-pattern=${EMBEDDINGS_PATTERN}" >> $GITHUB_OUTPUT
+        echo "cache-pattern=${CACHE_PATTERN}" >> $GITHUB_OUTPUT
+        echo "embeddings-name=${EMBEDDINGS_NAME}" >> $GITHUB_OUTPUT
+        echo "cache-name=${CACHE_NAME}" >> $GITHUB_OUTPUT
+
+        echo "📝 Embeddings pattern: ${EMBEDDINGS_PATTERN}"
+        echo "📝 Cache pattern: ${CACHE_PATTERN}"
+
+    # DOWNLOAD OPERATIONS
+    - name: Download Embeddings Artifacts
+      id: download-embeddings
+      if: inputs.operation == 'download' || inputs.operation == 'setup'
+      uses: actions/download-artifact@v4
+      with:
+        pattern: ${{ steps.get-artifact-names.outputs.embeddings-pattern }}
+        path: .ai-artifacts-temp/embeddings/
+        merge-multiple: true
+      continue-on-error: true
+
+    - name: Download Cache Artifacts
+      id: download-cache
+      if: inputs.operation == 'download' || inputs.operation == 'setup'
+      uses: actions/download-artifact@v4
+      with:
+        pattern: ${{ steps.get-artifact-names.outputs.cache-pattern }}
+        path: .ai-artifacts-temp/cache/
+        merge-multiple: true
+      continue-on-error: true
+
+    # SETUP OPERATIONS
+    - name: Setup Embeddings Directories
+      id: setup-embeddings
+      if: inputs.operation == 'setup'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        echo "📁 Setting up embeddings directories..."
+
+        # Create target directories
+        mkdir -p .ai-review-lancedb
+        mkdir -p "$HOME/.ai-review-lancedb" 2>/dev/null || mkdir -p .ai-review-lancedb-home
+
+        RESTORED=false
+
+        # Check if we have downloaded embeddings to restore
+        if [ -d ".ai-artifacts-temp/embeddings" ] && [ "$(ls -A .ai-artifacts-temp/embeddings 2>/dev/null)" ]; then
+          echo "✅ Found embeddings to restore"
+
+          # Copy embeddings to the expected locations
+          cp -r .ai-artifacts-temp/embeddings/* .ai-review-lancedb/ 2>/dev/null || echo "⚠️ Could not copy to .ai-review-lancedb"
+
+          # Try to copy to home directory
+          if [ -w "$HOME" ]; then
+            cp -r .ai-artifacts-temp/embeddings/* "$HOME/.ai-review-lancedb/" 2>/dev/null || echo "⚠️ Could not copy to home directory"
+          else
+            # Use local fallback for home directory
+            mkdir -p .ai-review-lancedb-home
+            cp -r .ai-artifacts-temp/embeddings/* .ai-review-lancedb-home/ 2>/dev/null || echo "⚠️ Could not copy to fallback directory"
+          fi
+
+          # Show stats about restored embeddings
+          DB_SIZE_BYTES=$(du -sb .ai-review-lancedb 2>/dev/null | cut -f1 || echo "0")
+          DB_SIZE_MB=$((DB_SIZE_BYTES / 1024 / 1024))
+          FILE_COUNT=$(find .ai-review-lancedb -type f 2>/dev/null | wc -l || echo "0")
+
+          echo "📊 Restored embeddings: ${DB_SIZE_MB}MB, ${FILE_COUNT} files"
+          RESTORED=true
+        else
+          echo "📝 No embeddings found to restore"
+        fi
+
+        echo "restored=${RESTORED}" >> $GITHUB_OUTPUT
+
+    - name: Setup Cache Directories
+      id: setup-cache
+      if: inputs.operation == 'setup'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        echo "📁 Setting up cache directories..."
+
+        # Create target directories
+        mkdir -p .ai-review-fastembed-cache
+        mkdir -p "$HOME/.ai-review-fastembed-cache" 2>/dev/null || mkdir -p .ai-review-fastembed-cache-home
+
+        RESTORED=false
+
+        # Check if we have downloaded cache to restore
+        if [ -d ".ai-artifacts-temp/cache" ] && [ "$(ls -A .ai-artifacts-temp/cache 2>/dev/null)" ]; then
+          echo "✅ Found cache to restore"
+
+          # Copy cache to the expected locations
+          cp -r .ai-artifacts-temp/cache/* .ai-review-fastembed-cache/ 2>/dev/null || echo "⚠️ Could not copy to .ai-review-fastembed-cache"
+
+          # Try to copy to home directory
+          if [ -w "$HOME" ]; then
+            cp -r .ai-artifacts-temp/cache/* "$HOME/.ai-review-fastembed-cache/" 2>/dev/null || echo "⚠️ Could not copy to home directory"
+          else
+            # Use local fallback for home directory
+            mkdir -p .ai-review-fastembed-cache-home
+            cp -r .ai-artifacts-temp/cache/* .ai-review-fastembed-cache-home/ 2>/dev/null || echo "⚠️ Could not copy to fallback directory"
+          fi
+
+          # Show stats about restored cache
+          CACHE_SIZE_BYTES=$(du -sb .ai-review-fastembed-cache 2>/dev/null | cut -f1 || echo "0")
+          CACHE_SIZE_MB=$((CACHE_SIZE_BYTES / 1024 / 1024))
+          CACHE_FILE_COUNT=$(find .ai-review-fastembed-cache -type f 2>/dev/null | wc -l || echo "0")
+
+          echo "📊 Restored cache: ${CACHE_SIZE_MB}MB, ${CACHE_FILE_COUNT} files"
+          RESTORED=true
+        else
+          echo "📝 No cache found to restore"
+        fi
+
+        echo "restored=${RESTORED}" >> $GITHUB_OUTPUT
+
+    # UPLOAD OPERATIONS
+    - name: Prepare Embeddings for Upload
+      if: inputs.operation == 'upload'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        echo "📦 Preparing embeddings for upload..."
+
+        mkdir -p .ai-artifacts-upload/embeddings
+
+        # Find where the embeddings are stored
+        EMBEDDINGS_FOUND=false
+        EMBEDDINGS_LOCATIONS=(
+          "$HOME/.ai-review-lancedb"
+          ".ai-review-lancedb"
+          ".ai-review-lancedb-home"
+        )
+
+        for location in "${EMBEDDINGS_LOCATIONS[@]}"; do
+          if [ -d "$location" ] && [ "$(ls -A $location 2>/dev/null)" ]; then
+            echo "✅ Found embeddings at: $location"
+            cp -r "$location"/* .ai-artifacts-upload/embeddings/
+            EMBEDDINGS_FOUND=true
+            break
+          fi
+        done
+
+        if [ "$EMBEDDINGS_FOUND" = "false" ]; then
+          echo "⚠️ No embeddings found to upload"
+        else
+          echo "✅ Embeddings prepared for upload"
+        fi
+
+    - name: Prepare Cache for Upload
+      if: inputs.operation == 'upload'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        echo "📦 Preparing cache for upload..."
+
+        mkdir -p .ai-artifacts-upload/cache
+
+        # Find where the cache is stored
+        CACHE_FOUND=false
+        CACHE_LOCATIONS=(
+          "$HOME/.ai-review-fastembed-cache"
+          ".ai-review-fastembed-cache"
+          ".ai-review-fastembed-cache-home"
+        )
+
+        for location in "${CACHE_LOCATIONS[@]}"; do
+          if [ -d "$location" ] && [ "$(ls -A $location 2>/dev/null)" ]; then
+            echo "✅ Found cache at: $location"
+            cp -r "$location"/* .ai-artifacts-upload/cache/
+            CACHE_FOUND=true
+            break
+          fi
+        done
+
+        if [ "$CACHE_FOUND" = "false" ]; then
+          echo "⚠️ No cache found to upload"
+        else
+          echo "✅ Cache prepared for upload"
+        fi
+
+    - name: Upload Embeddings
+      id: upload-embeddings
+      if: inputs.operation == 'upload'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.get-artifact-names.outputs.embeddings-name }}
+        path: .ai-artifacts-upload/embeddings/
+        retention-days: ${{ inputs.retention-days }}
+        compression-level: 6
+        if-no-files-found: warn
+      continue-on-error: true
+
+    - name: Upload Cache
+      id: upload-cache
+      if: inputs.operation == 'upload'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.get-artifact-names.outputs.cache-name }}
+        path: .ai-artifacts-upload/cache/
+        retention-days: ${{ inputs.retention-days }}
+        compression-level: 6
+        if-no-files-found: warn
+      continue-on-error: true
+
+    # CLEANUP OPERATIONS
+    - name: Cleanup Temporary Files
+      if: inputs.operation == 'cleanup' || always()
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        echo "🧹 Cleaning up temporary artifact files..."
+
+        rm -rf .ai-artifacts-temp
+        rm -rf .ai-artifacts-upload
+
+        echo "✅ Cleanup completed"
+
+    - name: Generate Summary
+      if: always()
+      shell: bash
+      run: |
+        echo "## 🗄️ AI Artifact Management Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Operation | Result |" >> $GITHUB_STEP_SUMMARY
+        echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| **Operation** | ${{ inputs.operation }} |" >> $GITHUB_STEP_SUMMARY
+
+        if [[ "${{ inputs.operation }}" == "download" || "${{ inputs.operation }}" == "setup" ]]; then
+          echo "| **Embeddings Found** | ${{ steps.download-embeddings.outcome == 'success' && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cache Found** | ${{ steps.download-cache.outcome == 'success' && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        if [[ "${{ inputs.operation }}" == "setup" ]]; then
+          echo "| **Embeddings Restored** | ${{ steps.setup-embeddings.outputs.restored == 'true' && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cache Restored** | ${{ steps.setup-cache.outputs.restored == 'true' && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        if [[ "${{ inputs.operation }}" == "upload" ]]; then
+          echo "| **Embeddings Uploaded** | ${{ steps.upload-embeddings.outcome == 'success' && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cache Uploaded** | ${{ steps.upload-cache.outcome == 'success' && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+        fi

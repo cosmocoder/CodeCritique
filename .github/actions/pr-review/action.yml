@@ -1,0 +1,307 @@
+name: 'AI Code Review'
+description: 'Automated code review using AI analysis with context-aware embeddings'
+
+inputs:
+  # AI Configuration
+  anthropic-api-key:
+    description: 'Anthropic API key for Claude models'
+    required: true
+
+  output-format:
+    description: 'Output format (text, json, markdown)'
+    required: false
+    default: 'json'
+
+  verbose:
+    description: 'Show verbose output'
+    required: false
+    default: 'false'
+
+  model:
+    description: 'LLM model to use (e.g., claude-sonnet-4-20250514)'
+    required: false
+
+  temperature:
+    description: 'LLM temperature'
+    required: false
+
+  max-tokens:
+    description: 'LLM max tokens'
+    required: false
+
+  similarity-threshold:
+    description: 'Threshold for finding similar code examples'
+    required: false
+
+  max-examples:
+    description: 'Max similar code examples to use'
+    required: false
+
+  concurrency:
+    description: 'Concurrency for processing multiple files'
+    required: false
+
+  custom-docs:
+    description: 'Custom documents to provide LLM instructions (format: "title:path,title:path")'
+    required: false
+    default: ''
+
+  # Embedding Configuration
+  embedding-artifact-pattern:
+    description: 'Pattern to match embedding artifacts (defaults to repository-specific pattern)'
+    required: false
+    default: ''
+
+  # GitHub PR Integration
+  post-comments:
+    description: 'Post review comments to the PR'
+    required: false
+    default: 'true'
+
+  summary-comment:
+    description: 'Post a summary comment to the PR'
+    required: false
+    default: 'true'
+
+  max-comments:
+    description: 'Maximum number of review comments to post'
+    required: false
+    default: '25'
+
+  # Feedback Tracking
+  track-feedback:
+    description: 'Track user feedback on comments to improve future reviews'
+    required: false
+    default: 'true'
+
+  feedback-artifact-name:
+    description: 'Name of the feedback artifact'
+    required: false
+    default: 'review-feedback'
+
+outputs:
+  # Review Results
+  comments-posted:
+    description: 'Number of review comments posted'
+    value: ${{ steps.review.outputs.comments-posted }}
+
+  issues-found:
+    description: 'Total number of issues found'
+    value: ${{ steps.review.outputs.issues-found }}
+
+  files-analyzed:
+    description: 'Number of files analyzed'
+    value: ${{ steps.review.outputs.files-analyzed }}
+
+  # Performance Metrics
+  analysis-time:
+    description: 'Time taken for analysis (seconds)'
+    value: ${{ steps.review.outputs.analysis-time }}
+
+  embedding-cache-hit:
+    description: 'Whether embeddings were found and used'
+    value: ${{ steps.review.outputs.embedding-cache-hit }}
+
+  # Quality Metrics
+  review-score:
+    description: 'Overall review score (0-100)'
+    value: ${{ steps.review.outputs.review-score }}
+
+  security-issues:
+    description: 'Number of security issues found'
+    value: ${{ steps.review.outputs.security-issues }}
+
+  performance-issues:
+    description: 'Number of performance issues found'
+    value: ${{ steps.review.outputs.performance-issues }}
+
+  maintainability-issues:
+    description: 'Number of maintainability issues found'
+    value: ${{ steps.review.outputs.maintainability-issues }}
+
+  # Artifacts
+  feedback-artifact-uploaded:
+    description: 'Whether feedback artifact was uploaded'
+    value: ${{ steps.review.outputs.feedback-artifact-uploaded }}
+
+  review-report-path:
+    description: 'Path to the detailed review report'
+    value: ${{ steps.review.outputs.review-report-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup GitHub CLI
+      uses: cli/gh-extension-precompile@v2.0.1
+      continue-on-error: true
+
+    - name: Checkout AI Code Review Tool
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ github.action_repository }}
+        ref: ${{ github.action_ref }}
+        path: ai-code-review-tool
+        token: ${{ github.token }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: 'ai-code-review-tool/package-lock.json'
+
+    - name: Install AI Tool Dependencies
+      shell: bash
+      working-directory: ai-code-review-tool
+      run: |
+        echo "📦 Installing AI Code Review tool dependencies..."
+        npm ci --no-audit --silent
+
+    - name: Download Embeddings Artifacts
+      id: setup-artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: ai-code-review-embeddings-${{ github.repository_id }}
+        path: .ai-code-review-embeddings
+      continue-on-error: true
+
+    - name: Download feedback artifacts
+      if: ${{ inputs.track-feedback == 'true' }}
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.feedback-artifact-name }}
+        path: .ai-feedback/
+      continue-on-error: true
+
+    - name: Run AI Code Review
+      id: review
+      shell: bash
+      working-directory: ai-code-review-tool
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+      run: |
+        # Build CLI command arguments - analyze target repo
+        CLI_ARGS="analyze --diff-with ${{ github.ref_name }} --directory ../target-repo"
+
+        # Working directory is automatically set to the target repo
+
+        # Add output format
+        CLI_ARGS="$CLI_ARGS --output ${{ inputs.output-format }}"
+
+        # Add verbose flag if enabled
+        if [ "${{ inputs.verbose }}" = "true" ]; then
+          CLI_ARGS="$CLI_ARGS --verbose"
+        fi
+
+        # Add model configuration
+        if [ -n "${{ inputs.model }}" ]; then
+          CLI_ARGS="$CLI_ARGS --model ${{ inputs.model }}"
+        fi
+
+        CLI_ARGS="$CLI_ARGS --temperature ${{ inputs.temperature }}"
+        CLI_ARGS="$CLI_ARGS --max-tokens ${{ inputs.max-tokens }}"
+        CLI_ARGS="$CLI_ARGS --similarity-threshold ${{ inputs.similarity-threshold }}"
+        CLI_ARGS="$CLI_ARGS --max-examples ${{ inputs.max-examples }}"
+        CLI_ARGS="$CLI_ARGS --concurrency ${{ inputs.concurrency }}"
+
+        # Add custom documents if specified
+        if [ -n "${{ inputs.custom-docs }}" ]; then
+          IFS=',' read -ra DOCS <<< "${{ inputs.custom-docs }}"
+          for doc in "${DOCS[@]}"; do
+            if [ -n "$doc" ]; then
+              CLI_ARGS="$CLI_ARGS --doc \"$doc\""
+            fi
+          done
+        fi
+
+        # Run the AI code review
+        echo "🤖 Running AI Code Review..."
+        echo "Command: node src/index.js $CLI_ARGS"
+
+        # Execute the command and capture output
+        START_TIME=$(date +%s)
+
+        # Run the CLI and save output to file for processing
+        eval "node src/index.js $CLI_ARGS" > review_output.json 2>&1 || {
+          echo "❌ AI Code Review failed"
+          cat review_output.json
+          exit 1
+        }
+
+        END_TIME=$(date +%s)
+        ANALYSIS_TIME=$((END_TIME - START_TIME))
+
+        echo "✅ AI Code Review completed in ${ANALYSIS_TIME}s"
+
+        # Count results and set outputs
+        if [ "${{ inputs.output-format }}" = "json" ]; then
+          FILES_ANALYZED=$(jq '. | length' review_output.json 2>/dev/null || echo "0")
+          ISSUES_FOUND=$(jq '[.[].issues // [] | length] | add // 0' review_output.json 2>/dev/null || echo "0")
+        else
+          FILES_ANALYZED="1"
+          ISSUES_FOUND="0"
+        fi
+
+        # Set action outputs
+        echo "files-analyzed=$FILES_ANALYZED" >> $GITHUB_OUTPUT
+        echo "issues-found=$ISSUES_FOUND" >> $GITHUB_OUTPUT
+        echo "analysis-time=$ANALYSIS_TIME" >> $GITHUB_OUTPUT
+        # Check if embeddings were successfully downloaded
+        EMBEDDING_AVAILABLE="${{ steps.setup-artifacts.outcome == 'success' }}"
+
+        echo "embedding-cache-hit=$EMBEDDING_AVAILABLE" >> $GITHUB_OUTPUT
+
+        if [ "$EMBEDDING_AVAILABLE" != "true" ]; then
+          echo "⚠️  WARNING: No embeddings available! Analysis will be less effective."
+          echo "   Consider running the embedding generation workflow first:"
+          echo "   https://github.com/${{ github.repository }}/actions/workflows/generate-embeddings.yml"
+        fi
+        echo "comments-posted=0" >> $GITHUB_OUTPUT
+        echo "review-score=0" >> $GITHUB_OUTPUT
+        echo "security-issues=0" >> $GITHUB_OUTPUT
+        echo "performance-issues=0" >> $GITHUB_OUTPUT
+        echo "maintainability-issues=0" >> $GITHUB_OUTPUT
+        echo "feedback-artifact-uploaded=false" >> $GITHUB_OUTPUT
+        echo "review-report-path=review_output.json" >> $GITHUB_OUTPUT
+
+        # Display results
+        if [ "${{ inputs.verbose }}" = "true" ]; then
+          echo "📊 Review Results:"
+          echo "  Files analyzed: $FILES_ANALYZED"
+          echo "  Issues found: $ISSUES_FOUND"
+          echo "  Analysis time: ${ANALYSIS_TIME}s"
+        fi
+
+        # Show the actual output
+        echo "📋 Review Output:"
+        cat review_output.json
+
+    - name: Post PR Comments
+      if: ${{ github.event_name == 'pull_request' && (inputs.post-comments == 'true' || inputs.summary-comment == 'true') }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        INPUT_POST_COMMENTS: ${{ inputs.post-comments }}
+        INPUT_SUMMARY_COMMENT: ${{ inputs.summary-comment }}
+        INPUT_MAX_COMMENTS: ${{ inputs.max-comments }}
+        INPUT_OUTPUT_FORMAT: ${{ inputs.output-format }}
+        ANALYSIS_TIME: ${{ steps.review.outputs.analysis-time }}
+      run: |
+        # Make the script executable
+        chmod +x ${{ github.action_path }}/post-comments.sh
+
+        # Run the comment posting script
+        ${{ github.action_path }}/post-comments.sh
+
+    - name: Upload review report
+      uses: actions/upload-artifact@v4
+      with:
+        name: ai-review-report-${{ github.event.pull_request.number || 'branch' }}
+        path: ai-code-review-tool/review_output.json
+        retention-days: 7
+      continue-on-error: true
+
+branding:
+  icon: 'eye'
+  color: 'blue'
