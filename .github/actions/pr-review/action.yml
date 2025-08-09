@@ -142,17 +142,52 @@ runs:
         ref: ${{ github.action_ref }}
         path: ai-code-review-tool
         token: ${{ github.token }}
+      continue-on-error: true
+
+    - name: Resolve Tool Root
+      id: tool
+      shell: bash
+      run: |
+        CANDIDATE="${{ github.action_path }}/../../.."
+        if CANON=$(cd "$CANDIDATE" 2>/dev/null && pwd -P); then
+          if [ -f "$CANON/src/index.js" ]; then
+            echo "tool-root=$CANON" >> $GITHUB_OUTPUT
+            echo "✅ Using tool from action repository checkout at: $CANON"
+            exit 0
+          fi
+        fi
+
+        CHECKOUT_DIR="$PWD/ai-code-review-tool"
+        if CANON_CHECKOUT=$(cd "$CHECKOUT_DIR" 2>/dev/null && pwd -P); then
+          if [ -f "$CANON_CHECKOUT/src/index.js" ]; then
+            echo "tool-root=$CANON_CHECKOUT" >> $GITHUB_OUTPUT
+            echo "✅ Using tool from explicit checkout at: $CANON_CHECKOUT"
+            exit 0
+          fi
+        fi
+
+        echo "❌ Could not locate tool source (src/index.js)." >&2
+        echo "Checked: $CANDIDATE and $CHECKOUT_DIR" >&2
+        exit 1
+
+    - name: Prepare dependency lock for caching
+      shell: bash
+      run: |
+        mkdir -p .tool-cache
+        if [ -f "${{ steps.tool.outputs.tool-root }}/package-lock.json" ]; then
+          cp "${{ steps.tool.outputs.tool-root }}/package-lock.json" .tool-cache/package-lock.json
+        fi
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '22'
         cache: 'npm'
-        cache-dependency-path: 'ai-code-review-tool/package-lock.json'
+        cache-dependency-path: '.tool-cache/package-lock.json'
 
     - name: Install AI Tool Dependencies
       shell: bash
-      working-directory: ai-code-review-tool
+      working-directory: ${{ steps.tool.outputs.tool-root }}
       run: |
         echo "📦 Installing AI Code Review tool dependencies..."
         npm ci --no-audit --silent
@@ -176,13 +211,13 @@ runs:
     - name: Run AI Code Review
       id: review
       shell: bash
-      working-directory: ai-code-review-tool
+      working-directory: ${{ steps.tool.outputs.tool-root }}
       env:
         GITHUB_TOKEN: ${{ github.token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
       run: |
         # Build CLI command arguments - analyze target repo
-        CLI_ARGS="analyze --diff-with ${{ github.ref_name }} --directory ../target-repo"
+        CLI_ARGS="analyze --diff-with ${{ github.ref_name }} --directory \"$GITHUB_WORKSPACE/target-repo\""
 
         # Working directory is automatically set to the target repo
 
@@ -298,7 +333,7 @@ runs:
       uses: actions/upload-artifact@v4
       with:
         name: ai-review-report-${{ github.event.pull_request.number || 'branch' }}
-        path: ai-code-review-tool/review_output.json
+        path: ${{ steps.tool.outputs.tool-root }}/review_output.json
         retention-days: 7
       continue-on-error: true
 

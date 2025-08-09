@@ -86,24 +86,60 @@ runs:
 
         echo "✅ Input validation passed"
 
-    - name: Checkout AI Code Review Tool
+    - name: Checkout AI Code Review Tool (fallback)
       uses: actions/checkout@v4
       with:
         repository: ${{ github.action_repository }}
         ref: ${{ github.action_ref }}
         path: ai-code-review-tool
         token: ${{ github.token }}
+      continue-on-error: true
+
+    - name: Resolve Tool Root
+      id: tool
+      shell: bash
+      run: |
+        # Prefer the repository already downloaded by the runner for this action
+        CANDIDATE="${{ github.action_path }}/../../.."
+        if CANON=$(cd "$CANDIDATE" 2>/dev/null && pwd -P); then
+          if [ -f "$CANON/src/index.js" ]; then
+            echo "tool-root=$CANON" >> $GITHUB_OUTPUT
+            echo "✅ Using tool from action repository checkout at: $CANON"
+            exit 0
+          fi
+        fi
+
+        CHECKOUT_DIR="$PWD/ai-code-review-tool"
+        if CANON_CHECKOUT=$(cd "$CHECKOUT_DIR" 2>/dev/null && pwd -P); then
+          if [ -f "$CANON_CHECKOUT/src/index.js" ]; then
+            echo "tool-root=$CANON_CHECKOUT" >> $GITHUB_OUTPUT
+            echo "✅ Using tool from explicit checkout at: $CANON_CHECKOUT"
+            exit 0
+          fi
+        fi
+
+        echo "❌ Could not locate tool source (src/index.js)." >&2
+        echo "Checked: $CANDIDATE and $CHECKOUT_DIR" >&2
+        exit 1
+
+    - name: Prepare dependency lock for caching
+      shell: bash
+      run: |
+        mkdir -p .tool-cache
+        if [ -f "${{ steps.tool.outputs.tool-root }}/package-lock.json" ]; then
+          cp "${{ steps.tool.outputs.tool-root }}/package-lock.json" .tool-cache/package-lock.json
+        fi
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '22.x'
         cache: 'npm'
-        cache-dependency-path: 'ai-code-review-tool/package-lock.json'
+        cache-dependency-path: '.tool-cache/package-lock.json'
 
     - name: Install AI Tool Dependencies
       shell: bash
-      working-directory: ai-code-review-tool
+      working-directory: ${{ steps.tool.outputs.tool-root }}
       run: |
         echo "📦 Installing AI Code Review tool dependencies..."
         npm ci --no-audit --silent
@@ -129,7 +165,7 @@ runs:
           TARGET_HASH=$(cd target-repo && git rev-parse HEAD 2>/dev/null || echo "no-git")
         fi
 
-        AI_TOOL_HASH=$(cd ai-code-review-tool && git rev-parse HEAD)
+        AI_TOOL_HASH=$(cd "${{ steps.tool.outputs.tool-root }}" && git rev-parse HEAD 2>/dev/null || echo "no-git")
         CONFIG_HASH=$(echo "${{ inputs.files }}|${{ inputs.exclude }}|${{ inputs.concurrency }}" | sha256sum | cut -d' ' -f1 | head -c 12)
 
         CONTENT_HASH="${TARGET_HASH:0:8}-${AI_TOOL_HASH:0:8}-${CONFIG_HASH}"
@@ -153,7 +189,7 @@ runs:
     - name: Generate Embeddings
       id: generate
       shell: bash
-      working-directory: ai-code-review-tool
+      working-directory: ${{ steps.tool.outputs.tool-root }}
       env:
         DEBUG: ${{ inputs.verbose }}
         VERBOSE: ${{ inputs.verbose }}
@@ -162,7 +198,7 @@ runs:
 
         # Build command arguments based on actual CLI options
         ARGS="embeddings:generate"
-        ARGS="${ARGS} --directory ../target-repo"
+        ARGS="${ARGS} --directory \"$GITHUB_WORKSPACE/target-repo\""
         ARGS="${ARGS} --concurrency ${{ inputs.concurrency }}"
 
         # Add specific files if provided
@@ -172,8 +208,9 @@ runs:
           done
         fi
 
-        # Always exclude the AI tool directory
+        # Always exclude the AI tool directory (both possible locations)
         ARGS="${ARGS} --exclude 'ai-code-review-tool/**'"
+        ARGS="${ARGS} --exclude '.github/actions/**'"
 
         # Add user-specified exclude patterns
         if [ -n "${{ inputs.exclude }}" ]; then
@@ -183,8 +220,8 @@ runs:
         fi
 
         # Add exclude file if specified
-        if [ -n "${{ inputs.exclude-file }}" ] && [ -f "../target-repo/${{ inputs.exclude-file }}" ]; then
-          ARGS="${ARGS} --exclude-file '../target-repo/${{ inputs.exclude-file }}'"
+        if [ -n "${{ inputs.exclude-file }}" ] && [ -f "$GITHUB_WORKSPACE/target-repo/${{ inputs.exclude-file }}" ]; then
+          ARGS="${ARGS} --exclude-file \"$GITHUB_WORKSPACE/target-repo/${{ inputs.exclude-file }}\""
         fi
 
         # Add gitignore flag
@@ -220,12 +257,12 @@ runs:
     - name: Gather Statistics
       id: stats
       shell: bash
-      working-directory: ai-code-review-tool
+      working-directory: ${{ steps.tool.outputs.tool-root }}
       run: |
         echo "📊 Gathering embedding statistics..."
 
         # Get stats using the CLI tool
-        if STATS_OUTPUT=$(node src/index.js embeddings:stats --directory "../target-repo" 2>/dev/null); then
+        if STATS_OUTPUT=$(node src/index.js embeddings:stats --directory "$GITHUB_WORKSPACE/target-repo" 2>/dev/null); then
           echo "📋 Statistics output:"
           echo "$STATS_OUTPUT"
 
@@ -317,6 +354,6 @@ runs:
       shell: bash
       run: |
         echo "🧹 Cleaning up temporary files..."
-        rm -rf ai-code-review-tool
+        if [ -d ai-code-review-tool ]; then rm -rf ai-code-review-tool; fi
         # Cleanup handled by shared artifact manager
         echo "✅ Cleanup completed"
