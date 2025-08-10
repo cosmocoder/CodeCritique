@@ -149,7 +149,7 @@ runs:
       uses: actions/download-artifact@v4
       with:
         name: ai-code-review-embeddings-${{ github.repository_id }}
-        path: .ai-code-review-embeddings
+        path: ${{ github.workspace }}
       continue-on-error: true
 
     - name: Generate Content Hash
@@ -161,8 +161,8 @@ runs:
         # - AI tool version (commit hash)
         # - Processing configuration
         TARGET_HASH="unknown"
-        if [ -d "target-repo/.git" ]; then
-          TARGET_HASH=$(cd target-repo && git rev-parse HEAD 2>/dev/null || echo "no-git")
+        if [ -d ".git" ]; then
+          TARGET_HASH=$(git rev-parse HEAD 2>/dev/null || echo "no-git")
         fi
 
         AI_TOOL_HASH=$(cd "${{ steps.tool.outputs.tool-root }}" && git rev-parse HEAD 2>/dev/null || echo "no-git")
@@ -193,12 +193,13 @@ runs:
       env:
         DEBUG: ${{ inputs.verbose }}
         VERBOSE: ${{ inputs.verbose }}
+        GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
       run: |
         echo "🧠 Generating embeddings for codebase..."
 
         # Build command arguments based on actual CLI options
         ARGS="embeddings:generate"
-        ARGS="${ARGS} --directory \"$GITHUB_WORKSPACE/target-repo\""
+        ARGS="${ARGS} --directory \"$GITHUB_WORKSPACE\""
         ARGS="${ARGS} --concurrency ${{ inputs.concurrency }}"
 
         # Add specific files if provided
@@ -208,9 +209,10 @@ runs:
           done
         fi
 
-        # Always exclude the AI tool directory (both possible locations)
+        # Always exclude action-related directories and files
         ARGS="${ARGS} --exclude 'ai-code-review-tool/**'"
-        ARGS="${ARGS} --exclude '.github/actions/**'"
+        ARGS="${ARGS} --exclude '.ai-code-review-artifacts/**'"
+        ARGS="${ARGS} --exclude '.tool-cache/**'"
 
         # Add user-specified exclude patterns
         if [ -n "${{ inputs.exclude }}" ]; then
@@ -220,8 +222,8 @@ runs:
         fi
 
         # Add exclude file if specified
-        if [ -n "${{ inputs.exclude-file }}" ] && [ -f "$GITHUB_WORKSPACE/target-repo/${{ inputs.exclude-file }}" ]; then
-          ARGS="${ARGS} --exclude-file \"$GITHUB_WORKSPACE/target-repo/${{ inputs.exclude-file }}\""
+        if [ -n "${{ inputs.exclude-file }}" ] && [ -f "$GITHUB_WORKSPACE/${{ inputs.exclude-file }}" ]; then
+          ARGS="${ARGS} --exclude-file \"$GITHUB_WORKSPACE/${{ inputs.exclude-file }}\""
         fi
 
         # Add gitignore flag
@@ -258,11 +260,15 @@ runs:
       id: stats
       shell: bash
       working-directory: ${{ steps.tool.outputs.tool-root }}
+      env:
+        GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
       run: |
         echo "📊 Gathering embedding statistics..."
 
         # Get stats using the CLI tool
-        if STATS_OUTPUT=$(node src/index.js embeddings:stats --directory "$GITHUB_WORKSPACE/target-repo" 2>/dev/null); then
+        STATS_ARGS="embeddings:stats --directory \"$GITHUB_WORKSPACE\""
+
+        if STATS_OUTPUT=$(eval "node src/index.js ${STATS_ARGS}" 2>/dev/null); then
           echo "📋 Statistics output:"
           echo "$STATS_OUTPUT"
 
@@ -272,18 +278,12 @@ runs:
 
           # Calculate database size if embeddings directory exists
           DB_SIZE_MB=0
-          EMBEDDINGS_LOCATIONS=(
-            "$HOME/.ai-review-lancedb"
-            ".ai-review-lancedb"
-          )
+          LANCEDB_LOCATION="${{ github.workspace }}/.ai-review-lancedb"
 
-          for location in "${EMBEDDINGS_LOCATIONS[@]}"; do
-            if [ -d "$location" ] && [ "$(ls -A $location 2>/dev/null)" ]; then
-              DB_SIZE_BYTES=$(du -sb "$location" 2>/dev/null | cut -f1 || echo "0")
-              DB_SIZE_MB=$((DB_SIZE_BYTES / 1024 / 1024))
-              break
-            fi
-          done
+          if [ -d "$LANCEDB_LOCATION" ] && [ "$(ls -A "$LANCEDB_LOCATION" 2>/dev/null)" ]; then
+            DB_SIZE_BYTES=$(du -sb "$LANCEDB_LOCATION" 2>/dev/null | cut -f1 || echo "0")
+            DB_SIZE_MB=$((DB_SIZE_BYTES / 1024 / 1024))
+          fi
 
           echo "embeddings-count=${EMBEDDINGS_COUNT}" >> $GITHUB_OUTPUT
           echo "files-count=${FILES_COUNT}" >> $GITHUB_OUTPUT
@@ -303,10 +303,12 @@ runs:
       uses: actions/upload-artifact@v4
       with:
         name: ai-code-review-embeddings-${{ github.repository_id }}
+        include-hidden-files: true
         path: |
-          $HOME/.ai-review-lancedb
-          .ai-review-lancedb
+          ${{ github.workspace }}/.ai-review-lancedb/
+          ${{ github.workspace }}/.ai-review-fastembed-cache/
         retention-days: ${{ inputs.embeddings-retention-days }}
+        if-no-files-found: warn
       continue-on-error: true
 
     - name: Generate Summary
@@ -318,7 +320,7 @@ runs:
         echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
         echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
         echo "| **Status** | ${{ steps.generate.outputs.success == 'true' && '✅ Success' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Directory** | \`target-repo\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Directory** | \`workspace\` |" >> $GITHUB_STEP_SUMMARY
         echo "| **Embeddings Generated** | ${{ steps.stats.outputs.embeddings-count }} |" >> $GITHUB_STEP_SUMMARY
         echo "| **Files Processed** | ${{ steps.stats.outputs.files-count }} |" >> $GITHUB_STEP_SUMMARY
         echo "| **Database Size** | ${{ steps.stats.outputs.db-size }} MB |" >> $GITHUB_STEP_SUMMARY

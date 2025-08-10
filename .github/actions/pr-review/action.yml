@@ -197,7 +197,7 @@ runs:
       uses: actions/download-artifact@v4
       with:
         name: ai-code-review-embeddings-${{ github.repository_id }}
-        path: .ai-code-review-embeddings
+        path: ${{ github.workspace }}
       continue-on-error: true
 
     - name: Download feedback artifacts
@@ -205,7 +205,7 @@ runs:
       uses: actions/download-artifact@v4
       with:
         name: ${{ inputs.feedback-artifact-name }}
-        path: .ai-feedback/
+        path: ${{ github.workspace }}/.ai-feedback/
       continue-on-error: true
 
     - name: Run AI Code Review
@@ -215,11 +215,18 @@ runs:
       env:
         GITHUB_TOKEN: ${{ github.token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
       run: |
-        # Build CLI command arguments - analyze target repo
-        CLI_ARGS="analyze --diff-with ${{ github.ref_name }} --directory \"$GITHUB_WORKSPACE/target-repo\""
+        # Build CLI command arguments - analyze workspace directly
+        CLI_ARGS="analyze --diff-with ${{ github.ref_name }} --directory \"$GITHUB_WORKSPACE\""
 
-        # Working directory is automatically set to the target repo
+        # Add exclusions for action-related files and directories
+        CLI_ARGS="$CLI_ARGS --exclude 'ai-code-review-tool/**'"
+        CLI_ARGS="$CLI_ARGS --exclude '.ai-code-review-embeddings/**'"
+        CLI_ARGS="$CLI_ARGS --exclude '.ai-feedback/**'"
+        CLI_ARGS="$CLI_ARGS --exclude '.tool-cache/**'"
+
+        # Working directory is the workspace root
 
         # Add output format
         CLI_ARGS="$CLI_ARGS --output ${{ inputs.output-format }}"
