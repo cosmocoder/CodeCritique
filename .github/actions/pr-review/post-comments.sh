@@ -95,11 +95,22 @@ Great job! The AI review didn't identify any significant issues with your change
         SUMMARY_BODY="${SUMMARY_BODY}*Review was performed without codebase context. Consider generating embeddings for more contextual analysis.*"
     fi
 
-    # Post the summary comment
-    gh api repos/:owner/:repo/issues/$PR_NUMBER/comments \
-        --method POST \
-        --field body="$SUMMARY_BODY" \
-        --silent || echo "⚠️  Failed to post summary comment"
+    # Check for existing AI review summary comment and update it
+    EXISTING_COMMENT_ID=$(gh api repos/:owner/:repo/issues/$PR_NUMBER/comments --jq '.[] | select(.body | contains("## 🤖 AI Code Review Summary")) | .id' | head -1)
+
+    if [ -n "$EXISTING_COMMENT_ID" ]; then
+        echo "🔄 Updating existing summary comment ID: $EXISTING_COMMENT_ID"
+        gh api repos/:owner/:repo/issues/comments/$EXISTING_COMMENT_ID \
+            --method PATCH \
+            --field body="$SUMMARY_BODY" \
+            --silent || echo "⚠️  Failed to update summary comment"
+    else
+        echo "➕ Creating new summary comment"
+        gh api repos/:owner/:repo/issues/$PR_NUMBER/comments \
+            --method POST \
+            --field body="$SUMMARY_BODY" \
+            --silent || echo "⚠️  Failed to post summary comment"
+    fi
 fi
 
 # Post inline comments for specific issues
