@@ -220,7 +220,7 @@ runs:
         GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
       run: |
         # Build CLI command arguments - analyze workspace directly
-        CLI_ARGS="analyze --diff-with ${{ github.ref_name }} --directory \"$GITHUB_WORKSPACE\""
+        CLI_ARGS="analyze -b ${{ github.head_ref }} --directory \"$GITHUB_WORKSPACE\""
 
         # Add output format
         CLI_ARGS="$CLI_ARGS --output ${{ inputs.output-format }}"
