@@ -243,11 +243,26 @@ runs:
           CLI_ARGS="$CLI_ARGS --model ${{ inputs.model }}"
         fi
 
-        CLI_ARGS="$CLI_ARGS --temperature ${{ inputs.temperature }}"
-        CLI_ARGS="$CLI_ARGS --max-tokens ${{ inputs.max-tokens }}"
-        CLI_ARGS="$CLI_ARGS --similarity-threshold ${{ inputs.similarity-threshold }}"
-        CLI_ARGS="$CLI_ARGS --max-examples ${{ inputs.max-examples }}"
-        CLI_ARGS="$CLI_ARGS --concurrency ${{ inputs.concurrency }}"
+        # Only add optional parameters if they have values
+        if [ -n "${{ inputs.temperature }}" ]; then
+          CLI_ARGS="$CLI_ARGS --temperature ${{ inputs.temperature }}"
+        fi
+
+        if [ -n "${{ inputs.max-tokens }}" ]; then
+          CLI_ARGS="$CLI_ARGS --max-tokens ${{ inputs.max-tokens }}"
+        fi
+
+        if [ -n "${{ inputs.similarity-threshold }}" ]; then
+          CLI_ARGS="$CLI_ARGS --similarity-threshold ${{ inputs.similarity-threshold }}"
+        fi
+
+        if [ -n "${{ inputs.max-examples }}" ]; then
+          CLI_ARGS="$CLI_ARGS --max-examples ${{ inputs.max-examples }}"
+        fi
+
+        if [ -n "${{ inputs.concurrency }}" ]; then
+          CLI_ARGS="$CLI_ARGS --concurrency ${{ inputs.concurrency }}"
+        fi
 
         # Add custom documents if specified
         if [ -n "${{ inputs.custom-docs }}" ]; then
