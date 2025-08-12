@@ -192,7 +192,9 @@ runs:
       id: setup-artifacts
       uses: dawidd6/action-download-artifact@v11
       with:
-        name: ai-code-review-embeddings-${{ github.repository_id }}
+        name: ai-code-review-embeddings
+        name_is_regexp: true
+        search_artifacts: true
         path: ${{ github.workspace }}
         github_token: ${{ github.token }}
         workflow_conclusion: success
