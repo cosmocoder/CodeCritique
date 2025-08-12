@@ -190,18 +190,24 @@ runs:
 
     - name: Download Embeddings Artifacts
       id: setup-artifacts
-      uses: actions/download-artifact@v4
+      uses: dawidd6/action-download-artifact@v11
       with:
         name: ai-code-review-embeddings-${{ github.repository_id }}
         path: ${{ github.workspace }}
+        github_token: ${{ github.token }}
+        workflow_conclusion: success
+        if_no_artifact_found: warn
       continue-on-error: true
 
     - name: Download feedback artifacts
       if: ${{ inputs.track-feedback == 'true' }}
-      uses: actions/download-artifact@v4
+      uses: dawidd6/action-download-artifact@v11
       with:
         name: ${{ inputs.feedback-artifact-name }}
         path: ${{ github.workspace }}/.ai-feedback/
+        github_token: ${{ github.token }}
+        workflow_conclusion: success
+        if_no_artifact_found: ignore
       continue-on-error: true
 
     - name: Run AI Code Review
