@@ -331,6 +331,7 @@ runs:
     - name: Post PR Comments
       if: ${{ github.event_name == 'pull_request' && (inputs.post-comments == 'true' || inputs.summary-comment == 'true') }}
       shell: bash
+      working-directory: ${{ steps.tool.outputs.tool-root }}
       env:
         GITHUB_TOKEN: ${{ github.token }}
         INPUT_POST_COMMENTS: ${{ inputs.post-comments }}
@@ -342,7 +343,7 @@ runs:
         # Make the script executable
         chmod +x ${{ github.action_path }}/post-comments.sh
 
-        # Run the comment posting script
+        # Run the comment posting script from the tool root directory where review_output.json exists
         ${{ github.action_path }}/post-comments.sh
 
     - name: Upload review report
