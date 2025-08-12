@@ -39,8 +39,22 @@ fi
 
 # Parse review results
 if [ "$INPUT_OUTPUT_FORMAT" = "json" ]; then
-    TOTAL_ISSUES=$(jq '[.[].issues // [] | length] | add // 0' "$REVIEW_OUTPUT_FILE" 2>/dev/null || echo "0")
-    FILES_WITH_ISSUES=$(jq '[.[] | select(.issues and (.issues | length > 0))] | length' "$REVIEW_OUTPUT_FILE" 2>/dev/null || echo "0")
+    # Debug: Show first few lines of JSON for debugging
+    echo "📋 Review output sample:"
+    head -10 "$REVIEW_OUTPUT_FILE"
+
+    # Handle both array format and object format with details/summary
+    if jq -e '.summary' "$REVIEW_OUTPUT_FILE" >/dev/null 2>&1; then
+        # New format with summary and details
+        TOTAL_ISSUES=$(jq '.summary.totalIssues // 0' "$REVIEW_OUTPUT_FILE" 2>/dev/null || echo "0")
+        FILES_WITH_ISSUES=$(jq '.summary.filesWithIssues // 0' "$REVIEW_OUTPUT_FILE" 2>/dev/null || echo "0")
+        echo "📊 Parsed from summary: $TOTAL_ISSUES issues, $FILES_WITH_ISSUES files"
+    else
+        # Legacy array format
+        TOTAL_ISSUES=$(jq '[.[].issues // [] | length] | add // 0' "$REVIEW_OUTPUT_FILE" 2>/dev/null || echo "0")
+        FILES_WITH_ISSUES=$(jq '[.[] | select(.issues and (.issues | length > 0))] | length' "$REVIEW_OUTPUT_FILE" 2>/dev/null || echo "0")
+        echo "📊 Parsed from legacy format: $TOTAL_ISSUES issues, $FILES_WITH_ISSUES files"
+    fi
 else
     TOTAL_ISSUES="0"
     FILES_WITH_ISSUES="1"
@@ -94,15 +108,24 @@ if [ "$INPUT_OUTPUT_FORMAT" = "json" ] && [ "$TOTAL_ISSUES" -gt 0 ]; then
 
     COMMENTS_POSTED=0
 
+    # Handle different JSON formats
+    if jq -e '.details' "$REVIEW_OUTPUT_FILE" >/dev/null 2>&1; then
+        # New format with details array
+        FILES_DATA=$(jq -c '.details[]' "$REVIEW_OUTPUT_FILE")
+    else
+        # Legacy array format
+        FILES_DATA=$(jq -c '.[]' "$REVIEW_OUTPUT_FILE")
+    fi
+
     # Process each file's issues
-    jq -c '.[]' "$REVIEW_OUTPUT_FILE" | while IFS= read -r file_result; do
+    echo "$FILES_DATA" | while IFS= read -r file_result; do
         if [ "$COMMENTS_POSTED" -ge "$MAX_COMMENTS" ]; then
             echo "📊 Reached maximum comment limit ($MAX_COMMENTS)"
             break
         fi
 
-        FILE_PATH=$(echo "$file_result" | jq -r '.file // .path // empty')
-        ISSUES=$(echo "$file_result" | jq -c '.issues // []')
+        FILE_PATH=$(echo "$file_result" | jq -r '.filePath // .file // .path // empty')
+        ISSUES=$(echo "$file_result" | jq -c '.review.issues // .issues // []')
 
         if [ -z "$FILE_PATH" ] || [ "$FILE_PATH" = "null" ]; then
             continue
@@ -116,7 +139,7 @@ if [ "$INPUT_OUTPUT_FORMAT" = "json" ] && [ "$TOTAL_ISSUES" -gt 0 ]; then
 
             DESCRIPTION=$(echo "$issue" | jq -r '.description // .message // "Code review suggestion"')
             SEVERITY=$(echo "$issue" | jq -r '.severity // "info"')
-            LINE_NUM=$(echo "$issue" | jq -r '.line // 1')
+            LINE_NUM=$(echo "$issue" | jq -r '.lineNumbers[0] // .line // 1')
             SUGGESTION=$(echo "$issue" | jq -r '.suggestion // empty')
 
             # Format the comment

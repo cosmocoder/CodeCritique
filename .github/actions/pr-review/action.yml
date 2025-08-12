@@ -331,7 +331,6 @@ runs:
     - name: Post PR Comments
       if: ${{ github.event_name == 'pull_request' && (inputs.post-comments == 'true' || inputs.summary-comment == 'true') }}
       shell: bash
-      working-directory: ${{ steps.tool.outputs.tool-root }}
       env:
         GITHUB_TOKEN: ${{ github.token }}
         INPUT_POST_COMMENTS: ${{ inputs.post-comments }}
@@ -339,11 +338,15 @@ runs:
         INPUT_MAX_COMMENTS: ${{ inputs.max-comments }}
         INPUT_OUTPUT_FORMAT: ${{ inputs.output-format }}
         ANALYSIS_TIME: ${{ steps.review.outputs.analysis-time }}
+        REVIEW_OUTPUT_PATH: ${{ steps.tool.outputs.tool-root }}/review_output.json
       run: |
         # Make the script executable
         chmod +x ${{ github.action_path }}/post-comments.sh
 
-        # Run the comment posting script from the tool root directory where review_output.json exists
+        # Copy review output to workspace root for script processing
+        cp "$REVIEW_OUTPUT_PATH" ./review_output.json
+
+        # Run the comment posting script from workspace (git repository context needed for gh CLI)
         ${{ github.action_path }}/post-comments.sh
 
     - name: Upload review report
