@@ -222,14 +222,6 @@ runs:
         # Build CLI command arguments - analyze workspace directly
         CLI_ARGS="analyze --diff-with ${{ github.ref_name }} --directory \"$GITHUB_WORKSPACE\""
 
-        # Add exclusions for action-related files and directories
-        CLI_ARGS="$CLI_ARGS --exclude 'ai-code-review-tool/**'"
-        CLI_ARGS="$CLI_ARGS --exclude '.ai-code-review-embeddings/**'"
-        CLI_ARGS="$CLI_ARGS --exclude '.ai-feedback/**'"
-        CLI_ARGS="$CLI_ARGS --exclude '.tool-cache/**'"
-
-        # Working directory is the workspace root
-
         # Add output format
         CLI_ARGS="$CLI_ARGS --output ${{ inputs.output-format }}"
 
