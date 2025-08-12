@@ -903,6 +903,14 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
     // Find the base branch (main/master)
     const baseBranch = findBaseBranch(workingDir);
 
+    // Ensure the base branch exists locally as well (crucial for diff operations)
+    try {
+      ensureBranchExists(baseBranch, workingDir);
+    } catch (error) {
+      console.warn(chalk.yellow(`Warning: Could not ensure base branch '${baseBranch}' exists locally: ${error.message}`));
+      // Continue with the original baseBranch name, it might work with remote refs
+    }
+
     console.log(chalk.gray(`Comparing ${branch} against ${baseBranch}...`));
 
     // Use three-dot notation to get changes in branch compared to base
