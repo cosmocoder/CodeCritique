@@ -47,6 +47,7 @@ program
   .option('--file <file>', 'Analyze a single file')
   .option('-d, --directory <dir>', 'Working directory for git operations (use with --diff-with)')
   .option('-o, --output <format>', 'Output format (text, json, markdown)', 'text')
+  .option('--output-file <file>', 'Save output to file (useful with --output json)')
   .option('--no-color', 'Disable colored output')
   .option('--verbose', 'Show verbose output')
   .option('--model <model>', 'LLM model to use (e.g., claude-sonnet-4-20250514)')
@@ -947,7 +948,7 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
  * @param {Array<Object>} reviewResults - Array of individual file review results from cag-review
  * @param {Object} cliOptions - Command line options
  */
-function outputJson(reviewResults) {
+function outputJson(reviewResults, options) {
   // Structure the output to be informative
   const output = {
     summary: {
@@ -975,7 +976,17 @@ function outputJson(reviewResults) {
       };
     }),
   };
-  console.log(JSON.stringify(output, null, 2));
+
+  const jsonOutput = JSON.stringify(output, null, 2);
+
+  // If output-file is specified, write to file instead of stdout
+  if (options && options.outputFile) {
+    fs.writeFileSync(options.outputFile, jsonOutput, 'utf8');
+    console.log(chalk.green(`JSON output saved to: ${options.outputFile}`));
+  } else {
+    // Write JSON output to stdout (process.stdout is not buffered)
+    process.stdout.write(jsonOutput);
+  }
 }
 
 /**

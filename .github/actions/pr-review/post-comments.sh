@@ -39,21 +39,23 @@ fi
 
 # Parse review results
 if [ "$INPUT_OUTPUT_FORMAT" = "json" ]; then
-    # Debug: Show first few lines of JSON for debugging
-    echo "📋 Review output sample:"
-    head -10 "$REVIEW_OUTPUT_FILE"
+    # Validate the clean JSON file written by the CLI tool
+    if jq empty "$REVIEW_OUTPUT_FILE" 2>/dev/null && [ -s "$REVIEW_OUTPUT_FILE" ]; then
+        echo "✅ JSON file is valid"
 
-    # Handle both array format and object format with details/summary
-    if jq -e '.summary' "$REVIEW_OUTPUT_FILE" >/dev/null 2>&1; then
-        # New format with summary and details
+        # Parse the JSON output (clean file written directly by CLI)
         TOTAL_ISSUES=$(jq '.summary.totalIssues // 0' "$REVIEW_OUTPUT_FILE" 2>/dev/null || echo "0")
         FILES_WITH_ISSUES=$(jq '.summary.filesWithIssues // 0' "$REVIEW_OUTPUT_FILE" 2>/dev/null || echo "0")
-        echo "📊 Parsed from summary: $TOTAL_ISSUES issues, $FILES_WITH_ISSUES files"
+
+        echo "📊 Parsing results:"
+        echo "  TOTAL_ISSUES: $TOTAL_ISSUES"
+        echo "  FILES_WITH_ISSUES: $FILES_WITH_ISSUES"
     else
-        # Legacy array format
-        TOTAL_ISSUES=$(jq '[.[].issues // [] | length] | add // 0' "$REVIEW_OUTPUT_FILE" 2>/dev/null || echo "0")
-        FILES_WITH_ISSUES=$(jq '[.[] | select(.issues and (.issues | length > 0))] | length' "$REVIEW_OUTPUT_FILE" 2>/dev/null || echo "0")
-        echo "📊 Parsed from legacy format: $TOTAL_ISSUES issues, $FILES_WITH_ISSUES files"
+        echo "❌ JSON file is invalid or empty"
+        echo "File size: $(wc -c < "$REVIEW_OUTPUT_FILE") bytes"
+        echo "First 10 lines:"
+        head -10 "$REVIEW_OUTPUT_FILE"
+        exit 1
     fi
 else
     TOTAL_ISSUES="0"
@@ -68,7 +70,7 @@ if [ "$SUMMARY_COMMENT" = "true" ]; then
 
     SUMMARY_BODY="## 🤖 AI Code Review Summary
 
-**Files Analyzed:** $(jq '. | length' "$REVIEW_OUTPUT_FILE" 2>/dev/null || echo "N/A")
+**Files Analyzed:** $(jq '.summary.totalFilesReviewed // 0' "$REVIEW_OUTPUT_FILE" 2>/dev/null || echo "N/A")
 **Issues Found:** $TOTAL_ISSUES
 **Analysis Time:** ${ANALYSIS_TIME:-N/A}s
 
@@ -119,14 +121,9 @@ if [ "$INPUT_OUTPUT_FORMAT" = "json" ] && [ "$TOTAL_ISSUES" -gt 0 ]; then
 
     COMMENTS_POSTED=0
 
-    # Handle different JSON formats
-    if jq -e '.details' "$REVIEW_OUTPUT_FILE" >/dev/null 2>&1; then
-        # New format with details array
-        FILES_DATA=$(jq -c '.details[]' "$REVIEW_OUTPUT_FILE")
-    else
-        # Legacy array format
-        FILES_DATA=$(jq -c '.[]' "$REVIEW_OUTPUT_FILE")
-    fi
+    # Extract files data from the details array
+    FILES_DATA=$(jq -c '.details[]' "$REVIEW_OUTPUT_FILE")
+    echo "Found $(echo "$FILES_DATA" | wc -l) result items to display"
 
     # Process each file's issues
     echo "$FILES_DATA" | while IFS= read -r file_result; do
