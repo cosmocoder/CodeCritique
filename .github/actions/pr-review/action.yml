@@ -201,6 +201,29 @@ runs:
         if_no_artifact_found: warn
       continue-on-error: true
 
+    - name: Debug Embeddings Setup
+      shell: bash
+      run: |
+        echo "🔍 Debugging embeddings setup..."
+        echo "GitHub Workspace: ${{ github.workspace }}"
+        echo "Repository ID: ${{ github.repository_id }}"
+        echo "Artifact outcome: ${{ steps.setup-artifacts.outcome }}"
+
+        echo "📂 Checking for embeddings directories..."
+        if [ -d "${{ github.workspace }}/.ai-review-lancedb" ]; then
+          echo "✅ Found .ai-review-lancedb directory"
+          ls -la "${{ github.workspace }}/.ai-review-lancedb"
+        else
+          echo "❌ Missing .ai-review-lancedb directory"
+        fi
+
+        if [ -d "${{ github.workspace }}/.ai-review-fastembed-cache" ]; then
+          echo "✅ Found .ai-review-fastembed-cache directory"
+          ls -la "${{ github.workspace }}/.ai-review-fastembed-cache"
+        else
+          echo "❌ Missing .ai-review-fastembed-cache directory"
+        fi
+
     - name: Download feedback artifacts
       if: ${{ inputs.track-feedback == 'true' }}
       uses: dawidd6/action-download-artifact@v11
@@ -220,10 +243,36 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
+        CI: true
+        DEBUG: ${{ inputs.verbose }}
+        VERBOSE: ${{ inputs.verbose }}
       run: |
+        # Debug embeddings path resolution
+        echo "🔍 Environment for embeddings:"
+        echo "  CI: $CI"
+        echo "  GITHUB_WORKSPACE_PATH: $GITHUB_WORKSPACE_PATH"
+        echo "  Working Directory: $(pwd)"
+        echo "  Target Directory: $GITHUB_WORKSPACE"
+        echo "  Resolved Target Directory: $(cd "$GITHUB_WORKSPACE" && pwd -P)"
+
+        # Verify embeddings are available
+        if [ -d "$GITHUB_WORKSPACE/.ai-review-lancedb" ]; then
+          echo "✅ Embeddings database found at: $GITHUB_WORKSPACE/.ai-review-lancedb"
+          echo "📊 LanceDB directory contents:"
+          ls -la "$GITHUB_WORKSPACE/.ai-review-lancedb"
+
+          # Show what project paths are stored in embeddings
+          echo "🔍 Checking stored project paths in embeddings..."
+          node src/index.js embeddings:stats --directory "$GITHUB_WORKSPACE" || echo "Could not get embeddings stats"
+        else
+          echo "⚠️  No embeddings database found - analysis will run without context"
+        fi
+
         # Build CLI command arguments - analyze workspace directly
         CLI_ARGS="analyze -b ${{ github.head_ref }} --directory \"$GITHUB_WORKSPACE\""
 
+        # Add verbose to show project path resolution in the CLI
+        CLI_ARGS="$CLI_ARGS --verbose"
         # Add output format
         CLI_ARGS="$CLI_ARGS --output ${{ inputs.output-format }}"
 
