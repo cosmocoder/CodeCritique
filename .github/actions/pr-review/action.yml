@@ -202,49 +202,22 @@ runs:
     - name: Setup Embeddings Directories
       shell: bash
       run: |
-        echo "🔍 Setting up embeddings directories..."
-        echo "GitHub Workspace: ${{ github.workspace }}"
-        echo "Repository ID: ${{ github.repository_id }}"
-        echo "Artifact outcome: ${{ steps.setup-artifacts.outcome }}"
-
         # Check if artifacts were downloaded to a subdirectory (common with artifact actions)
         ARTIFACT_SUBDIR="ai-code-review-embeddings-${{ github.repository_id }}"
 
         if [ -d "$ARTIFACT_SUBDIR" ]; then
-          echo "✅ Found artifact subdirectory: $ARTIFACT_SUBDIR"
-
           # Move .ai-review-lancedb if it exists in subdirectory
           if [ -d "$ARTIFACT_SUBDIR/.ai-review-lancedb" ]; then
-            echo "📦 Moving .ai-review-lancedb to workspace root..."
             mv "$ARTIFACT_SUBDIR/.ai-review-lancedb" "${{ github.workspace }}/.ai-review-lancedb"
-            echo "✅ Moved .ai-review-lancedb directory"
           fi
 
           # Move .ai-review-fastembed-cache if it exists in subdirectory
           if [ -d "$ARTIFACT_SUBDIR/.ai-review-fastembed-cache" ]; then
-            echo "📦 Moving .ai-review-fastembed-cache to workspace root..."
             mv "$ARTIFACT_SUBDIR/.ai-review-fastembed-cache" "${{ github.workspace }}/.ai-review-fastembed-cache"
-            echo "✅ Moved .ai-review-fastembed-cache directory"
           fi
 
           # Clean up artifact subdirectory
-          rmdir "$ARTIFACT_SUBDIR" 2>/dev/null || echo "⚠️  Artifact directory not empty, keeping it"
-        fi
-
-        # Final verification
-        echo "📂 Final embeddings directory check..."
-        if [ -d "${{ github.workspace }}/.ai-review-lancedb" ]; then
-          echo "✅ .ai-review-lancedb directory ready at correct location"
-          ls -la "${{ github.workspace }}/.ai-review-lancedb" | head -5
-        else
-          echo "❌ Missing .ai-review-lancedb directory"
-        fi
-
-        if [ -d "${{ github.workspace }}/.ai-review-fastembed-cache" ]; then
-          echo "✅ .ai-review-fastembed-cache directory ready at correct location"
-          ls -la "${{ github.workspace }}/.ai-review-fastembed-cache" | head -5
-        else
-          echo "❌ Missing .ai-review-fastembed-cache directory"
+          rmdir "$ARTIFACT_SUBDIR" 2>/dev/null || true
         fi
 
     - name: Download feedback artifacts
@@ -270,32 +243,9 @@ runs:
         DEBUG: ${{ inputs.verbose }}
         VERBOSE: ${{ inputs.verbose }}
       run: |
-        # Debug embeddings path resolution
-        echo "🔍 Environment for embeddings:"
-        echo "  CI: $CI"
-        echo "  GITHUB_WORKSPACE_PATH: $GITHUB_WORKSPACE_PATH"
-        echo "  Working Directory: $(pwd)"
-        echo "  Target Directory: $GITHUB_WORKSPACE"
-        echo "  Resolved Target Directory: $(cd "$GITHUB_WORKSPACE" && pwd -P)"
-
-        # Verify embeddings are available
-        if [ -d "$GITHUB_WORKSPACE/.ai-review-lancedb" ]; then
-          echo "✅ Embeddings database found at: $GITHUB_WORKSPACE/.ai-review-lancedb"
-          echo "📊 LanceDB directory contents:"
-          ls -la "$GITHUB_WORKSPACE/.ai-review-lancedb"
-
-          # Show what project paths are stored in embeddings
-          echo "🔍 Checking stored project paths in embeddings..."
-          node src/index.js embeddings:stats --directory "$GITHUB_WORKSPACE" || echo "Could not get embeddings stats"
-        else
-          echo "⚠️  No embeddings database found - analysis will run without context"
-        fi
-
         # Build CLI command arguments - analyze workspace directly
         CLI_ARGS="analyze -b ${{ github.head_ref }} --directory \"$GITHUB_WORKSPACE\""
 
-        # Add verbose to show project path resolution in the CLI
-        CLI_ARGS="$CLI_ARGS --verbose"
         # Add output format
         CLI_ARGS="$CLI_ARGS --output ${{ inputs.output-format }}"
 
