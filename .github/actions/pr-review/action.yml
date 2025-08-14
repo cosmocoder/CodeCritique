@@ -192,34 +192,57 @@ runs:
       id: setup-artifacts
       uses: dawidd6/action-download-artifact@v11
       with:
-        name: ai-code-review-embeddings
-        name_is_regexp: true
+        name: ai-code-review-embeddings-${{ github.repository_id }}
         search_artifacts: true
-        path: ${{ github.workspace }}
         github_token: ${{ github.token }}
         workflow_conclusion: success
         if_no_artifact_found: warn
       continue-on-error: true
 
-    - name: Debug Embeddings Setup
+    - name: Setup Embeddings Directories
       shell: bash
       run: |
-        echo "🔍 Debugging embeddings setup..."
+        echo "🔍 Setting up embeddings directories..."
         echo "GitHub Workspace: ${{ github.workspace }}"
         echo "Repository ID: ${{ github.repository_id }}"
         echo "Artifact outcome: ${{ steps.setup-artifacts.outcome }}"
 
-        echo "📂 Checking for embeddings directories..."
+        # Check if artifacts were downloaded to a subdirectory (common with artifact actions)
+        ARTIFACT_SUBDIR="ai-code-review-embeddings-${{ github.repository_id }}"
+
+        if [ -d "$ARTIFACT_SUBDIR" ]; then
+          echo "✅ Found artifact subdirectory: $ARTIFACT_SUBDIR"
+
+          # Move .ai-review-lancedb if it exists in subdirectory
+          if [ -d "$ARTIFACT_SUBDIR/.ai-review-lancedb" ]; then
+            echo "📦 Moving .ai-review-lancedb to workspace root..."
+            mv "$ARTIFACT_SUBDIR/.ai-review-lancedb" "${{ github.workspace }}/.ai-review-lancedb"
+            echo "✅ Moved .ai-review-lancedb directory"
+          fi
+
+          # Move .ai-review-fastembed-cache if it exists in subdirectory
+          if [ -d "$ARTIFACT_SUBDIR/.ai-review-fastembed-cache" ]; then
+            echo "📦 Moving .ai-review-fastembed-cache to workspace root..."
+            mv "$ARTIFACT_SUBDIR/.ai-review-fastembed-cache" "${{ github.workspace }}/.ai-review-fastembed-cache"
+            echo "✅ Moved .ai-review-fastembed-cache directory"
+          fi
+
+          # Clean up artifact subdirectory
+          rmdir "$ARTIFACT_SUBDIR" 2>/dev/null || echo "⚠️  Artifact directory not empty, keeping it"
+        fi
+
+        # Final verification
+        echo "📂 Final embeddings directory check..."
         if [ -d "${{ github.workspace }}/.ai-review-lancedb" ]; then
-          echo "✅ Found .ai-review-lancedb directory"
-          ls -la "${{ github.workspace }}/.ai-review-lancedb"
+          echo "✅ .ai-review-lancedb directory ready at correct location"
+          ls -la "${{ github.workspace }}/.ai-review-lancedb" | head -5
         else
           echo "❌ Missing .ai-review-lancedb directory"
         fi
 
         if [ -d "${{ github.workspace }}/.ai-review-fastembed-cache" ]; then
-          echo "✅ Found .ai-review-fastembed-cache directory"
-          ls -la "${{ github.workspace }}/.ai-review-fastembed-cache"
+          echo "✅ .ai-review-fastembed-cache directory ready at correct location"
+          ls -la "${{ github.workspace }}/.ai-review-fastembed-cache" | head -5
         else
           echo "❌ Missing .ai-review-fastembed-cache directory"
         fi
