@@ -24,9 +24,16 @@ fi
 
 # Extract PR information
 PR_NUMBER=$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH")
+PR_HEAD_SHA=$(jq -r '.pull_request.head.sha // empty' "$GITHUB_EVENT_PATH")
+
 if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
     echo "⚠️  No PR number found, skipping comment posting"
     exit 0
+fi
+
+if [ -z "$PR_HEAD_SHA" ] || [ "$PR_HEAD_SHA" = "null" ]; then
+    echo "⚠️  No PR head SHA found, will use fallback comments only"
+    PR_HEAD_SHA=""
 fi
 
 echo "💬 Processing review results for PR #$PR_NUMBER"
@@ -139,6 +146,21 @@ if [ "$INPUT_OUTPUT_FORMAT" = "json" ] && [ "$TOTAL_ISSUES" -gt 0 ]; then
             continue
         fi
 
+        # Convert absolute path to relative path for GitHub API
+        # Remove the GitHub workspace prefix to get relative path
+        RELATIVE_FILE_PATH="$FILE_PATH"
+        if [[ "$FILE_PATH" == *"/github/workspace/"* ]]; then
+            RELATIVE_FILE_PATH="${FILE_PATH##*/github/workspace/}"
+        elif [[ "$FILE_PATH" == *"/_work/"*"/dash/"* ]]; then
+            # Handle GitHub Actions runner path format: /home/runner/_work/dash/dash/...
+            RELATIVE_FILE_PATH="${FILE_PATH##*/_work/*/dash/}"
+        elif [[ "$FILE_PATH" == /* ]]; then
+            # If it's still an absolute path, try to extract just the filename
+            RELATIVE_FILE_PATH="${FILE_PATH##*/}"
+        fi
+
+        echo "📁 Processing file: $FILE_PATH -> $RELATIVE_FILE_PATH"
+
         # Process each issue in the file
         echo "$ISSUES" | jq -c '.[]?' | while IFS= read -r issue; do
             if [ "$COMMENTS_POSTED" -ge "$MAX_COMMENTS" ]; then
@@ -174,33 +196,48 @@ $SUGGESTION"
 *Severity: $SEVERITY*"
 
             # Post the inline comment
-            echo "📍 Posting comment for $FILE_PATH:$LINE_NUM"
+            echo "📍 Posting comment for $RELATIVE_FILE_PATH:$LINE_NUM"
 
-            gh api repos/:owner/:repo/pulls/$PR_NUMBER/comments \
-                --method POST \
-                --field body="$COMMENT_BODY" \
-                --field path="$FILE_PATH" \
-                --field line="$LINE_NUM" \
-                --field side="RIGHT" \
-                --silent && {
-                    COMMENTS_POSTED=$((COMMENTS_POSTED + 1))
-                    echo "✅ Posted comment for $FILE_PATH"
-                } || {
-                    echo "⚠️  Failed to post comment for $FILE_PATH:$LINE_NUM"
-                    # Try posting as a general PR comment instead
-                    FALLBACK_BODY="**File: \`$FILE_PATH\` (Line $LINE_NUM)**
+            # Try posting as inline comment with commit_id if available
+            if [ -n "$PR_HEAD_SHA" ]; then
+                echo "🔧 Attempting inline comment with commit_id=$PR_HEAD_SHA path=$RELATIVE_FILE_PATH line=$LINE_NUM"
+                gh api repos/:owner/:repo/pulls/$PR_NUMBER/comments \
+                    --method POST \
+                    --field body="$COMMENT_BODY" \
+                    --field commit_id="$PR_HEAD_SHA" \
+                    --field path="$RELATIVE_FILE_PATH" \
+                    --field line="$LINE_NUM" \
+                    --field side="RIGHT" \
+                    --silent && {
+                        COMMENTS_POSTED=$((COMMENTS_POSTED + 1))
+                        echo "✅ Posted inline comment for $RELATIVE_FILE_PATH"
+                        continue
+                    } || {
+                        echo "⚠️  Failed to post inline comment for $RELATIVE_FILE_PATH:$LINE_NUM"
+                        echo "🔍 Trying with verbose error output..."
+                        gh api repos/:owner/:repo/pulls/$PR_NUMBER/comments \
+                            --method POST \
+                            --field body="$COMMENT_BODY" \
+                            --field commit_id="$PR_HEAD_SHA" \
+                            --field path="$RELATIVE_FILE_PATH" \
+                            --field line="$LINE_NUM" \
+                            --field side="RIGHT" 2>&1 | head -3
+                    }
+            fi
+
+            # Fallback: post as general PR comment
+            FALLBACK_BODY="**File: \`$RELATIVE_FILE_PATH\` (Line $LINE_NUM)**
 
 $COMMENT_BODY"
 
-                    gh api repos/:owner/:repo/issues/$PR_NUMBER/comments \
-                        --method POST \
-                        --field body="$FALLBACK_BODY" \
-                        --silent && {
-                            COMMENTS_POSTED=$((COMMENTS_POSTED + 1))
-                            echo "✅ Posted fallback comment for $FILE_PATH"
-                        } || {
-                            echo "❌ Failed to post fallback comment for $FILE_PATH"
-                        }
+            gh api repos/:owner/:repo/issues/$PR_NUMBER/comments \
+                --method POST \
+                --field body="$FALLBACK_BODY" \
+                --silent && {
+                    COMMENTS_POSTED=$((COMMENTS_POSTED + 1))
+                    echo "✅ Posted fallback comment for $RELATIVE_FILE_PATH"
+                } || {
+                    echo "❌ Failed to post fallback comment for $RELATIVE_FILE_PATH"
                 }
         done
     done
