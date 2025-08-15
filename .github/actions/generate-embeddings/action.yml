@@ -1,12 +1,11 @@
-name: 'AI Code Review - Generate Embeddings'
-description: 'Generate embeddings for codebase using the AI Code Review tool'
+name: 'CodeCritique - Generate Embeddings'
+description: 'Generate embeddings for codebase using the CodeCritique tool'
 
 branding:
   icon: 'brain'
   color: 'blue'
 
 inputs:
-  # Processing Configuration (matching CLI options)
   files:
     description: 'Specific files or patterns to process (space-separated)'
     required: false
@@ -14,11 +13,9 @@ inputs:
   concurrency:
     description: 'Number of concurrent embedding requests'
     required: false
-    default: '10'
   exclude:
     description: 'Patterns to exclude (space-separated glob patterns)'
     required: false
-    default: '**/node_modules/** **/dist/** **/build/** **/.git/**'
   exclude-file:
     description: 'File containing patterns to exclude (one per line)'
     required: false
@@ -38,32 +35,6 @@ inputs:
     required: false
     default: '30'
 
-outputs:
-  embeddings-generated:
-    description: 'Number of embeddings generated'
-    value: ${{ steps.stats.outputs.embeddings-count }}
-  files-processed:
-    description: 'Number of files processed'
-    value: ${{ steps.stats.outputs.files-count }}
-  database-size-mb:
-    description: 'Size of embeddings database in MB'
-    value: ${{ steps.stats.outputs.db-size }}
-  processing-time:
-    description: 'Processing time in seconds'
-    value: ${{ steps.timing.outputs.duration }}
-  artifact-name:
-    description: 'Name of the created embeddings artifact'
-    value: ai-code-review-embeddings-${{ github.repository_id }}
-  cache-hit:
-    description: 'Whether embeddings were restored from cache'
-    value: ${{ steps.cache-check.outputs.cache-hit }}
-  previous-embeddings-restored:
-    description: 'Whether previous embeddings were restored from artifacts'
-    value: ${{ steps.setup-artifacts.outcome == 'success' }}
-  restored-artifact-name:
-    description: 'Name of the restored embeddings artifact'
-    value: ai-code-review-embeddings-${{ github.repository_id }}
-
 runs:
   using: 'composite'
   steps:
@@ -72,10 +43,12 @@ runs:
       run: |
         echo "🔍 Validating action inputs..."
 
-        # Validate concurrency is a positive integer
-        if ! [[ "${{ inputs.concurrency }}" =~ ^[0-9]+$ ]] || [ "${{ inputs.concurrency }}" -le 0 ]; then
-          echo "❌ Error: concurrency must be a positive integer, got: ${{ inputs.concurrency }}"
-          exit 1
+        # Validate concurrency is a positive integer (only if provided)
+        if [ -n "${{ inputs.concurrency }}" ]; then
+          if ! [[ "${{ inputs.concurrency }}" =~ ^[0-9]+$ ]] || [ "${{ inputs.concurrency }}" -le 0 ]; then
+            echo "❌ Error: concurrency must be a positive integer, got: ${{ inputs.concurrency }}"
+            exit 1
+          fi
         fi
 
         # Validate retention days
@@ -86,100 +59,30 @@ runs:
 
         echo "✅ Input validation passed"
 
-    - name: Checkout AI Code Review Tool (fallback)
-      uses: actions/checkout@v4
-      with:
-        repository: ${{ github.action_repository }}
-        ref: ${{ github.action_ref }}
-        path: ai-code-review-tool
-        token: ${{ github.token }}
-      continue-on-error: true
-
-    - name: Resolve Tool Root
-      id: tool
+    # Create a symlink to the action repository to access sibling composite actions.
+    # This workaround is needed because GitHub Actions doesn't support relative paths
+    # to sibling actions when the action is used from external repositories.
+    # The symlink allows us to reference ./.action-repo/.github/actions/setup-tool
+    - name: Link current action repo
       shell: bash
-      run: |
-        # Prefer the repository already downloaded by the runner for this action
-        CANDIDATE="${{ github.action_path }}/../../.."
-        if CANON=$(cd "$CANDIDATE" 2>/dev/null && pwd -P); then
-          if [ -f "$CANON/src/index.js" ]; then
-            echo "tool-root=$CANON" >> $GITHUB_OUTPUT
-            echo "✅ Using tool from action repository checkout at: $CANON"
-            exit 0
-          fi
-        fi
+      run: ln -fs "$(realpath "${{ github.action_path }}/../../..")" "$GITHUB_WORKSPACE/.action-repo"
 
-        CHECKOUT_DIR="$PWD/ai-code-review-tool"
-        if CANON_CHECKOUT=$(cd "$CHECKOUT_DIR" 2>/dev/null && pwd -P); then
-          if [ -f "$CANON_CHECKOUT/src/index.js" ]; then
-            echo "tool-root=$CANON_CHECKOUT" >> $GITHUB_OUTPUT
-            echo "✅ Using tool from explicit checkout at: $CANON_CHECKOUT"
-            exit 0
-          fi
-        fi
-
-        echo "❌ Could not locate tool source (src/index.js)." >&2
-        echo "Checked: $CANDIDATE and $CHECKOUT_DIR" >&2
-        exit 1
-
-    - name: Prepare dependency lock for caching
-      shell: bash
-      run: |
-        mkdir -p .tool-cache
-        if [ -f "${{ steps.tool.outputs.tool-root }}/package-lock.json" ]; then
-          cp "${{ steps.tool.outputs.tool-root }}/package-lock.json" .tool-cache/package-lock.json
-        fi
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
+    - name: Setup CodeCritique Tool
+      id: setup-tool
+      uses: ./.action-repo/.github/actions/setup-tool
       with:
+        github-token: ${{ github.token }}
         node-version: '22.x'
-        cache: 'npm'
-        cache-dependency-path: '.tool-cache/package-lock.json'
 
-    - name: Install AI Tool Dependencies
+    - name: Cleanup link
+      if: always()
       shell: bash
-      working-directory: ${{ steps.tool.outputs.tool-root }}
-      run: |
-        echo "📦 Installing AI Code Review tool dependencies..."
-        npm ci --no-audit --silent
-
-    - name: Download Previous Embeddings
-      id: setup-artifacts
-      uses: dawidd6/action-download-artifact@v11
-      with:
-        name: ai-code-review-embeddings-${{ github.repository_id }}
-        search_artifacts: true
-        github_token: ${{ github.token }}
-        workflow_conclusion: success
-        if_no_artifact_found: warn
-      continue-on-error: true
-
-    - name: Setup Embeddings Directories
-      shell: bash
-      run: |
-        # Check if artifacts were downloaded to a subdirectory (common with artifact actions)
-        ARTIFACT_SUBDIR="ai-code-review-embeddings-${{ github.repository_id }}"
-
-        if [ -d "$ARTIFACT_SUBDIR" ]; then
-          # Move .ai-review-lancedb if it exists in subdirectory
-          if [ -d "$ARTIFACT_SUBDIR/.ai-review-lancedb" ]; then
-            mv "$ARTIFACT_SUBDIR/.ai-review-lancedb" "${{ github.workspace }}/.ai-review-lancedb"
-          fi
-
-          # Move .ai-review-fastembed-cache if it exists in subdirectory
-          if [ -d "$ARTIFACT_SUBDIR/.ai-review-fastembed-cache" ]; then
-            mv "$ARTIFACT_SUBDIR/.ai-review-fastembed-cache" "${{ github.workspace }}/.ai-review-fastembed-cache"
-          fi
-
-          # Clean up artifact subdirectory
-          rmdir "$ARTIFACT_SUBDIR" 2>/dev/null || true
-        fi
+      run: rm -f "$GITHUB_WORKSPACE/.action-repo"
 
     - name: Generate Embeddings
       id: generate
       shell: bash
-      working-directory: ${{ steps.tool.outputs.tool-root }}
+      working-directory: ${{ steps.setup-tool.outputs.tool-root }}
       env:
         DEBUG: ${{ inputs.verbose }}
         VERBOSE: ${{ inputs.verbose }}
@@ -190,7 +93,11 @@ runs:
         # Build command arguments based on actual CLI options
         ARGS="embeddings:generate"
         ARGS="${ARGS} --directory \"$GITHUB_WORKSPACE\""
-        ARGS="${ARGS} --concurrency ${{ inputs.concurrency }}"
+
+        # Add concurrency only if provided
+        if [ -n "${{ inputs.concurrency }}" ]; then
+          ARGS="${ARGS} --concurrency ${{ inputs.concurrency }}"
+        fi
 
         # Add specific files if provided
         if [ -n "${{ inputs.files }}" ]; then
@@ -202,7 +109,6 @@ runs:
         # Always exclude action-related directories and files
         ARGS="${ARGS} --exclude 'ai-code-review-tool/**'"
         ARGS="${ARGS} --exclude '.ai-code-review-artifacts/**'"
-        ARGS="${ARGS} --exclude '.tool-cache/**'"
 
         # Add user-specified exclude patterns
         if [ -n "${{ inputs.exclude }}" ]; then
