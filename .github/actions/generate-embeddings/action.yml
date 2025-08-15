@@ -146,45 +146,35 @@ runs:
 
     - name: Download Previous Embeddings
       id: setup-artifacts
-      uses: actions/download-artifact@v4
+      uses: dawidd6/action-download-artifact@v11
       with:
         name: ai-code-review-embeddings-${{ github.repository_id }}
-        path: ${{ github.workspace }}
+        search_artifacts: true
+        github_token: ${{ github.token }}
+        workflow_conclusion: success
+        if_no_artifact_found: warn
       continue-on-error: true
 
-    - name: Generate Content Hash
-      id: content-hash
+    - name: Setup Embeddings Directories
       shell: bash
       run: |
-        # Generate content hash for caching based on:
-        # - Target directory contents (git hash if available)
-        # - AI tool version (commit hash)
-        # - Processing configuration
-        TARGET_HASH="unknown"
-        if [ -d ".git" ]; then
-          TARGET_HASH=$(git rev-parse HEAD 2>/dev/null || echo "no-git")
+        # Check if artifacts were downloaded to a subdirectory (common with artifact actions)
+        ARTIFACT_SUBDIR="ai-code-review-embeddings-${{ github.repository_id }}"
+
+        if [ -d "$ARTIFACT_SUBDIR" ]; then
+          # Move .ai-review-lancedb if it exists in subdirectory
+          if [ -d "$ARTIFACT_SUBDIR/.ai-review-lancedb" ]; then
+            mv "$ARTIFACT_SUBDIR/.ai-review-lancedb" "${{ github.workspace }}/.ai-review-lancedb"
+          fi
+
+          # Move .ai-review-fastembed-cache if it exists in subdirectory
+          if [ -d "$ARTIFACT_SUBDIR/.ai-review-fastembed-cache" ]; then
+            mv "$ARTIFACT_SUBDIR/.ai-review-fastembed-cache" "${{ github.workspace }}/.ai-review-fastembed-cache"
+          fi
+
+          # Clean up artifact subdirectory
+          rmdir "$ARTIFACT_SUBDIR" 2>/dev/null || true
         fi
-
-        AI_TOOL_HASH=$(cd "${{ steps.tool.outputs.tool-root }}" && git rev-parse HEAD 2>/dev/null || echo "no-git")
-        CONFIG_HASH=$(echo "${{ inputs.files }}|${{ inputs.exclude }}|${{ inputs.concurrency }}" | sha256sum | cut -d' ' -f1 | head -c 12)
-
-        CONTENT_HASH="${TARGET_HASH:0:8}-${AI_TOOL_HASH:0:8}-${CONFIG_HASH}"
-        echo "content-hash=${CONTENT_HASH}" >> $GITHUB_OUTPUT
-        echo "📋 Content hash: ${CONTENT_HASH}"
-
-    - name: Check for Cached Embeddings
-      id: cache-check
-      uses: actions/cache@v4
-      with:
-        path: .ai-code-review-embeddings
-        key: ai-code-review-embeddings-${{ github.repository }}-${{ steps.content-hash.outputs.content-hash }}
-        restore-keys: |
-          ai-code-review-embeddings-${{ github.repository }}-
-
-    - name: Start Timing
-      id: start-timing
-      shell: bash
-      run: echo "start-time=$(date +%s)" >> $GITHUB_OUTPUT
 
     - name: Generate Embeddings
       id: generate
@@ -246,57 +236,6 @@ runs:
           exit 1
         fi
 
-    - name: Calculate Processing Time
-      id: timing
-      shell: bash
-      run: |
-        START_TIME="${{ steps.start-timing.outputs.start-time }}"
-        END_TIME=$(date +%s)
-        DURATION=$((END_TIME - START_TIME))
-        echo "duration=${DURATION}" >> $GITHUB_OUTPUT
-        echo "⏱️ Processing completed in ${DURATION} seconds"
-
-    - name: Gather Statistics
-      id: stats
-      shell: bash
-      working-directory: ${{ steps.tool.outputs.tool-root }}
-      env:
-        GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
-      run: |
-        echo "📊 Gathering embedding statistics..."
-
-        # Get stats using the CLI tool
-        STATS_ARGS="embeddings:stats --directory \"$GITHUB_WORKSPACE\""
-
-        if STATS_OUTPUT=$(eval "node src/index.js ${STATS_ARGS}" 2>/dev/null); then
-          echo "📋 Statistics output:"
-          echo "$STATS_OUTPUT"
-
-          # Parse statistics from output
-          EMBEDDINGS_COUNT=$(echo "$STATS_OUTPUT" | grep -o 'Total embeddings: [0-9]*' | grep -o '[0-9]*' || echo "0")
-          FILES_COUNT=$(echo "$STATS_OUTPUT" | grep -o 'Files with embeddings: [0-9]*' | grep -o '[0-9]*' || echo "0")
-
-          # Calculate database size if embeddings directory exists
-          DB_SIZE_MB=0
-          LANCEDB_LOCATION="${{ github.workspace }}/.ai-review-lancedb"
-
-          if [ -d "$LANCEDB_LOCATION" ] && [ "$(ls -A "$LANCEDB_LOCATION" 2>/dev/null)" ]; then
-            DB_SIZE_BYTES=$(du -sb "$LANCEDB_LOCATION" 2>/dev/null | cut -f1 || echo "0")
-            DB_SIZE_MB=$((DB_SIZE_BYTES / 1024 / 1024))
-          fi
-
-          echo "embeddings-count=${EMBEDDINGS_COUNT}" >> $GITHUB_OUTPUT
-          echo "files-count=${FILES_COUNT}" >> $GITHUB_OUTPUT
-          echo "db-size=${DB_SIZE_MB}" >> $GITHUB_OUTPUT
-
-          echo "✅ Statistics: ${EMBEDDINGS_COUNT} embeddings, ${FILES_COUNT} files, ${DB_SIZE_MB}MB"
-        else
-          echo "⚠️ Could not gather statistics, setting defaults"
-          echo "embeddings-count=0" >> $GITHUB_OUTPUT
-          echo "files-count=0" >> $GITHUB_OUTPUT
-          echo "db-size=0" >> $GITHUB_OUTPUT
-        fi
-
     - name: Upload Embeddings Artifact
       id: upload-artifacts
       if: steps.generate.outputs.success == 'true'
@@ -310,52 +249,3 @@ runs:
         retention-days: ${{ inputs.embeddings-retention-days }}
         if-no-files-found: warn
       continue-on-error: true
-
-    - name: Generate Summary
-      if: always()
-      shell: bash
-      run: |
-        echo "## 🧠 AI Code Review - Embedding Generation Results" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-        echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-        echo "| **Status** | ${{ steps.generate.outputs.success == 'true' && '✅ Success' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Directory** | \`workspace\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Embeddings Generated** | ${{ steps.stats.outputs.embeddings-count }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Files Processed** | ${{ steps.stats.outputs.files-count }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Database Size** | ${{ steps.stats.outputs.db-size }} MB |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Processing Time** | ${{ steps.timing.outputs.duration }} seconds |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Cache Hit** | ${{ steps.cache-check.outputs.cache-hit == 'true' && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Previous Embeddings** | ${{ steps.setup-artifacts.outcome == 'success' && '✅ Restored' || '📝 Initial Generation' }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Concurrency** | ${{ inputs.concurrency }} |" >> $GITHUB_STEP_SUMMARY
-
-        if [ "${{ inputs.verbose }}" = "true" ]; then
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔧 Configuration" >> $GITHUB_STEP_SUMMARY
-          echo "- **AI Tool Repository:** ${{ github.action_repository }}@${{ github.action_ref }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Files Pattern:** \`${{ inputs.files || 'Auto-detected' }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Exclude Patterns:** \`${{ inputs.exclude }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Content Hash:** \`${{ steps.content-hash.outputs.content-hash }}\`" >> $GITHUB_STEP_SUMMARY
-        fi
-
-        if [ "${{ steps.setup-artifacts.outcome }}" = "success" ]; then
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔄 Incremental Processing" >> $GITHUB_STEP_SUMMARY
-          echo "Previous embeddings were restored from artifact: \`ai-code-review-embeddings-${{ github.repository_id }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "The CLI tool automatically detected existing embeddings and processed only changed files for optimal performance." >> $GITHUB_STEP_SUMMARY
-        fi
-
-        if [ "${{ steps.generate.outputs.success }}" != "true" ]; then
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### ❌ Error Information" >> $GITHUB_STEP_SUMMARY
-          echo "The embedding generation process failed. Please check the action logs for detailed error information." >> $GITHUB_STEP_SUMMARY
-        fi
-
-    - name: Cleanup
-      if: always()
-      shell: bash
-      run: |
-        echo "🧹 Cleaning up temporary files..."
-        if [ -d ai-code-review-tool ]; then rm -rf ai-code-review-tool; fi
-        # Cleanup handled by shared artifact manager
-        echo "✅ Cleanup completed"
