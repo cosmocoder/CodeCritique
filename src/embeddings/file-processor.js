@@ -578,9 +578,32 @@ export class FileProcessor {
       return;
     }
 
+    // Efficient batch check: Get all existing document chunks for this project
+    let existingDocChunksMap = new Map();
+    try {
+      const existingChunks = await documentChunkTable
+        .query()
+        .where(`project_path = '${baseDir.replace(/'/g, "''")}'`)
+        .toArray();
+
+      // Build a map for fast lookup: original_document_path -> [chunks]
+      for (const chunk of existingChunks) {
+        if (!existingDocChunksMap.has(chunk.original_document_path)) {
+          existingDocChunksMap.set(chunk.original_document_path, []);
+        }
+        existingDocChunksMap.get(chunk.original_document_path).push(chunk);
+      }
+
+      console.log(chalk.cyan(`Found ${existingChunks.length} existing document chunks for comparison`));
+    } catch (queryError) {
+      console.warn(chalk.yellow(`Warning: Could not query existing document chunks, will process all docs: ${queryError.message}`));
+      existingDocChunksMap = new Map();
+    }
+
     const allDocChunksToEmbed = [];
     const allDocChunkRecordsToAdd = [];
     const processedDocPathsForDeletion = new Set();
+    let skippedDocCount = 0;
 
     for (const filePath of filePaths) {
       const absoluteFilePath = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(baseDir, filePath);
@@ -600,14 +623,42 @@ export class FileProcessor {
             continue;
           }
 
+          // Check if document has changed by comparing chunk content hashes
+          const existingChunks = existingDocChunksMap.get(consistentRelativePath) || [];
+
+          // Extract chunks to compare with existing ones
+          const { chunks: currentChunks, documentH1 } = extractMarkdownChunks(absoluteFilePath, content, consistentRelativePath);
+          let hasUnchangedDocument = false;
+
+          if (existingChunks.length > 0 && currentChunks.length === existingChunks.length) {
+            // Create a signature of the document by combining all chunk content hashes
+            const currentChunkHashes = currentChunks
+              .map((chunk) => createHash('md5').update(chunk.content).digest('hex').substring(0, 8))
+              .sort()
+              .join('|');
+
+            const existingChunkHashes = existingChunks
+              .map((chunk) => chunk.content_hash)
+              .sort()
+              .join('|');
+
+            hasUnchangedDocument = currentChunkHashes === existingChunkHashes;
+          }
+
+          if (hasUnchangedDocument) {
+            // Document hasn't changed - skip processing
+            skippedDocCount++;
+            debug(`Skipping unchanged document: ${consistentRelativePath} (${currentChunks.length} chunks match)`);
+            continue;
+          }
+
+          // Document has changed or is new - process it
           if (!processedDocPathsForDeletion.has(consistentRelativePath)) {
             processedDocPathsForDeletion.add(consistentRelativePath);
           }
 
-          const { chunks, documentH1 } = extractMarkdownChunks(absoluteFilePath, content, consistentRelativePath);
-
-          if (chunks.length > 0) {
-            chunks.forEach((chunk) => {
+          if (currentChunks.length > 0) {
+            currentChunks.forEach((chunk) => {
               const chunkWithTitle = {
                 ...chunk,
                 documentTitle: documentH1 || path.basename(absoluteFilePath, path.extname(absoluteFilePath)),
@@ -620,6 +671,10 @@ export class FileProcessor {
           console.warn(chalk.yellow(`Error processing document ${consistentRelativePath} for chunking: ${docError.message}`));
         }
       }
+    }
+
+    if (skippedDocCount > 0) {
+      console.log(chalk.cyan(`Skipped ${skippedDocCount} unchanged documentation files`));
     }
 
     if (allDocChunksToEmbed.length > 0) {
