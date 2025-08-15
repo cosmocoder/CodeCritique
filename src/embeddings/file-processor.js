@@ -413,14 +413,97 @@ export class FileProcessor {
       }
     }
 
-    // Generate embeddings for the batch
-    if (contentsForBatch.length > 0) {
+    // Efficient batch check: Get all existing embeddings for this project in one query
+    const fileTable = await this.databaseManager.getTable(this.fileEmbeddingsTable);
+    const filesToActuallyProcess = [];
+    const contentsToActuallyProcess = [];
+    let existingFilesMap = new Map();
+
+    try {
+      // Single query to get all existing file embeddings for this project
+      const existingRecords = await fileTable
+        .query()
+        .where(`project_path = '${baseDir.replace(/'/g, "''")}'`)
+        .toArray();
+
+      // Build a map for fast lookup: path -> [records]
+      for (const record of existingRecords) {
+        if (!existingFilesMap.has(record.path)) {
+          existingFilesMap.set(record.path, []);
+        }
+        existingFilesMap.get(record.path).push(record);
+      }
+
+      console.log(chalk.cyan(`Found ${existingRecords.length} existing embeddings for comparison`));
+    } catch (queryError) {
+      console.warn(chalk.yellow(`Warning: Could not query existing embeddings, will process all files: ${queryError.message}`));
+      existingFilesMap = new Map(); // Empty map means process all files
+    }
+
+    // Now check each file against the existing embeddings map
+    const recordsToDelete = [];
+
+    for (let i = 0; i < filesToProcess.length; i++) {
+      const fileData = filesToProcess[i];
+      const contentHash = createHash('md5').update(fileData.content).digest('hex').substring(0, 8);
+
+      const existingRecords = existingFilesMap.get(fileData.relativePath) || [];
+      let needsUpdate = true;
+
+      if (existingRecords.length > 0) {
+        // Check if any existing record matches our current file state
+        for (const existing of existingRecords) {
+          if (existing.content_hash === contentHash) {
+            // File content hasn't changed - skip processing (CI-friendly)
+            // Note: We rely on content_hash rather than last_modified because
+            // GitHub Actions checkout changes file timestamps even for unchanged files
+            needsUpdate = false;
+            results.skipped++;
+            this.progressTracker.update('skipped');
+            if (typeof onProgress === 'function') onProgress('skipped', fileData.originalInputPath);
+            this.processedFiles.set(fileData.originalInputPath, 'skipped_unchanged');
+            debug(`Skipping unchanged file: ${fileData.relativePath} (hash: ${contentHash})`);
+            break;
+          } else if (existing.path === fileData.relativePath) {
+            // Same file path but different content - mark old version for deletion
+            recordsToDelete.push(existing);
+          }
+        }
+      }
+
+      if (needsUpdate) {
+        // File needs processing (new or changed)
+        filesToActuallyProcess.push(fileData);
+        contentsToActuallyProcess.push(fileData.content);
+      }
+    }
+
+    // Batch delete old versions if any
+    if (recordsToDelete.length > 0) {
+      for (const recordToDelete of recordsToDelete) {
+        try {
+          await fileTable.delete(`id = '${recordToDelete.id.replace(/'/g, "''")}'`);
+          debug(`Deleted old version: ${recordToDelete.path} (old hash: ${recordToDelete.content_hash})`);
+        } catch (deleteError) {
+          console.warn(chalk.yellow(`Warning: Could not delete old version of ${recordToDelete.path}: ${deleteError.message}`));
+        }
+      }
+    }
+
+    // Generate embeddings only for files that need processing
+    if (filesToActuallyProcess.length > 0) {
+      console.log(
+        chalk.cyan(
+          `Processing ${filesToActuallyProcess.length} new/changed files (skipped ${filesToProcess.length - filesToActuallyProcess.length} unchanged)`
+        )
+      );
+
       try {
-        const embeddings = await this.modelManager.calculateEmbeddingBatch(contentsForBatch);
+        const embeddings = await this.modelManager.calculateEmbeddingBatch(contentsToActuallyProcess);
         const recordsToAdd = [];
 
         for (let i = 0; i < embeddings.length; i++) {
-          const fileData = filesToProcess[i];
+          const fileData = filesToActuallyProcess[i];
           const embeddingVector = embeddings[i];
 
           if (embeddingVector) {
@@ -449,13 +532,12 @@ export class FileProcessor {
           }
         }
 
-        // Add records to database
+        // Add new/updated records to database
         if (recordsToAdd.length > 0) {
-          const fileTable = await this.databaseManager.getTable(this.fileEmbeddingsTable);
           await fileTable.add(recordsToAdd);
 
           recordsToAdd.forEach((record, index) => {
-            const fileData = filesToProcess[index];
+            const fileData = filesToActuallyProcess[index];
             if (embeddings[index]) {
               results.processed++;
               results.files.push(fileData.originalInputPath);
