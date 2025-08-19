@@ -11,6 +11,7 @@ import path from 'node:path';
 import chalk from 'chalk';
 import { getDefaultEmbeddingsSystem } from './embeddings/factory.js';
 import { calculateCosineSimilarity } from './embeddings/similarity-calculator.js';
+import { loadFeedbackData, shouldSkipSimilarIssue, extractDismissedPatterns, generateFeedbackContext } from './feedback-loader.js';
 import * as llm from './llm.js';
 import { findRelevantPRComments } from './pr-history/database.js';
 import { inferContextFromCodeContent, inferContextFromDocumentContent } from './utils/context-inference.js';
@@ -159,6 +160,13 @@ async function runAnalysis(filePath, options = {}) {
 
     console.log(chalk.blue(`Analyzing file: ${filePath}`));
 
+    // Load feedback data if feedback tracking is enabled
+    let feedbackData = {};
+    if (options.trackFeedback && options.feedbackPath) {
+      console.log(chalk.cyan('--- Loading Feedback Data ---'));
+      feedbackData = await loadFeedbackData(options.feedbackPath, { verbose: options.verbose });
+    }
+
     // Check if file exists
     if (!fs.existsSync(filePath)) {
       throw new Error(`File not found: ${filePath}`);
@@ -246,17 +254,27 @@ async function runAnalysis(filePath, options = {}) {
       formattedCodeExamples,
       formattedGuidelines, // Always pass the formatted guidelines
       prCommentContext, // Pass PR comment context
-      { ...options, isTestFile, relevantCustomDocChunks } // Pass isTestFile flag and relevant custom doc chunks
+      { ...options, isTestFile, relevantCustomDocChunks, feedbackData } // Pass isTestFile flag, custom doc chunks, and feedback data
     );
 
     // Call LLM for analysis
-    const analysisResults = await callLLMForAnalysis(context, { ...options, isTestFile });
+    const analysisResults = await callLLMForAnalysis(context, { ...options, isTestFile, feedbackData });
+
+    // Post-process results to filter dismissed issues
+    let filteredResults = analysisResults;
+    if (options.trackFeedback && feedbackData && Object.keys(feedbackData).length > 0) {
+      console.log(chalk.cyan('--- Filtering Results Based on Feedback ---'));
+      filteredResults = filterAnalysisResults(analysisResults, feedbackData, {
+        similarityThreshold: options.feedbackThreshold || 0.7,
+        verbose: options.verbose,
+      });
+    }
 
     return {
       success: true,
       filePath,
       language,
-      results: analysisResults,
+      results: filteredResults,
       context: {
         codeExamples: finalCodeExamples.length,
         guidelines: finalGuidelineSnippets.length,
@@ -280,7 +298,9 @@ async function runAnalysis(filePath, options = {}) {
           codeExamples: finalCodeExamples.length > 0,
           guidelines: finalGuidelineSnippets.length > 0,
           prHistory: prContextAvailable,
+          feedbackFiltering: options.trackFeedback && Object.keys(feedbackData).length > 0,
         },
+        ...(filteredResults.metadata || {}),
       },
     };
   } catch (error) {
@@ -306,7 +326,7 @@ async function runAnalysis(filePath, options = {}) {
  * @returns {Object} Context for LLM
  */
 function prepareContextForLLM(filePath, content, language, finalCodeExamples, finalGuidelineSnippets, prCommentContext = [], options = {}) {
-  const { customDocs, relevantCustomDocChunks } = options;
+  const { customDocs, relevantCustomDocChunks, feedbackData } = options;
 
   // Extract file name and directory
   const fileName = path.basename(filePath);
@@ -349,6 +369,21 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
     });
   }
 
+  // Add feedback context if available
+  const dismissedPatterns = feedbackData ? extractDismissedPatterns(feedbackData, { maxPatterns: 10 }) : [];
+  if (dismissedPatterns.length > 0) {
+    contextSections.push({
+      title: 'Dismissed Issue Patterns',
+      description: 'Types of issues previously dismissed or marked as not relevant by users',
+      items: dismissedPatterns.map((pattern, index) => ({
+        index: index + 1,
+        issue: pattern.issue,
+        reason: pattern.reason,
+        sentiment: pattern.sentiment,
+      })),
+    });
+  }
+
   return {
     file: {
       path: filePath,
@@ -383,10 +418,12 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
     codeExamples,
     guidelineSnippets,
     customDocs: relevantCustomDocChunks || customDocs, // Use relevant chunks if available, fallback to full docs
+    feedbackContext: generateFeedbackContext(dismissedPatterns), // Add feedback context for LLM
     metadata: {
       hasCodeExamples: finalCodeExamples.length > 0,
       hasGuidelines: finalGuidelineSnippets.length > 0,
       hasPRHistory: prCommentContext.length > 0,
+      hasFeedbackContext: dismissedPatterns.length > 0,
       analysisTimestamp: new Date().toISOString(),
       reviewType: reviewType,
       isPRReview: options.isPRReview || false,
@@ -501,7 +538,7 @@ async function sendPromptToLLM(prompt, llmOptions) {
  * @returns {string} Analysis prompt
  */
 function generateAnalysisPrompt(context) {
-  const { file, codeExamples, guidelineSnippets, customDocs } = context;
+  const { file, codeExamples, guidelineSnippets, customDocs, feedbackContext } = context;
 
   // Format code examples
   const formattedCodeExamples =
@@ -691,6 +728,8 @@ CONTEXT B: SIMILAR CODE EXAMPLES FROM PROJECT
 ${formattedCodeExamples}
 
 ${prHistorySection}
+
+${feedbackContext || ''}
 
 INSTRUCTIONS:
 
@@ -2233,6 +2272,58 @@ async function gatherUnifiedContextForPR(prFiles, options = {}) {
     guidelines: deduplicatedGuidelines,
     prComments: deduplicatedPRComments,
     customDocChunks: deduplicatedCustomDocChunks,
+  };
+}
+
+/**
+ * Filter analysis results based on feedback data
+ *
+ * @param {Object} analysisResults - Raw analysis results from LLM
+ * @param {Object} feedbackData - Loaded feedback data
+ * @param {Object} options - Filtering options
+ * @returns {Object} Filtered analysis results
+ */
+function filterAnalysisResults(analysisResults, feedbackData, options = {}) {
+  const { similarityThreshold = 0.7, verbose = false } = options;
+
+  if (!analysisResults || !analysisResults.issues || !Array.isArray(analysisResults.issues)) {
+    return analysisResults;
+  }
+
+  const originalCount = analysisResults.issues.length;
+
+  // Filter issues based on feedback
+  const filteredIssues = analysisResults.issues.filter((issue, index) => {
+    const issueDescription = issue.description || issue.summary || '';
+    const shouldSkip = shouldSkipSimilarIssue(issueDescription, feedbackData, {
+      similarityThreshold,
+      verbose,
+    });
+
+    if (shouldSkip && verbose) {
+      console.log(chalk.yellow(`   Filtered issue ${index + 1}: "${issueDescription.substring(0, 50)}..."`));
+    }
+
+    return !shouldSkip;
+  });
+
+  const filteredCount = originalCount - filteredIssues.length;
+
+  if (verbose && filteredCount > 0) {
+    console.log(chalk.green(`✅ Filtered ${filteredCount} dismissed issues, ${filteredIssues.length} remaining`));
+  }
+
+  return {
+    ...analysisResults,
+    issues: filteredIssues,
+    metadata: {
+      ...analysisResults.metadata,
+      feedbackFiltering: {
+        originalIssueCount: originalCount,
+        filteredIssueCount: filteredCount,
+        finalIssueCount: filteredIssues.length,
+      },
+    },
   };
 }
 

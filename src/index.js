@@ -60,6 +60,9 @@ program
     '--doc <specs...>',
     'A document to provide custom instructions to the LLM (e.g., "Engineering Guidelines:./docs/guidelines.md"). Can be specified multiple times.'
   )
+  .option('--feedback-path <path>', 'Path to feedback artifacts directory for filtering dismissed issues')
+  .option('--track-feedback', 'Enable feedback-aware analysis to avoid previously dismissed issues')
+  .option('--feedback-threshold <number>', 'Similarity threshold for feedback filtering (0-1)', parseFloat, 0.7)
   .action(runCodeReview); // Assumes runCodeReview function exists and is correct
 
 // Existing Embeddings commands (ensure they are present and correct)
@@ -156,6 +159,8 @@ Examples:
   $ ai-code-review analyze --doc "Our Eng Guidelines:./ENGINEERING_GUIDELINES.md" --file src/utils/validation.ts
   $ ai-code-review analyze --diff-with feature-branch -d /path/to/repo
   $ ai-code-review analyze --output json > review-results.json
+  $ ai-code-review analyze --track-feedback --feedback-path ./feedback-artifacts --file src/utils/validation.ts
+  $ ai-code-review analyze --track-feedback --feedback-threshold 0.8 -b main
   $ ai-code-review embeddings:generate --directory src
   $ ai-code-review embeddings:generate --exclude "**/*.test.js" "**/*.spec.js"
   $ ai-code-review embeddings:generate --exclude-file .embedignore
@@ -327,6 +332,10 @@ async function runCodeReview(options) {
     projectPath: projectPath, // Add project path for embedding searches
     directory: options.directory, // Also pass the directory option
     customDocs,
+    // Feedback options
+    feedbackPath: options.feedbackPath,
+    trackFeedback: options.trackFeedback,
+    feedbackThreshold: options.feedbackThreshold,
     // Add any other relevant options here
   };
 

@@ -81,7 +81,7 @@ inputs:
   feedback-artifact-name:
     description: 'Name of the feedback artifact'
     required: false
-    default: 'review-feedback'
+    default: 'ai-review-feedback-${{ github.repository_id }}'
 
 outputs:
   # Review Results
@@ -160,10 +160,10 @@ runs:
       uses: dawidd6/action-download-artifact@v11
       with:
         name: ${{ inputs.feedback-artifact-name }}
-        path: ${{ github.workspace }}/.ai-feedback/
+        path: ${{ github.workspace }}/.ai-feedback
         github_token: ${{ github.token }}
         workflow_conclusion: success
-        if_no_artifact_found: ignore
+        if_no_artifact_found: warn
       continue-on-error: true
 
     - name: Run AI Code Review
@@ -226,6 +226,15 @@ runs:
               CLI_ARGS="$CLI_ARGS --doc \"$doc\""
             fi
           done
+        fi
+
+        # Add feedback parameters if feedback tracking is enabled
+        if [ "${{ inputs.track-feedback }}" = "true" ]; then
+          CLI_ARGS="$CLI_ARGS --track-feedback"
+          CLI_ARGS="$CLI_ARGS --feedback-path \"$GITHUB_WORKSPACE/.ai-feedback\""
+          if [ -n "${{ inputs.similarity-threshold }}" ]; then
+            CLI_ARGS="$CLI_ARGS --feedback-threshold ${{ inputs.similarity-threshold }}"
+          fi
         fi
 
         # Run the AI code review
@@ -317,6 +326,17 @@ runs:
         script: |
           const script = await import('${{ github.action_path }}/post-comments.js');
           await script.default({ github, context, core });
+
+    - name: Upload feedback artifact
+      if: ${{ inputs.track-feedback == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.feedback-artifact-name }}
+        path: ${{ steps.setup-tool.outputs.tool-root }}/feedback-*.json
+        include-hidden-files: true
+        retention-days: 30
+        if-no-files-found: ignore
+      continue-on-error: true
 
     - name: Upload review report
       uses: actions/upload-artifact@v4

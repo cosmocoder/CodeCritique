@@ -4,7 +4,36 @@
  */
 
 import fs from 'fs';
+import path from 'path';
+import { shouldSkipSimilarIssue, loadFeedbackData } from '../../../src/feedback-loader.js';
 
+/**
+ * Main function for posting CodeCritique review comments to GitHub Pull Requests.
+ *
+ * Features:
+ * - Posts inline code review comments with feedback tracking
+ * - Analyzes user feedback (reactions, replies) for conversation auto-resolution
+ * - Implements feedback-aware filtering to prevent reposting dismissed suggestions
+ * - Manages comment lifecycle (creation, preservation, cleanup)
+ * - Supports fallback to general PR comments when inline comments fail
+ * - Generates summary comments with analysis metrics
+ * - Saves feedback artifacts for cross-workflow learning
+ *
+ * @param {Object} params - GitHub Actions context and tools
+ * @param {Object} params.github - GitHub API client (Octokit)
+ * @param {Object} params.context - GitHub Actions workflow context
+ * @param {Object} params.core - GitHub Actions core utilities for outputs/logging
+ *
+ * @async
+ * @function
+ * @returns {Promise<void>} Resolves when comment posting is complete
+ *
+ * @throws {Error} If comment posting fails, sets action as failed with error message
+ *
+ * @example
+ * // Called automatically by GitHub Actions
+ * await postComments({ github, context, core });
+ */
 export default async ({ github, context, core }) => {
   try {
     // Get environment variables
@@ -14,73 +43,142 @@ export default async ({ github, context, core }) => {
     const analysisTime = process.env.ANALYSIS_TIME || 'N/A';
     const reviewOutputPath = process.env.REVIEW_OUTPUT_PATH;
     const trackFeedback = process.env.INPUT_TRACK_FEEDBACK === 'true';
-    const feedbackArtifactName = process.env.INPUT_FEEDBACK_ARTIFACT_NAME || 'review-feedback';
 
     console.log(`💬 Processing review results for PR #${context.issue.number}`);
 
-    // Feedback tracking functions
-    const loadFeedbackData = async () => {
-      if (!trackFeedback) return {};
-
-      try {
-        // Try to load previous feedback from artifacts
-        const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
-          owner: context.repo.owner,
-          repo: context.repo.repo,
-          run_id: context.runId,
-        });
-
-        const feedbackArtifact = artifacts.artifacts.find((a) => a.name === feedbackArtifactName);
-        if (feedbackArtifact) {
-          console.log(`📥 Found existing feedback artifact: ${feedbackArtifact.name}`);
-          // In a real implementation, we would download and parse the artifact
-          // For now, return empty object as GitHub API doesn't easily allow artifact download in actions
-          return {};
-        }
-
-        console.log('📭 No previous feedback artifact found');
-        return {};
-      } catch (error) {
-        console.log(`⚠️ Error loading feedback data: ${error.message}`);
-        return {};
-      }
-    };
-
-    const analyzeFeedback = async (commentId) => {
+    const analyzeFeedback = async (commentId, commentBody = '') => {
       if (!trackFeedback) return null;
 
       try {
+        // Determine if this is a review comment or issue comment
+        const isReviewComment = commentBody !== '';
+
         // Check for user reactions
-        const { data: reactions } = await github.rest.reactions.listForIssueComment({
-          owner: context.repo.owner,
-          repo: context.repo.repo,
-          comment_id: commentId,
-        });
+        const reactions = isReviewComment
+          ? await github.rest.reactions.listForPullRequestReviewComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: commentId,
+            })
+          : await github.rest.reactions.listForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: commentId,
+            });
 
         // Analyze reactions for feedback
-        const positiveReactions = reactions.filter((r) => ['+1', 'heart', 'hooray'].includes(r.content)).length;
-        const negativeReactions = reactions.filter((r) => ['-1', 'confused', 'eyes'].includes(r.content)).length;
+        const positiveReactions = reactions.data.filter((r) => ['+1', 'heart', 'hooray'].includes(r.content)).length;
+        const negativeReactions = reactions.data.filter((r) => ['-1', 'confused', 'eyes'].includes(r.content)).length;
 
         // Get subsequent comments to check for replies
-        const { data: allComments } = await github.rest.issues.listComments({
-          issue_number: context.issue.number,
-          owner: context.repo.owner,
-          repo: context.repo.repo,
-        });
+        const allComments = isReviewComment
+          ? await github.rest.pulls.listReviewComments({
+              pull_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            })
+          : await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
 
-        // Find comments that might be replies (within 5 comments after the AI comment)
-        const commentIndex = allComments.findIndex((c) => c.id === commentId);
-        const potentialReplies = allComments.slice(commentIndex + 1, commentIndex + 6);
+        const dismissiveKeywords = ['disagree', 'not relevant', 'false positive', 'ignore', 'resolved'];
+        let userReplies = [];
 
-        const userReplies = potentialReplies.filter(
-          (c) =>
-            c.user.login !== 'github-actions[bot]' &&
-            (c.body.toLowerCase().includes('disagree') ||
-              c.body.toLowerCase().includes('not relevant') ||
-              c.body.toLowerCase().includes('false positive') ||
-              c.body.toLowerCase().includes('ignore') ||
-              c.body.toLowerCase().includes('resolved'))
-        );
+        if (isReviewComment) {
+          // For review comments, find threaded replies using in_reply_to_id
+          userReplies = allComments.data.filter(
+            (c) =>
+              c.in_reply_to_id === commentId &&
+              c.user.login !== 'github-actions[bot]' &&
+              dismissiveKeywords.some((keyword) => c.body.toLowerCase().includes(keyword))
+          );
+        } else {
+          // For issue comments, find replies within 5 comments after the AI comment
+          const commentIndex = allComments.data.findIndex((c) => c.id === commentId);
+          const potentialReplies = allComments.data.slice(commentIndex + 1, commentIndex + 6);
+          userReplies = potentialReplies.filter(
+            (c) => c.user.login !== 'github-actions[bot]' && dismissiveKeywords.some((keyword) => c.body.toLowerCase().includes(keyword))
+          );
+        }
+
+        // Check if user provided dismissive feedback
+        const hasDismissiveFeedback = userReplies.length > 0 || negativeReactions > positiveReactions;
+
+        // Auto-resolve conversation if user provided dismissive feedback
+        if (hasDismissiveFeedback && isReviewComment) {
+          try {
+            console.log(`🔧 Auto-resolving conversation for comment ${commentId} due to dismissive feedback`);
+
+            // First, get the review thread information to get the thread ID
+            const threadQuery = `
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $number) {
+                    reviewThreads(first: 100) {
+                      nodes {
+                        id
+                        comments(first: 1) {
+                          nodes {
+                            databaseId
+                          }
+                        }
+                        isResolved
+                      }
+                    }
+                  }
+                }
+              }
+            `;
+
+            const threadData = await github.graphql(threadQuery, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              number: context.issue.number,
+            });
+
+            // Find the thread that contains our comment
+            const thread = threadData.repository.pullRequest.reviewThreads.nodes.find((t) =>
+              t.comments.nodes.some((c) => c.databaseId === parseInt(commentId))
+            );
+
+            if (thread && !thread.isResolved) {
+              // Post acknowledgment comment
+              await github.rest.pulls.createReplyForReviewComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                comment_id: commentId,
+                body: '✅ **Conversation resolved based on user feedback**\n\n*This suggestion has been marked as resolved due to user feedback indicating it should be ignored.*',
+              });
+
+              // Resolve the conversation thread
+              const resolveMutation = `
+                mutation($threadId: ID!) {
+                  resolveReviewThread(input: { threadId: $threadId }) {
+                    thread {
+                      id
+                      isResolved
+                    }
+                  }
+                }
+              `;
+
+              await github.graphql(resolveMutation, {
+                threadId: thread.id,
+              });
+
+              console.log(`✅ Successfully resolved conversation thread for comment ${commentId}`);
+            } else if (thread && thread.isResolved) {
+              console.log(`ℹ️ Conversation thread for comment ${commentId} is already resolved`);
+            } else {
+              console.log(`⚠️ Could not find review thread for comment ${commentId}`);
+            }
+          } catch (resolveError) {
+            console.log(`⚠️ Could not auto-resolve conversation for comment ${commentId}: ${resolveError.message}`);
+          }
+        }
 
         return {
           commentId,
@@ -93,6 +191,7 @@ export default async ({ github, context, core }) => {
           })),
           overallSentiment:
             positiveReactions > negativeReactions ? 'positive' : negativeReactions > positiveReactions ? 'negative' : 'neutral',
+          contextAdded: hasDismissiveFeedback,
         };
       } catch (error) {
         console.log(`⚠️ Error analyzing feedback for comment ${commentId}: ${error.message}`);
@@ -115,16 +214,33 @@ export default async ({ github, context, core }) => {
             positiveCount: Object.values(feedbackData).filter((f) => f?.overallSentiment === 'positive').length,
             negativeCount: Object.values(feedbackData).filter((f) => f?.overallSentiment === 'negative').length,
             repliesCount: Object.values(feedbackData).reduce((acc, f) => acc + (f?.userReplies?.length || 0), 0),
+            contextAddedCount: Object.values(feedbackData).filter((f) => f?.contextAdded).length,
           },
         };
 
-        // Save to file for artifact upload
-        const feedbackPath = `feedback-${context.issue.number}-${Date.now()}.json`;
-        fs.writeFileSync(feedbackPath, JSON.stringify(feedbackReport, null, 2));
+        // Save to both locations: .ai-feedback for CLI and tool root for upload
+        const toolRoot = process.env.REVIEW_OUTPUT_PATH ? path.dirname(process.env.REVIEW_OUTPUT_PATH) : '.';
+        const feedbackDir = path.join(process.env.GITHUB_WORKSPACE || process.cwd(), '.ai-feedback');
+        const feedbackFileName = `feedback-${context.issue.number}-${Date.now()}.json`;
 
-        console.log(`💾 Saved feedback data to ${feedbackPath}`);
+        // Ensure feedback directory exists
+        if (!fs.existsSync(feedbackDir)) {
+          fs.mkdirSync(feedbackDir, { recursive: true });
+        }
+
+        // Save to .ai-feedback for CLI to find
+        const feedbackPath = path.join(feedbackDir, feedbackFileName);
+        // Also save to tool root for artifact upload
+        const uploadPath = path.join(toolRoot, feedbackFileName);
+
+        const feedbackJson = JSON.stringify(feedbackReport, null, 2);
+        fs.writeFileSync(feedbackPath, feedbackJson);
+        fs.writeFileSync(uploadPath, feedbackJson);
+
+        console.log(`💾 Saved feedback data to ${feedbackPath} (for CLI)`);
+        console.log(`💾 Saved feedback data to ${uploadPath} (for upload)`);
         core.setOutput('feedback-artifact-uploaded', 'true');
-        core.setOutput('feedback-report-path', feedbackPath);
+        core.setOutput('feedback-report-path', uploadPath);
 
         return feedbackReport;
       } catch (error) {
@@ -132,36 +248,6 @@ export default async ({ github, context, core }) => {
         core.setOutput('feedback-artifact-uploaded', 'false');
         return null;
       }
-    };
-
-    const shouldSkipSimilarIssue = (issueDescription, feedbackData) => {
-      if (!trackFeedback || !feedbackData) return false;
-
-      // Check if similar issues were previously dismissed
-      const dismissedIssues = Object.values(feedbackData).filter(
-        (f) =>
-          f?.overallSentiment === 'negative' ||
-          f?.userReplies?.some((r) => r.body.toLowerCase().includes('false positive') || r.body.toLowerCase().includes('not relevant'))
-      );
-
-      // Simple similarity check (in production, might use more sophisticated matching)
-      return dismissedIssues.some((dismissed) => {
-        if (!dismissed.originalIssue) return false;
-        const similarity = calculateSimilarity(issueDescription, dismissed.originalIssue);
-        return similarity > 0.7; // 70% similarity threshold
-      });
-    };
-
-    const calculateSimilarity = (text1, text2) => {
-      if (!text1 || !text2) return 0;
-
-      const words1 = text1.toLowerCase().split(/\s+/);
-      const words2 = text2.toLowerCase().split(/\s+/);
-
-      const commonWords = words1.filter((word) => words2.includes(word));
-      const totalWords = new Set([...words1, ...words2]).size;
-
-      return commonWords.length / totalWords;
     };
 
     const formatCodeInText = (text) => {
@@ -183,7 +269,8 @@ export default async ({ github, context, core }) => {
     };
 
     // Load existing feedback data
-    const existingFeedback = await loadFeedbackData();
+    const feedbackDir = path.join(process.env.GITHUB_WORKSPACE || process.cwd(), '.ai-feedback');
+    const existingFeedback = await loadFeedbackData(feedbackDir, { verbose: true });
     const currentFeedback = {};
 
     // Check if review output exists
@@ -199,9 +286,8 @@ export default async ({ github, context, core }) => {
     console.log('✅ JSON file is valid');
 
     const totalIssues = reviewData.summary?.totalIssues || 0;
-    const filesWithIssues = reviewData.summary?.filesWithIssues || 0;
 
-    console.log(`📊 Parsing results: ${totalIssues} issues, ${filesWithIssues} files`);
+    console.log(`📊 Parsing results: ${totalIssues} issues found`);
 
     // Get PR information
     const { data: pull } = await github.rest.pulls.get({
@@ -254,8 +340,9 @@ export default async ({ github, context, core }) => {
         const feedback = await analyzeFeedback(comment.id, comment.body);
         if (feedback) {
           // Store original issue description for similarity matching
-          const issueMatch = comment.body.match(/\*\*(.*?)\*\*/);
-          feedback.originalIssue = issueMatch ? issueMatch[1] : comment.body.substring(0, 100);
+          // Extract the actual issue description (the text after "**CodeCritique Review**")
+          const reviewHeaderMatch = comment.body.match(/\*\*CodeCritique Review\*\*\s*\n\n(.*?)(?:\n\n|\*\*|$)/s);
+          feedback.originalIssue = reviewHeaderMatch ? reviewHeaderMatch[1].trim() : comment.body.substring(0, 100);
           currentFeedback[comment.id] = feedback;
           console.log(`📝 Collected feedback for comment ${comment.id}: ${feedback.overallSentiment}`);
         }
@@ -264,7 +351,7 @@ export default async ({ github, context, core }) => {
       console.log(`📊 Collected feedback from ${Object.keys(currentFeedback).length} previous comments`);
     }
 
-    // Delete previous line comments
+    // Delete previous line comments (but preserve ones with user feedback)
     if (postComments) {
       console.log('🔄 Cleaning up previous line comments...');
 
@@ -278,13 +365,36 @@ export default async ({ github, context, core }) => {
         (comment) => comment.body.includes(uniqueCommentId) && comment.user.login === 'github-actions[bot]'
       );
 
+      let deletedCount = 0;
+      let preservedCount = 0;
+
       for (const comment of botReviewComments) {
-        await github.rest.pulls.deleteReviewComment({
-          owner: context.repo.owner,
-          repo: context.repo.repo,
-          comment_id: comment.id,
-        });
+        // Check if this comment has user feedback - if so, preserve it
+        const commentFeedback = currentFeedback[comment.id];
+        const hasUserInteraction =
+          commentFeedback &&
+          (commentFeedback.userReplies.length > 0 || commentFeedback.positiveReactions > 0 || commentFeedback.negativeReactions > 0);
+
+        if (hasUserInteraction) {
+          console.log(`📌 Preserving comment ${comment.id} due to user feedback`);
+          preservedCount++;
+        } else {
+          // No user interaction - safe to delete
+          try {
+            await github.rest.pulls.deleteReviewComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: comment.id,
+            });
+            deletedCount++;
+          } catch (deleteError) {
+            console.log(`⚠️ Could not delete comment ${comment.id}: ${deleteError.message}`);
+          }
+        }
       }
+
+      console.log(`🗑️ Deleted ${deletedCount} comments without user feedback`);
+      console.log(`📌 Preserved ${preservedCount} comments with user feedback`);
     }
 
     // Post or update summary comment
@@ -367,7 +477,12 @@ ${uniqueCommentId}`;
           if (commentsPosted >= maxComments) break;
 
           // Skip similar issues that received negative feedback
-          if (shouldSkipSimilarIssue(issue.description, existingFeedback)) {
+          if (
+            shouldSkipSimilarIssue(issue.description, existingFeedback, {
+              similarityThreshold: 0.7,
+              verbose: true,
+            })
+          ) {
             console.log(`⏭️ Skipping similar issue based on previous feedback: ${issue.description.substring(0, 50)}...`);
             continue;
           }
@@ -461,6 +576,7 @@ ${commentBody}`,
         console.log(`  - Positive reactions: ${feedbackReport.summary.positiveCount}`);
         console.log(`  - Negative reactions: ${feedbackReport.summary.negativeCount}`);
         console.log(`  - User replies: ${feedbackReport.summary.repliesCount}`);
+        console.log(`  - Resolution context added: ${feedbackReport.summary.contextAddedCount}`);
       }
     }
 
