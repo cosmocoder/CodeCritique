@@ -33,16 +33,6 @@ inputs:
     required: false
     default: 'false'
 
-  create-backup:
-    description: 'Create backup artifacts before deletion'
-    required: false
-    default: 'false'
-
-  backup-retention-days:
-    description: 'Retention days for backup artifacts'
-    required: false
-    default: '7'
-
   # Selective Cleanup Options
   artifact-name-pattern:
     description: 'Custom artifact name pattern for selective cleanup (supports wildcards)'
@@ -93,15 +83,6 @@ outputs:
     description: 'List of artifacts that failed to delete'
     value: ${{ steps.cleanup.outputs.failed-deletions }}
 
-  # Backup Information
-  backup-artifacts-created:
-    description: 'Number of backup artifacts created'
-    value: ${{ steps.cleanup.outputs.backup-count }}
-
-  backup-artifact-names:
-    description: 'Names of created backup artifacts'
-    value: ${{ steps.cleanup.outputs.backup-names }}
-
   # Performance Metrics
   processing-time:
     description: 'Total time taken for cleanup process (seconds)'
@@ -149,12 +130,6 @@ runs:
           exit 1
         fi
 
-        # Validate backup-retention-days
-        if ! [[ "${{ inputs.backup-retention-days }}" =~ ^[0-9]+$ ]] || [ "${{ inputs.backup-retention-days }}" -le 0 ]; then
-          echo "❌ Error: backup-retention-days must be a positive integer, got: ${{ inputs.backup-retention-days }}"
-          exit 1
-        fi
-
         echo "✅ Input validation passed"
 
     - name: Start Timing
@@ -175,9 +150,7 @@ runs:
         ARTIFACTS_PROCESSED=0
         SPACE_RECLAIMED=0
         ERRORS_COUNT=0
-        BACKUP_COUNT=0
         FAILED_DELETIONS=""
-        BACKUP_NAMES=""
         CLEANUP_SUMMARY=""
         REPORT_PATH="cleanup-report-$(date +%Y%m%d-%H%M%S).json"
 
@@ -189,12 +162,10 @@ runs:
             "repository": "${{ inputs.repository }}",
             "cleanup_type": "${{ inputs.cleanup-type }}",
             "older_than_days": ${{ inputs.older-than-days }},
-            "dry_run": ${{ inputs.dry-run }},
-            "create_backup": ${{ inputs.create-backup }}
+            "dry_run": ${{ inputs.dry-run }}
           },
           "artifacts_found": [],
           "artifacts_deleted": [],
-          "artifacts_backed_up": [],
           "errors": []
         }
         EOF
@@ -208,13 +179,13 @@ runs:
             PATTERNS="ai-model-cache- ai-fastembed-cache-"
             ;;
           "feedback")
-            PATTERNS="review-feedback ai-feedback-"
+            PATTERNS="ai-review-feedback-"
             ;;
           "reports")
             PATTERNS="ai-review-report-"
             ;;
           "all")
-            PATTERNS="ai-code-review-embeddings- ai-model-cache- ai-fastembed-cache- review-feedback ai-feedback- ai-review-report-"
+            PATTERNS="ai-code-review-embeddings- ai-model-cache- ai-fastembed-cache- ai-review-feedback- ai-review-report-"
             ;;
           *)
             echo "❌ Unknown cleanup type: ${{ inputs.cleanup-type }}"
@@ -237,7 +208,7 @@ runs:
         echo "📦 Fetching artifacts from repository: ${{ inputs.repository }}"
 
         # Use GitHub REST API to get artifacts
-        ARTIFACTS_JSON=$(curl -s -H "Authorization: Bearer ${{ inputs.github-token }}" \
+        ARTIFACTS_JSON=$(curl -s -H "Authorization: Bearer ${{ github.token }}" \
           -H "Accept: application/vnd.github.v3+json" \
           "https://api.github.com/repos/${{ inputs.repository }}/actions/artifacts?per_page=100" \
           | jq -r '.artifacts[]')
@@ -249,8 +220,6 @@ runs:
           echo "summary=No artifacts found to cleanup" >> $GITHUB_OUTPUT
           echo "errors-count=0" >> $GITHUB_OUTPUT
           echo "failed-deletions=" >> $GITHUB_OUTPUT
-          echo "backup-count=0" >> $GITHUB_OUTPUT
-          echo "backup-names=" >> $GITHUB_OUTPUT
           echo "artifacts-processed=0" >> $GITHUB_OUTPUT
           echo "report-path=$REPORT_PATH" >> $GITHUB_OUTPUT
           exit 0
@@ -328,11 +297,6 @@ runs:
           # Add to report
           echo "$artifact" | jq '. + {"matched": true}' >> artifacts_found.tmp
 
-          # Create backup if requested (will be handled by separate step)
-          if [ "${{ inputs.create-backup }}" = "true" ] && [ "${{ inputs.dry-run }}" = "false" ]; then
-            echo "💾 Marking artifact for backup: $ARTIFACT_NAME"
-            echo "$ARTIFACT_NAME" >> artifacts_to_backup.txt
-          fi
 
           # Perform deletion
           if [ "${{ inputs.dry-run }}" = "true" ]; then
@@ -353,7 +317,7 @@ runs:
             echo "🗑️ Deleting artifact: $ARTIFACT_NAME"
 
             if curl -s -X DELETE \
-              -H "Authorization: Bearer ${{ inputs.github-token }}" \
+              -H "Authorization: Bearer ${{ github.token }}" \
               -H "Accept: application/vnd.github.v3+json" \
               "https://api.github.com/repos/${{ inputs.repository }}/actions/artifacts/${ARTIFACT_ID}" >/dev/null 2>&1; then
               echo "✅ Successfully deleted: $ARTIFACT_NAME"
@@ -395,15 +359,13 @@ runs:
           echo "    \"repository\": \"${{ inputs.repository }}\","
           echo "    \"cleanup_type\": \"${{ inputs.cleanup-type }}\","
           echo "    \"older_than_days\": ${{ inputs.older-than-days }},"
-          echo "    \"dry_run\": ${{ inputs.dry-run }},"
-          echo "    \"create_backup\": ${{ inputs.create-backup }}"
+          echo "    \"dry_run\": ${{ inputs.dry-run }}"
           echo "  },"
           echo "  \"results\": {"
           echo "    \"artifacts_processed\": $ARTIFACTS_PROCESSED,"
           echo "    \"artifacts_deleted\": $ARTIFACTS_DELETED,"
           echo "    \"space_reclaimed_mb\": $SPACE_RECLAIMED,"
-          echo "    \"errors_count\": $ERRORS_COUNT,"
-          echo "    \"backup_count\": $BACKUP_COUNT"
+          echo "    \"errors_count\": $ERRORS_COUNT"
           echo "  },"
 
           echo -n "  \"artifacts_found\": ["
@@ -435,29 +397,10 @@ runs:
         echo "summary=$CLEANUP_SUMMARY" >> $GITHUB_OUTPUT
         echo "errors-count=$ERRORS_COUNT" >> $GITHUB_OUTPUT
         echo "failed-deletions=$FAILED_DELETIONS" >> $GITHUB_OUTPUT
-        echo "backup-count=$BACKUP_COUNT" >> $GITHUB_OUTPUT
-        echo "backup-names=$BACKUP_NAMES" >> $GITHUB_OUTPUT
         echo "artifacts-processed=$ARTIFACTS_PROCESSED" >> $GITHUB_OUTPUT
         echo "report-path=$REPORT_PATH" >> $GITHUB_OUTPUT
 
         echo "📊 Cleanup Summary: $CLEANUP_SUMMARY"
-
-    - name: Create Artifact Backups
-      if: inputs.create-backup == 'true' && inputs.dry-run == 'false'
-      uses: ./.github/actions/manage-ai-artifacts
-      with:
-        operation: download
-        embeddings-pattern: ${{ inputs.artifact-name-pattern || 'ai-code-review-embeddings-*' }}
-        cache-pattern: ${{ inputs.artifact-name-pattern || 'ai-fastembed-cache-*' }}
-        github-token: ${{ inputs.github-token }}
-
-    - name: Upload Backup Artifacts
-      if: inputs.create-backup == 'true' && inputs.dry-run == 'false'
-      uses: ./.github/actions/manage-ai-artifacts
-      with:
-        operation: upload
-        retention-days: ${{ inputs.backup-retention-days }}
-        github-token: ${{ inputs.github-token }}
 
     - name: Calculate Processing Time
       id: timing
@@ -496,9 +439,6 @@ runs:
         echo "| **Processing Time** | ${{ steps.timing.outputs.duration }} seconds |" >> $GITHUB_STEP_SUMMARY
         echo "| **Errors** | ${{ steps.cleanup.outputs.errors-count }} |" >> $GITHUB_STEP_SUMMARY
 
-        if [ "${{ inputs.create-backup }}" = "true" ]; then
-          echo "| **Backups Created** | ${{ steps.cleanup.outputs.backup-count }} |" >> $GITHUB_STEP_SUMMARY
-        fi
 
         if [ ${{ steps.cleanup.outputs.errors-count }} -gt 0 ]; then
           echo "" >> $GITHUB_STEP_SUMMARY
