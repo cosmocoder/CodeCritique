@@ -491,6 +491,8 @@ ${uniqueCommentId}`;
 
           let commentBody = `${emoji} **CodeCritique Review**
 
+*Severity: ${severity}*
+
 ${formatCodeInText(issue.description)}`;
 
           if (issue.suggestion) {
@@ -499,10 +501,6 @@ ${formatCodeInText(issue.description)}`;
 **Suggestion:**
 ${formatCodeInText(issue.suggestion)}`;
           }
-
-          commentBody += `
-
-*Severity: ${severity}*`;
 
           // Add feedback tracking notice if enabled
           if (trackFeedback) {
