@@ -40,7 +40,6 @@ export default async ({ github, context, core }) => {
     const postComments = process.env.INPUT_POST_COMMENTS === 'true';
     const summaryComment = process.env.INPUT_SUMMARY_COMMENT === 'true';
     const maxComments = parseInt(process.env.INPUT_MAX_COMMENTS) || 25;
-    const analysisTime = process.env.ANALYSIS_TIME || 'N/A';
     const reviewOutputPath = process.env.REVIEW_OUTPUT_PATH;
     const trackFeedback = process.env.INPUT_TRACK_FEEDBACK === 'true';
 
@@ -403,7 +402,6 @@ export default async ({ github, context, core }) => {
 
 **Files Analyzed:** ${reviewData.summary?.totalFilesReviewed || 'N/A'}
 **Issues Found:** ${totalIssues}
-**Analysis Time:** ${analysisTime}s
 
 ${
   totalIssues > 0

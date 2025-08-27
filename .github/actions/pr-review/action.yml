@@ -48,9 +48,6 @@ outputs:
     value: ${{ steps.review.outputs.files-analyzed }}
 
   # Performance Metrics
-  analysis-time:
-    description: 'Time taken for analysis (seconds)'
-    value: ${{ steps.review.outputs.analysis-time }}
 
   embedding-cache-hit:
     description: 'Whether embeddings were found and used'
@@ -173,18 +170,13 @@ runs:
         echo "Command: node src/index.js $CLI_ARGS"
 
         # Execute the command and capture output
-        START_TIME=$(date +%s)
-
         # Run the CLI - JSON output goes to file, logs to console
         eval "node src/index.js $CLI_ARGS" || {
           echo "❌ AI Code Review failed"
           exit 1
         }
 
-        END_TIME=$(date +%s)
-        ANALYSIS_TIME=$((END_TIME - START_TIME))
-
-        echo "✅ AI Code Review completed in ${ANALYSIS_TIME}s"
+        echo "✅ AI Code Review completed"
 
         # Count results and set outputs from JSON
         FILES_ANALYZED=$(jq '.summary.totalFilesReviewed // 0' review_output.json 2>/dev/null || echo "0")
@@ -193,7 +185,6 @@ runs:
         # Set action outputs
         echo "files-analyzed=$FILES_ANALYZED" >> $GITHUB_OUTPUT
         echo "issues-found=$ISSUES_FOUND" >> $GITHUB_OUTPUT
-        echo "analysis-time=$ANALYSIS_TIME" >> $GITHUB_OUTPUT
         # Check if embeddings were successfully downloaded
         EMBEDDING_AVAILABLE="${{ steps.setup-tool.outputs.embeddings-available }}"
 
@@ -217,7 +208,6 @@ runs:
           echo "📊 Review Results:"
           echo "  Files analyzed: $FILES_ANALYZED"
           echo "  Issues found: $ISSUES_FOUND"
-          echo "  Analysis time: ${ANALYSIS_TIME}s"
         fi
 
         # Show the actual output
@@ -234,7 +224,6 @@ runs:
         INPUT_OUTPUT_FORMAT: 'json'
         INPUT_TRACK_FEEDBACK: 'true'
         INPUT_FEEDBACK_ARTIFACT_NAME: ${{ env.FEEDBACK_ARTIFACT_NAME }}
-        ANALYSIS_TIME: ${{ steps.review.outputs.analysis-time }}
         REVIEW_OUTPUT_PATH: ${{ steps.setup-tool.outputs.tool-root }}/review_output.json
       with:
         github-token: ${{ github.token }}
