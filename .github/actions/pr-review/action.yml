@@ -11,11 +11,6 @@ inputs:
     description: 'Anthropic API key for Claude models'
     required: true
 
-  output-format:
-    description: 'Output format (text, json, markdown)'
-    required: false
-    default: 'json'
-
   verbose:
     description: 'Show verbose output'
     required: false
@@ -25,20 +20,8 @@ inputs:
     description: 'LLM model to use (e.g., claude-sonnet-4-20250514)'
     required: false
 
-  temperature:
-    description: 'LLM temperature'
-    required: false
-
   max-tokens:
     description: 'LLM max tokens'
-    required: false
-
-  similarity-threshold:
-    description: 'Threshold for finding similar code examples'
-    required: false
-
-  max-examples:
-    description: 'Max similar code examples to use'
     required: false
 
   concurrency:
@@ -49,39 +32,6 @@ inputs:
     description: 'Custom documents to provide LLM instructions (format: "title:path,title:path")'
     required: false
     default: ''
-
-  # Embedding Configuration
-  embedding-artifact-pattern:
-    description: 'Pattern to match embedding artifacts (defaults to repository-specific pattern)'
-    required: false
-    default: ''
-
-  # GitHub PR Integration
-  post-comments:
-    description: 'Post review comments to the PR'
-    required: false
-    default: 'true'
-
-  summary-comment:
-    description: 'Post a summary comment to the PR'
-    required: false
-    default: 'true'
-
-  max-comments:
-    description: 'Maximum number of review comments to post'
-    required: false
-    default: '25'
-
-  # Feedback Tracking
-  track-feedback:
-    description: 'Track user feedback on comments to improve future reviews'
-    required: false
-    default: 'true'
-
-  feedback-artifact-name:
-    description: 'Name of the feedback artifact'
-    required: false
-    default: 'ai-review-feedback-${{ github.repository_id }}'
 
 outputs:
   # Review Results
@@ -134,6 +84,8 @@ outputs:
 
 runs:
   using: 'composite'
+  env:
+    FEEDBACK_ARTIFACT_NAME: 'ai-review-feedback-${{ github.repository_id }}'
   steps:
     # Create a symlink to the action repository to access sibling composite actions.
     # This workaround is needed because GitHub Actions doesn't support relative paths
@@ -156,10 +108,9 @@ runs:
       run: rm -f "$GITHUB_WORKSPACE/.action-repo"
 
     - name: Download feedback artifacts
-      if: ${{ inputs.track-feedback == 'true' }}
       uses: dawidd6/action-download-artifact@v11
       with:
-        name: ${{ inputs.feedback-artifact-name }}
+        name: ${{ env.FEEDBACK_ARTIFACT_NAME }}
         path: ${{ github.workspace }}/.ai-feedback
         github_token: ${{ github.token }}
         workflow_conclusion: success
@@ -181,11 +132,8 @@ runs:
         # Build CLI command arguments - analyze workspace directly
         CLI_ARGS="analyze -b ${{ github.head_ref }} --directory \"$GITHUB_WORKSPACE\""
 
-        # Add output format and output file
-        CLI_ARGS="$CLI_ARGS --output ${{ inputs.output-format }}"
-        if [ "${{ inputs.output-format }}" = "json" ]; then
-          CLI_ARGS="$CLI_ARGS --output-file review_output.json"
-        fi
+        # Add output format and output file (always JSON)
+        CLI_ARGS="$CLI_ARGS --output json --output-file review_output.json"
 
         # Add verbose flag if enabled
         if [ "${{ inputs.verbose }}" = "true" ]; then
@@ -198,20 +146,8 @@ runs:
         fi
 
         # Only add optional parameters if they have values
-        if [ -n "${{ inputs.temperature }}" ]; then
-          CLI_ARGS="$CLI_ARGS --temperature ${{ inputs.temperature }}"
-        fi
-
         if [ -n "${{ inputs.max-tokens }}" ]; then
           CLI_ARGS="$CLI_ARGS --max-tokens ${{ inputs.max-tokens }}"
-        fi
-
-        if [ -n "${{ inputs.similarity-threshold }}" ]; then
-          CLI_ARGS="$CLI_ARGS --similarity-threshold ${{ inputs.similarity-threshold }}"
-        fi
-
-        if [ -n "${{ inputs.max-examples }}" ]; then
-          CLI_ARGS="$CLI_ARGS --max-examples ${{ inputs.max-examples }}"
         fi
 
         if [ -n "${{ inputs.concurrency }}" ]; then
@@ -228,14 +164,9 @@ runs:
           done
         fi
 
-        # Add feedback parameters if feedback tracking is enabled
-        if [ "${{ inputs.track-feedback }}" = "true" ]; then
-          CLI_ARGS="$CLI_ARGS --track-feedback"
-          CLI_ARGS="$CLI_ARGS --feedback-path \"$GITHUB_WORKSPACE/.ai-feedback\""
-          if [ -n "${{ inputs.similarity-threshold }}" ]; then
-            CLI_ARGS="$CLI_ARGS --feedback-threshold ${{ inputs.similarity-threshold }}"
-          fi
-        fi
+        # Add feedback parameters
+        CLI_ARGS="$CLI_ARGS --track-feedback"
+        CLI_ARGS="$CLI_ARGS --feedback-path \"$GITHUB_WORKSPACE/.ai-feedback\""
 
         # Run the AI code review
         echo "🤖 Running AI Code Review..."
@@ -244,36 +175,20 @@ runs:
         # Execute the command and capture output
         START_TIME=$(date +%s)
 
-        # Run the CLI - if JSON output, it will be saved to file directly
-        if [ "${{ inputs.output-format }}" = "json" ]; then
-          # JSON mode: output goes to file, logs to console
-          eval "node src/index.js $CLI_ARGS" || {
-            echo "❌ AI Code Review failed"
-            exit 1
-          }
-        else
-          # Non-JSON mode: capture all output
-          eval "node src/index.js $CLI_ARGS" > review_output.txt 2>&1 || {
-            echo "❌ AI Code Review failed"
-            cat review_output.txt
-            exit 1
-          }
-        fi
+        # Run the CLI - JSON output goes to file, logs to console
+        eval "node src/index.js $CLI_ARGS" || {
+          echo "❌ AI Code Review failed"
+          exit 1
+        }
 
         END_TIME=$(date +%s)
         ANALYSIS_TIME=$((END_TIME - START_TIME))
 
         echo "✅ AI Code Review completed in ${ANALYSIS_TIME}s"
 
-        # Count results and set outputs
-        if [ "${{ inputs.output-format }}" = "json" ]; then
-          # Parse the JSON output with summary and details
-          FILES_ANALYZED=$(jq '.summary.totalFilesReviewed // 0' review_output.json 2>/dev/null || echo "0")
-          ISSUES_FOUND=$(jq '.summary.totalIssues // 0' review_output.json 2>/dev/null || echo "0")
-        else
-          FILES_ANALYZED="1"
-          ISSUES_FOUND="0"
-        fi
+        # Count results and set outputs from JSON
+        FILES_ANALYZED=$(jq '.summary.totalFilesReviewed // 0' review_output.json 2>/dev/null || echo "0")
+        ISSUES_FOUND=$(jq '.summary.totalIssues // 0' review_output.json 2>/dev/null || echo "0")
 
         # Set action outputs
         echo "files-analyzed=$FILES_ANALYZED" >> $GITHUB_OUTPUT
@@ -310,15 +225,15 @@ runs:
         cat review_output.json
 
     - name: Post PR Comments
-      if: ${{ github.event_name == 'pull_request' && (inputs.post-comments == 'true' || inputs.summary-comment == 'true') }}
+      if: ${{ github.event_name == 'pull_request' }}
       uses: actions/github-script@v7
       env:
-        INPUT_POST_COMMENTS: ${{ inputs.post-comments }}
-        INPUT_SUMMARY_COMMENT: ${{ inputs.summary-comment }}
-        INPUT_MAX_COMMENTS: ${{ inputs.max-comments }}
-        INPUT_OUTPUT_FORMAT: ${{ inputs.output-format }}
-        INPUT_TRACK_FEEDBACK: ${{ inputs.track-feedback }}
-        INPUT_FEEDBACK_ARTIFACT_NAME: ${{ inputs.feedback-artifact-name }}
+        INPUT_POST_COMMENTS: 'true'
+        INPUT_SUMMARY_COMMENT: 'true'
+        INPUT_MAX_COMMENTS: '25'
+        INPUT_OUTPUT_FORMAT: 'json'
+        INPUT_TRACK_FEEDBACK: 'true'
+        INPUT_FEEDBACK_ARTIFACT_NAME: ${{ env.FEEDBACK_ARTIFACT_NAME }}
         ANALYSIS_TIME: ${{ steps.review.outputs.analysis-time }}
         REVIEW_OUTPUT_PATH: ${{ steps.setup-tool.outputs.tool-root }}/review_output.json
       with:
@@ -328,10 +243,9 @@ runs:
           await script.default({ github, context, core });
 
     - name: Upload feedback artifact
-      if: ${{ inputs.track-feedback == 'true' }}
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ inputs.feedback-artifact-name }}
+        name: ${{ env.FEEDBACK_ARTIFACT_NAME }}
         path: ${{ steps.setup-tool.outputs.tool-root }}/feedback-*.json
         include-hidden-files: true
         retention-days: 30
