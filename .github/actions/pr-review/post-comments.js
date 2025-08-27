@@ -249,42 +249,6 @@ export default async ({ github, context, core }) => {
       }
     };
 
-    const formatCodeInText = (text) => {
-      if (!text) return text;
-
-      return (
-        text
-          // Convert single quotes around code-like elements to backticks
-          .replace(/'([a-zA-Z][a-zA-Z0-9_-]*[a-zA-Z0-9])'/g, '`$1`') // 'timeout-minutes' -> `timeout-minutes`
-          .replace(/'([a-zA-Z][a-zA-Z0-9]*_[a-zA-Z0-9_]*[a-zA-Z0-9])'/g, '`$1`') // 'snake_case' -> `snake_case`
-          .replace(
-            /'(if|else|function|class|const|let|var|return|import|export|async|await|try|catch|throw|for|while|do|switch|case|break|continue|typeof|instanceof|new|this|super|extends|implements|public|private|protected|static|abstract|interface|namespace|enum|type|declare|module|require|default)'/g,
-            '`$1`'
-          ) // JavaScript/TypeScript keywords
-          .replace(
-            /'(permissions|timeout-minutes|runs-on|uses|with|env|if|steps|name|run|shell|working-directory|continue-on-error)'/g,
-            '`$1`'
-          ) // GitHub Actions keywords
-          // Format command line flags (--flag, -f)
-          .replace(/\b(--[a-zA-Z0-9][a-zA-Z0-9-]*)\b/g, '`$1`')
-          .replace(/\b(-[a-zA-Z])\b/g, '`$1`')
-          // Format common commands and tools
-          .replace(
-            /\b(git|npm|yarn|docker|kubectl|helm|terraform|ansible|make|cmake|pip|conda|brew|apt|yum|curl|wget|ssh|scp|rsync|grep|awk|sed|jq|cat|ls|cd|pwd|mkdir|rmdir|rm|cp|mv|chmod|chown|find|which|whereis|ps|top|htop|kill|killall|systemctl|service|crontab|tar|zip|unzip|gzip|gunzip|node|python|java|javac|gcc|g\+\+|clang|rustc|cargo|go|ruby|php|perl|bash|zsh|sh|fish)\b/g,
-            '`$1`'
-          )
-          // Format file extensions and common filenames
-          .replace(
-            /\b([a-zA-Z0-9_-]+\.(js|ts|jsx|tsx|json|yaml|yml|xml|html|css|scss|sass|less|md|txt|log|conf|config|env|gitignore|dockerignore|makefile|dockerfile|readme|license|changelog|package\.json|tsconfig\.json|webpack\.config\.js|babel\.config\.js|eslint\.config\.js|prettier\.config\.js))\b/gi,
-            '`$1`'
-          )
-          // Format environment variables (ALL_CAPS with underscores)
-          .replace(/\b([A-Z][A-Z0-9_]{2,})\b/g, '`$1`')
-          // Format code-like identifiers with underscores or hyphens
-          .replace(/\b([a-zA-Z][a-zA-Z0-9]*[_-][a-zA-Z0-9_-]*)\b/g, '`$1`')
-      );
-    };
-
     // Load existing feedback data
     const feedbackDir = path.join(process.env.GITHUB_WORKSPACE || process.cwd(), '.ai-feedback');
     const existingFeedback = await loadFeedbackData(feedbackDir, { verbose: true });
@@ -511,13 +475,13 @@ ${uniqueCommentId}`;
 
 *Severity: ${severity}*
 
-${formatCodeInText(issue.description)}`;
+${issue.description}`;
 
           if (issue.suggestion) {
             commentBody += `
 
 **Suggestion:**
-${formatCodeInText(issue.suggestion)}`;
+${issue.suggestion}`;
           }
 
           // Add feedback tracking notice if enabled

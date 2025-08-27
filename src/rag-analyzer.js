@@ -505,6 +505,22 @@ CRITICAL FORMATTING REQUIREMENTS:
 - Do not include trailing commas
 - Validate that your response is parseable JSON before sending
 
+MARKDOWN FORMATTING IN DESCRIPTIONS AND SUGGESTIONS:
+- Use backticks (\`) around code elements like commands, flags, file names, variable names, function names, etc.
+- Examples: \`git fetch\`, \`--unshallow\`, \`timeout-minutes\`, \`process.env.NODE_ENV\`, \`handleClick()\`
+- Use backticks for any technical terms that would be considered "code" including:
+  - Command line tools and commands
+  - Command line flags and options
+  - Configuration keys and values
+  - File names and extensions
+  - Environment variables
+  - Function and variable names
+  - CSS classes and IDs
+  - HTML attributes
+  - API endpoints and parameters
+- Do NOT use backticks around regular English words or common nouns
+- Use proper markdown formatting for emphasis (*italics*, **bold**) when appropriate
+
 Your response must start with { and end with } with no additional text.`;
 }
 
