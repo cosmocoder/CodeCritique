@@ -7,6 +7,7 @@ A self-hosted, AI-powered code review tool using **RAG (Retrieval-Augmented Gene
 - [Overview](#overview)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [GitHub Actions Integration](#github-actions-integration)
 - [Commands Reference](#commands-reference)
 - [RAG Architecture](#rag-architecture)
 - [Configuration](#configuration)
@@ -245,461 +246,194 @@ npx ai-code-review analyze --diff-with feature-branch
 
 ## GitHub Actions Integration
 
-The AI Code Review tool provides a reusable GitHub Actions composite action for seamless CI/CD integration. This action **automatically handles incremental embedding processing** by:
+This project provides **two reusable GitHub Actions** that can be used in any repository for automated AI-powered code review:
 
-- **Initial Run**: Generates embeddings for the entire codebase when no previous embeddings exist
-- **Subsequent Runs**: Downloads previous embeddings and processes only changed files for optimal performance
-- **Automatic Detection**: The CLI tool automatically detects existing embeddings and switches to incremental mode
+1. **🧠 Generate Embeddings Action** - Creates semantic embeddings for your codebase
+2. **🔍 PR Review Action** - Performs AI-powered code reviews on pull requests
 
-### Using the Embedding Generation Action
+These actions can be used independently or together for a complete AI code review workflow in your CI/CD pipeline.
 
-Add the embedding generation action to your GitHub workflow:
+---
+
+### 🧠 Generate Embeddings Action
+
+**Action Path:** `cosmocoder/CodeCritique/.github/actions/generate-embeddings@main`
+
+This action generates semantic embeddings for your codebase, enabling context-aware code analysis. The embeddings are stored as GitHub Actions artifacts and can be reused across workflow runs. It is recommended to generated embeddings for your project every time the `main` branch is updated.
+
+#### Basic Usage
 
 ```yaml
-name: Generate AI Code Review Embeddings
+name: Generate Code Embeddings
+
 on:
   push:
-    branches: [main]
-    paths: ['src/**', 'lib/**']
-  pull_request:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   generate-embeddings:
+    name: Generate Code Embeddings
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # needed for downloading artifacts
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
 
-      - name: Generate Code Embeddings
-        uses: cosmocoder/codecritique/.github/actions/generate-embeddings@main
+      - name: Generate Embeddings
+        uses: cosmocoder/CodeCritique/.github/actions/generate-embeddings@main
         with:
-          directory: 'src'
-          concurrency: '10'
-          verbose: 'true'
+          verbose: true
 ```
 
-### Action Inputs
+#### Input Parameters
 
-| Input                       | Description                                             | Required | Default               |
-| --------------------------- | ------------------------------------------------------- | -------- | --------------------- |
-| `directory`                 | Directory to process for embeddings                     | No       | `.`                   |
-| `files`                     | Specific files or patterns to process (space-separated) | No       | `''`                  |
-| `concurrency`               | Number of concurrent embedding requests                 | No       | `10`                  |
-| `exclude`                   | Patterns to exclude (space-separated glob patterns)     | No       | See below\*           |
-| `exclude-file`              | File containing patterns to exclude (one per line)      | No       | `''`                  |
-| `no-gitignore`              | Disable automatic exclusion of files in .gitignore      | No       | `false`               |
-| `verbose`                   | Show verbose output                                     | No       | `false`               |
-| `cache-embeddings`          | Cache embeddings across runs                            | No       | `true`                |
-| `embeddings-retention-days` | Number of days to retain embedding artifacts            | No       | `30`                  |
-| `github-token`              | GitHub token for repository access                      | No       | `${{ github.token }}` |
+| Parameter                   | Description                                             | Required | Default          |
+| --------------------------- | ------------------------------------------------------- | -------- | ---------------- |
+| `files`                     | Specific files or patterns to process (space-separated) | No       | `''` (all files) |
+| `concurrency`               | Number of concurrent embedding requests                 | No       | Auto-detected    |
+| `exclude`                   | Patterns to exclude (space-separated glob patterns)     | No       | `''`             |
+| `exclude-file`              | File containing patterns to exclude (one per line)      | No       | `''`             |
+| `verbose`                   | Show verbose output                                     | No       | `false`          |
+| `embeddings-retention-days` | Number of days to retain embedding artifacts            | No       | `30`             |
 
-_Default exclude patterns: `\*\*/_.test.js **/\*.spec.js **/_.test.ts \*\*/_.spec.ts **/node_modules/** **/dist/** **/build/** **/.git/**`
+#### Advanced Configuration Examples
 
-### Action Outputs
-
-| Output                         | Description                                              |
-| ------------------------------ | -------------------------------------------------------- |
-| `embeddings-generated`         | Number of embeddings generated                           |
-| `files-processed`              | Number of files processed                                |
-| `database-size-mb`             | Size of embeddings database in MB                        |
-| `processing-time`              | Processing time in seconds                               |
-| `artifact-name`                | Name of the created embeddings artifact                  |
-| `cache-hit`                    | Whether embeddings were restored from cache              |
-| `previous-embeddings-restored` | Whether previous embeddings were restored from artifacts |
-| `restored-artifact-name`       | Name of the restored embeddings artifact                 |
-
-### How Incremental Processing Works
-
-The action automatically manages incremental processing:
-
-1. **First Run**: No previous embeddings exist, so the action generates embeddings for all files
-2. **Subsequent Runs**: The action:
-   - Downloads the most recent embedding artifacts from previous workflow runs
-   - Restores them to the `.ai-review-lancedb` directory
-   - The CLI tool detects existing embeddings and processes only changed files
-   - Creates a new artifact with the updated embeddings
-
-This approach provides significant performance benefits for large codebases while ensuring embeddings stay up-to-date.
-
-### Usage Examples
-
-#### Basic Usage (Works for Both Initial and Incremental Processing)
-
-```yaml
-- name: Generate Embeddings
-  uses: cosmocoder/codecritique/.github/actions/generate-embeddings@main
-```
-
-The action automatically handles whether this is an initial run or an incremental update.
-
-#### Custom Directory and Concurrency
-
-```yaml
-- name: Generate Embeddings for Source Code
-  uses: cosmocoder/codecritique/.github/actions/generate-embeddings@main
-  with:
-    directory: 'src'
-    concurrency: '15'
-    verbose: 'true'
-```
-
-#### Specific Files and Exclusions
+##### Processing Specific Files
 
 ```yaml
 - name: Generate Embeddings for TypeScript Files
-  uses: cosmocoder/codecritique/.github/actions/generate-embeddings@main
+  uses: cosmocoder/CodeCritique/.github/actions/generate-embeddings@main
   with:
-    files: '**/*.ts **/*.tsx'
-    exclude: '**/*.test.* **/*.spec.* **/dist/**'
-    exclude-file: '.embedignore'
-```
-
-#### Complete Workflow with Outputs
-
-```yaml
-name: AI Code Review Setup
-on:
-  push:
-    branches: [main]
-
-jobs:
-  generate-embeddings:
-    runs-on: ubuntu-latest
-    outputs:
-      embeddings-count: ${{ steps.embeddings.outputs.embeddings-generated }}
-      processing-time: ${{ steps.embeddings.outputs.processing-time }}
-      cache-hit: ${{ steps.embeddings.outputs.cache-hit }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Generate Code Embeddings
-        id: embeddings
-        uses: cosmocoder/codecritique/.github/actions/generate-embeddings@main
-        with:
-          directory: 'src'
-          concurrency: '12'
-          verbose: 'true'
-          embeddings-retention-days: '60'
-
-      - name: Report Results
-        run: |
-          echo "Generated ${{ steps.embeddings.outputs.embeddings-generated }} embeddings"
-          echo "Processed ${{ steps.embeddings.outputs.files-processed }} files"
-          echo "Database size: ${{ steps.embeddings.outputs.database-size-mb }} MB"
-          echo "Processing time: ${{ steps.embeddings.outputs.processing-time }} seconds"
-          echo "Cache hit: ${{ steps.embeddings.outputs.cache-hit }}"
-
-  use-embeddings:
-    needs: generate-embeddings
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download Embeddings
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.generate-embeddings.outputs.artifact-name }}
-          path: .embeddings
-
-      - name: Use Embeddings for Analysis
-        run: |
-          echo "Embeddings ready for AI analysis"
-          # Your code analysis steps here
-```
-
-#### Conditional Processing
-
-```yaml
-- name: Generate Embeddings (if needed)
-  uses: cosmocoder/codecritique/.github/actions/generate-embeddings@main
-  if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'ai-review')
-  with:
-    directory: 'src'
-    cache-embeddings: 'true'
-```
-
-### Performance Optimization
-
-For large repositories, optimize performance with these settings:
-
-```yaml
-- name: Generate Embeddings (Large Repo)
-  uses: cosmocoder/codecritique/.github/actions/generate-embeddings@main
-  with:
-    directory: 'src'
-    concurrency: '20' # Increase concurrency
-    exclude: | # Exclude unnecessary files
-      **/*.test.*
-      **/*.spec.*
-      **/node_modules/**
-      **/dist/**
-      **/build/**
-      **/*.min.js
-      **/coverage/**
-    cache-embeddings: 'true' # Enable caching
-    embeddings-retention-days: '90' # Longer retention for stable repos
-```
-
-### Caching Strategy
-
-The action automatically implements intelligent caching:
-
-- **Content-based**: Cache keys include repository content hash and configuration
-- **Automatic invalidation**: Cache invalidates when code or settings change
-- **Cross-run persistence**: Embeddings persist across workflow runs
-- **Performance boost**: Subsequent runs are significantly faster with cache hits
-
-### Integration Patterns
-
-#### With Pull Request Reviews
-
-The AI Code Review tool provides a complete PR review action that automatically posts intelligent comments to your pull requests:
-
-```yaml
-name: AI Code Review Pipeline
-on:
-  pull_request:
-    types: [opened, synchronize]
-
-jobs:
-  generate-embeddings:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Generate Embeddings
-        id: embeddings
-        uses: cosmocoder/codecritique/.github/actions/generate-embeddings@main
-        with:
-          directory: 'src'
-          concurrency: '10'
-
-  ai-review:
-    needs: generate-embeddings
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: AI Code Review
-        uses: cosmocoder/codecritique/.github/actions/pr-review@main
-        with:
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          embedding-artifact-name: ${{ needs.generate-embeddings.outputs.artifact-name }}
-```
-
-#### PR Review Action
-
-For detailed documentation on the PR review action, see the key inputs:
-
-| Input               | Description                                         | Default                      |
-| ------------------- | --------------------------------------------------- | ---------------------------- |
-| `anthropic-api-key` | Anthropic API key for Claude models                 | Required                     |
-| `base-branch`       | Base branch to compare against                      | `main`                       |
-| `model`             | LLM model to use                                    | `claude-3-5-sonnet-20241022` |
-| `max-comments`      | Maximum review comments to post                     | `25`                         |
-| `custom-docs`       | Custom guidelines (format: "title:path,title:path") | `''`                         |
-| `verbose`           | Show detailed output                                | `false`                      |
-
-#### Artifact Cleanup Action
-
-The AI Code Review tool includes a comprehensive artifact cleanup action for managing storage and maintaining clean repositories:
-
-```yaml
-name: Daily Artifact Cleanup
-on:
-  schedule:
-    - cron: '0 2 * * *' # Run daily at 2 AM UTC
-  workflow_dispatch:
-
-jobs:
-  cleanup:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Cleanup Old Artifacts
-        uses: cosmocoder/codecritique/.github/actions/cleanup-artifacts@main
-        with:
-          cleanup-type: 'all'
-          older-than-days: '30'
-          dry-run: 'false'
-          verbose: 'true'
-```
-
-**Key Features:**
-
-- **Selective Cleanup**: Target specific artifact types (embeddings, models, feedback, reports)
-- **Safety Features**: Dry-run mode, confirmation prompts, backup creation
-- **Age-based Filtering**: Only cleanup artifacts older than specified days
-- **Pattern Matching**: Custom artifact name patterns and exclusion rules
-- **Comprehensive Reporting**: Detailed cleanup reports with metrics
-- **Error Handling**: Graceful error handling with detailed error reporting
-
-#### Cleanup Action Inputs
-
-| Input                   | Description                                                 | Required | Default                    |
-| ----------------------- | ----------------------------------------------------------- | -------- | -------------------------- |
-| `github-token`          | GitHub token for repository access                          | No       | `${{ github.token }}`      |
-| `cleanup-type`          | Type of cleanup: all, embeddings, models, feedback, reports | No       | `all`                      |
-| `older-than-days`       | Only cleanup artifacts older than specified days (0 = all)  | No       | `30`                       |
-| `repository`            | Repository to cleanup (format: owner/repo)                  | No       | `${{ github.repository }}` |
-| `dry-run`               | Preview cleanup actions without deleting                    | No       | `false`                    |
-| `require-confirmation`  | Require explicit confirmation before deletion               | No       | `false`                    |
-| `create-backup`         | Create backup artifacts before deletion                     | No       | `false`                    |
-| `backup-retention-days` | Retention days for backup artifacts                         | No       | `7`                        |
-| `artifact-name-pattern` | Custom artifact name pattern (supports wildcards)           | No       | `''`                       |
-| `exclude-patterns`      | Comma-separated patterns to exclude from cleanup            | No       | `''`                       |
-| `max-artifacts-per-run` | Maximum artifacts to process in one run                     | No       | `50`                       |
-| `verbose`               | Show detailed cleanup progress                              | No       | `false`                    |
-| `generate-report`       | Generate detailed cleanup report as artifact                | No       | `true`                     |
-
-#### Cleanup Action Outputs
-
-| Output                     | Description                                    |
-| -------------------------- | ---------------------------------------------- |
-| `artifacts-deleted`        | Number of artifacts successfully deleted       |
-| `space-reclaimed-mb`       | Estimated storage space reclaimed in MB        |
-| `cleanup-summary`          | Summary of cleanup actions performed           |
-| `errors-count`             | Number of errors encountered during cleanup    |
-| `failed-deletions`         | List of artifacts that failed to delete        |
-| `backup-artifacts-created` | Number of backup artifacts created             |
-| `processing-time`          | Total time taken for cleanup process (seconds) |
-| `artifacts-processed`      | Total number of artifacts processed            |
-
-#### Cleanup Types
-
-- **`all`**: Cleans up all AI Code Review related artifacts (embeddings, models, feedback, reports)
-- **`embeddings`**: Only embedding artifacts (`ai-code-review-embeddings-*`)
-- **`models`**: Model cache artifacts (`ai-model-cache-*`, `ai-fastembed-cache-*`)
-- **`feedback`**: Feedback tracking artifacts (`review-feedback`, `ai-feedback-*`)
-- **`reports`**: Review report artifacts (`ai-review-report-*`)
-
-#### Safety Features
-
-**Dry Run Mode** - Preview what would be deleted:
-
-```yaml
-- name: Preview Cleanup
-  uses: cosmocoder/codecritique/.github/actions/cleanup-artifacts@main
-  with:
-    cleanup-type: 'embeddings'
-    older-than-days: '30'
-    dry-run: 'true'
-    verbose: 'true'
-```
-
-**Backup Creation** - Create backup artifacts before deletion:
-
-```yaml
-- name: Safe Cleanup with Backup
-  uses: cosmocoder/codecritique/.github/actions/cleanup-artifacts@main
-  with:
-    cleanup-type: 'all'
-    older-than-days: '60'
-    create-backup: 'true'
-    backup-retention-days: '14'
-```
-
-**Pattern Matching** - Target specific patterns and exclude critical artifacts:
-
-```yaml
-- name: Selective Cleanup
-  uses: cosmocoder/codecritique/.github/actions/cleanup-artifacts@main
-  with:
-    cleanup-type: 'all'
-    artifact-name-pattern: 'ai-code-review-embeddings-*'
-    exclude-patterns: 'production-*,critical-*,master-branch-*'
-    older-than-days: '30'
-```
-
-#### Example Workflows
-
-**PR-triggered Cleanup:**
-
-```yaml
-name: Cleanup on PR Close
-on:
-  pull_request:
-    types: [closed]
-
-jobs:
-  cleanup-pr-artifacts:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Cleanup PR-specific Artifacts
-        uses: cosmocoder/codecritique/.github/actions/cleanup-artifacts@main
-        with:
-          cleanup-type: 'reports'
-          artifact-name-pattern: 'ai-review-report-${{ github.event.pull_request.number }}'
-          older-than-days: '0' # Clean regardless of age
-          verbose: 'true'
-```
-
-**Safe Production Cleanup:**
-
-```yaml
-name: Production Artifact Cleanup
-on:
-  workflow_dispatch:
-    inputs:
-      confirm_cleanup:
-        description: 'Type "CONFIRM" to proceed with cleanup'
-        required: true
-        type: string
-
-jobs:
-  cleanup:
-    runs-on: ubuntu-latest
-    if: github.event.inputs.confirm_cleanup == 'CONFIRM'
-    steps:
-      - name: Production Cleanup with Backup
-        uses: cosmocoder/codecritique/.github/actions/cleanup-artifacts@main
-        with:
-          cleanup-type: 'all'
-          older-than-days: '30'
-          create-backup: 'true'
-          backup-retention-days: '30'
-          exclude-patterns: 'production-*,master-*,release-*'
-          max-artifacts-per-run: '50'
-          verbose: 'true'
-          generate-report: 'true'
-```
-
-#### Best Practices
-
-1. **Always Test First**: Use `dry-run: 'true'` to preview actions
-2. **Use Age Filters**: Set appropriate `older-than-days` values
-3. **Create Backups**: Enable `create-backup: 'true'` for critical artifacts
-4. **Monitor Reports**: Review generated cleanup reports
-5. **Set Limits**: Use `max-artifacts-per-run` to prevent overwhelming the API
-6. **Use Exclusions**: Protect critical artifacts with `exclude-patterns`
-7. **Enable Verbose**: Use `verbose: 'true'` for detailed logging during testing
-
-```yaml
-# Advanced PR Review Configuration
-- name: AI Code Review with Custom Settings
-  uses: cosmocoder/codecritique/.github/actions/pr-review@main
-  with:
-    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-    base-branch: 'develop'
-    max-comments: 15
-    custom-docs: 'Guidelines:./docs/guidelines.md,Standards:./docs/standards.md'
+    files: 'src/**/*.ts src/**/*.tsx'
+    exclude: '**/*.test.ts **/*.spec.ts'
     verbose: true
 ```
 
-#### Scheduled Embedding Updates
+##### High Performance Setup
 
 ```yaml
-name: Weekly Embedding Refresh
+- name: Generate Embeddings (High Performance)
+  uses: cosmocoder/CodeCritique/.github/actions/generate-embeddings@main
+  with:
+    concurrency: 20
+    embeddings-retention-days: 60
+```
+
+---
+
+### 🔍 PR Review Action
+
+**Action Path:** `cosmocoder/CodeCritique/.github/actions/pr-review@main`
+
+This action performs AI-powered code reviews on pull requests using Anthropic Claude models. It automatically downloads any available embeddings to provide context-aware analysis and posts review comments directly to the PR.
+
+The action includes intelligent feedback tracking that monitors user reactions and replies to review comments. When users dismiss suggestions (through reactions like 👎 or replies with keywords like "disagree", "ignore", or "not relevant"), the action automatically resolves those conversation threads and avoids reposting similar issues in subsequent runs on the same PR, creating a more streamlined review experience.
+
+#### Basic Usage
+
+```yaml
+name: AI PR Review
+
 on:
-  schedule:
-    - cron: '0 2 * * 0' # Weekly on Sunday
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 jobs:
-  refresh-embeddings:
+  pr-review:
+    name: AI PR Review
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # needed for marking conversations as resolved
+      pull-requests: write # needed for posting comments
+      actions: read # needed for downloading artifacts
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: cosmocoder/codecritique/.github/actions/generate-embeddings@main
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup master branch for diff analysis
+        run: git fetch --no-tags --prune --unshallow origin master:master
+
+      - name: Code Review
+        uses: cosmocoder/CodeCritique/.github/actions/pr-review@main
         with:
-          cache-embeddings: 'false' # Force refresh
-          embeddings-retention-days: '180'
+          verbose: true
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
+
+#### Required Setup
+
+1. **Anthropic API Key**: Store your Anthropic API key as a repository secret named `ANTHROPIC_API_KEY`
+2. **Permissions**: The workflow must have `contents: write`, `actions: read`, and `pull-requests: write` permissions
+3. **Git Setup**: Ensure the base branch is available for diff analysis (see example above)
+
+#### Input Parameters
+
+| Parameter           | Description                                          | Required | Default         |
+| ------------------- | ---------------------------------------------------- | -------- | --------------- |
+| `anthropic-api-key` | Anthropic API key for Claude models                  | **Yes**  | -               |
+| `verbose`           | Show verbose output                                  | No       | `false`         |
+| `model`             | LLM model to use (e.g., `claude-sonnet-4-20250514`)  | No       | Auto-selected   |
+| `max-tokens`        | Maximum tokens for LLM response                      | No       | Auto-calculated |
+| `concurrency`       | Concurrency for processing multiple files            | No       | `3`             |
+| `custom-docs`       | Custom documents (format: `"title:path,title:path"`) | No       | `''`            |
+
+> **Note**: The action uses sensible defaults for all review parameters. It always:
+>
+> - Uses JSON output format for parsing results
+> - Posts both individual comments and summary comments to PRs
+> - Limits to 25 comments maximum
+> - Tracks feedback to improve future reviews
+> - Uses optimal temperature and similarity thresholds
+
+#### Output Values
+
+The action provides several outputs that can be used in subsequent workflow steps:
+
+| Output                   | Description                            |
+| ------------------------ | -------------------------------------- |
+| `comments-posted`        | Number of review comments posted       |
+| `issues-found`           | Total number of issues found           |
+| `files-analyzed`         | Number of files analyzed               |
+| `analysis-time`          | Time taken for analysis (seconds)      |
+| `embedding-cache-hit`    | Whether embeddings were found and used |
+| `review-score`           | Overall review score (0-100)           |
+| `security-issues`        | Number of security issues found        |
+| `performance-issues`     | Number of performance issues found     |
+| `maintainability-issues` | Number of maintainability issues found |
+| `review-report-path`     | Path to the detailed review report     |
+
+#### Advanced Configuration Examples
+
+##### Custom Model and Performance Settings
+
+```yaml
+- name: AI Code Review with Custom Settings
+  uses: cosmocoder/CodeCritique/.github/actions/pr-review@main
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    model: 'claude-3-5-sonnet-20241022'
+    max-tokens: '4000'
+    concurrency: '5'
+    verbose: true
+```
+
+##### With Custom Documentation
+
+```yaml
+- name: AI Code Review with Team Guidelines
+  uses: cosmocoder/CodeCritique/.github/actions/pr-review@main
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    custom-docs: 'Style Guide:./docs/style-guide.md,API Standards:./docs/api-standards.md'
+    verbose: true
+```
+
+---
 
 ## Commands Reference
 
