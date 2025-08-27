@@ -81,9 +81,13 @@ outputs:
 
 runs:
   using: 'composite'
-  env:
-    FEEDBACK_ARTIFACT_NAME: 'ai-review-feedback-${{ github.repository_id }}'
   steps:
+    # Set up environment variables for reuse across steps
+    - name: Set environment variables
+      shell: bash
+      run: |
+        echo "FEEDBACK_ARTIFACT_NAME=ai-review-feedback-${{ github.repository_id }}" >> $GITHUB_ENV
+
     # Create a symlink to the action repository to access sibling composite actions.
     # This workaround is needed because GitHub Actions doesn't support relative paths
     # to sibling actions when the action is used from external repositories.
