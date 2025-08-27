@@ -20,10 +20,6 @@ inputs:
     description: 'File containing patterns to exclude (one per line)'
     required: false
     default: ''
-  no-gitignore:
-    description: 'Disable automatic exclusion of files in .gitignore'
-    required: false
-    default: 'false'
   verbose:
     description: 'Show verbose output'
     required: false
@@ -120,11 +116,6 @@ runs:
         # Add exclude file if specified
         if [ -n "${{ inputs.exclude-file }}" ] && [ -f "$GITHUB_WORKSPACE/${{ inputs.exclude-file }}" ]; then
           ARGS="${ARGS} --exclude-file \"$GITHUB_WORKSPACE/${{ inputs.exclude-file }}\""
-        fi
-
-        # Add gitignore flag
-        if [ "${{ inputs.no-gitignore }}" = "true" ]; then
-          ARGS="${ARGS} --no-gitignore"
         fi
 
         # Add verbose flag
