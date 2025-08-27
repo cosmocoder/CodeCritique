@@ -356,7 +356,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup master branch for diff analysis
-        run: git fetch --no-tags --prune --unshallow origin master:master
+        run: git fetch --no-tags --prune origin main:main
 
       - name: Code Review
         uses: cosmocoder/CodeCritique/.github/actions/pr-review@main
