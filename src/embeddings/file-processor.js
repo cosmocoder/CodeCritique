@@ -244,6 +244,7 @@ export class FileProcessor {
       excludePatterns = [],
       respectGitignore = true,
       baseDir: optionBaseDir = process.cwd(),
+      maxLines = 1000,
       onProgress, // <<< Add onProgress here
     } = options;
     const resolvedCanonicalBaseDir = path.resolve(optionBaseDir);
@@ -307,7 +308,7 @@ export class FileProcessor {
 
     for (let i = 0; i < filePaths.length; i += BATCH_SIZE) {
       const batch = filePaths.slice(i, i + BATCH_SIZE);
-      const batchResults = await this._processBatch(batch, resolvedCanonicalBaseDir, exclusionOptions, onProgress);
+      const batchResults = await this._processBatch(batch, resolvedCanonicalBaseDir, exclusionOptions, onProgress, maxLines);
 
       // Merge results
       results.processed += batchResults.processed;
@@ -345,7 +346,7 @@ export class FileProcessor {
    * @returns {Promise<Object>} Batch processing results
    * @private
    */
-  async _processBatch(filePaths, baseDir, exclusionOptions, onProgress) {
+  async _processBatch(filePaths, baseDir, exclusionOptions, onProgress, maxLines = 1000) {
     const results = { processed: 0, failed: 0, skipped: 0, excluded: 0, files: [], failedFiles: [], excludedFiles: [] };
     const filesToProcess = [];
     const contentsForBatch = [];
@@ -374,18 +375,18 @@ export class FileProcessor {
       try {
         const stats = fs.statSync(absoluteFilePath);
 
-        // Skip large files
-        if (stats.size > 1024 * 1024) {
-          // 1MB limit
-          results.skipped++;
-          this.progressTracker.update('skipped');
-          if (typeof onProgress === 'function') onProgress('skipped', filePath);
-          this.processedFiles.set(filePath, 'skipped_large');
-          continue;
-        }
-
         // Read file content
-        const content = await fs.promises.readFile(absoluteFilePath, 'utf8');
+        let content = await fs.promises.readFile(absoluteFilePath, 'utf8');
+
+        // Truncate content to maximum specified lines for code files only (documentation files are chunked separately)
+        const isDocFile = isDocumentationFile(absoluteFilePath);
+        if (!isDocFile) {
+          const lines = content.split('\n');
+          if (lines.length > maxLines) {
+            content = lines.slice(0, maxLines).join('\n') + '\n... (truncated from ' + lines.length + ' lines)';
+            debug(`Truncated code file ${consistentRelativePath} from ${lines.length} lines to ${maxLines} lines`);
+          }
+        }
 
         if (content.trim().length === 0) {
           results.skipped++;

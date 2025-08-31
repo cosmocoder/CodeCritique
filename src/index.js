@@ -68,6 +68,11 @@ program
   .option('-d, --directory <dir>', 'Directory to process', '.')
   .option('-f, --files <files...>', 'Specific files or patterns to process')
   .option('-c, --concurrency <number>', 'Number of concurrent embedding requests', '10') // Default concurrency 10
+  .option(
+    '--max-lines <number>',
+    'Maximum lines per code file for embeddings (documentation files are not truncated, default: 1000)',
+    '1000'
+  )
   .option('--verbose', 'Show verbose output')
   .option('--exclude <patterns...>', 'Patterns to exclude (e.g., "**/*.test.js" "docs/**")')
   .option('--exclude-file <file>', 'File containing patterns to exclude (one per line)')
@@ -565,6 +570,7 @@ async function generateEmbeddings(options) {
       respectGitignore: options.gitignore !== false,
       baseDir: baseDir,
       batchSize: 100, // Set a reasonable batch size
+      maxLines: parseInt(options.maxLines || '1000', 10),
       onProgress: (status) => {
         // Update counters based on status
         if (status === 'processed') {
