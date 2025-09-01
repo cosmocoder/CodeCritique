@@ -6,11 +6,6 @@ inputs:
     description: 'GitHub token for authentication'
     required: true
 
-  node-version:
-    description: 'Node.js version to use'
-    required: false
-    default: '22'
-
 outputs:
   tool-root:
     description: 'Root directory of the CodeCritique tool'
@@ -41,7 +36,7 @@ runs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: ${{ inputs.node-version }}
+        node-version: '22'
         cache: 'npm'
         cache-dependency-path: '.action-repo/package-lock.json'
 

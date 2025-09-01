@@ -68,7 +68,6 @@ runs:
       uses: ./.action-repo/.github/actions/setup-tool
       with:
         github-token: ${{ github.token }}
-        node-version: '22.x'
 
     - name: Cleanup link
       if: always()
