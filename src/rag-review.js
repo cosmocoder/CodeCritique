@@ -12,6 +12,7 @@ import { runAnalysis, gatherUnifiedContextForPR } from './rag-analyzer.js';
 import { shouldProcessFile } from './utils/file-validation.js';
 import { findBaseBranch, getChangedLinesInfo, getFileContentFromGit } from './utils/git.js';
 import { detectFileType, detectLanguageFromExtension } from './utils/language-detection.js';
+import { shouldChunkPR, chunkPRFiles, combineChunkResults } from './utils/pr-chunking.js';
 
 /**
  * Review a single file using RAG approach
@@ -258,7 +259,24 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
       };
     }
 
-    // Step 2: Gather unified context for the entire PR
+    // Check if PR should be chunked based on size and complexity (skip if this is already a chunk)
+    if (!options.skipChunking) {
+      const chunkingDecision = shouldChunkPR(prFiles);
+      if (verbose) {
+        console.log(chalk.blue(`PR size assessment: ${chunkingDecision.estimatedTokens} tokens, ${prFiles.length} files`));
+        if (chunkingDecision.shouldChunk) {
+          console.log(chalk.yellow(`Large PR detected - will chunk into ~${chunkingDecision.recommendedChunks} chunks`));
+        }
+      }
+
+      // If PR is too large, use chunked processing
+      if (chunkingDecision.shouldChunk) {
+        console.log(chalk.blue(`🔄 Using chunked processing for large PR (${chunkingDecision.estimatedTokens} tokens)`));
+        return await reviewLargePRInChunks(prFiles, options);
+      }
+    }
+
+    // Step 2: Gather unified context for the entire PR (for regular-sized PRs)
     if (verbose) {
       console.log(chalk.blue(`Performing unified context retrieval for ${prFiles.length} PR files...`));
     }
@@ -474,6 +492,71 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
       results: [],
     };
   }
+}
+
+/**
+ * Reviews a large PR by splitting it into manageable chunks and processing them in parallel
+ * @param {Array} prFiles - Array of PR files with diff content
+ * @param {Object} options - Review options
+ * @returns {Promise<Object>} Combined review results
+ */
+async function reviewLargePRInChunks(prFiles, options) {
+  console.log(chalk.blue(`🔄 Large PR detected: ${prFiles.length} files. Splitting into chunks...`));
+
+  // Step 1: Gather shared context once for all chunks
+  console.log(chalk.cyan('📚 Gathering shared context for entire PR...'));
+  const sharedContext = await gatherUnifiedContextForPR(prFiles, options);
+
+  // Step 2: Split PR into manageable chunks
+  const chunks = chunkPRFiles(prFiles, 45000); // Conservative token limit per chunk
+  console.log(chalk.green(`✂️ Split PR into ${chunks.length} chunks`));
+
+  chunks.forEach((chunk, i) => {
+    console.log(chalk.gray(`  Chunk ${i + 1}: ${chunk.files.length} files (~${chunk.totalTokens} tokens)`));
+  });
+
+  // Step 3: Process chunks in parallel
+  console.log(chalk.blue('🔄 Processing chunks in parallel...'));
+  const chunkResults = await Promise.all(
+    chunks.map((chunk, index) => reviewPRChunk(chunk, sharedContext, options, index + 1, chunks.length))
+  );
+
+  // Step 4: Combine results
+  console.log(chalk.blue('🔗 Combining chunk results...'));
+  return combineChunkResults(chunkResults, prFiles.length);
+}
+
+/**
+ * Reviews a single chunk of files from a large PR
+ * @param {Object} chunk - Chunk object with files array
+ * @param {Object} sharedContext - Pre-gathered shared context
+ * @param {Object} options - Review options
+ * @param {number} chunkNumber - Current chunk number
+ * @param {number} totalChunks - Total number of chunks
+ * @returns {Promise<Object>} Chunk review results
+ */
+async function reviewPRChunk(chunk, sharedContext, options, chunkNumber, totalChunks) {
+  console.log(chalk.cyan(`📝 Reviewing chunk ${chunkNumber}/${totalChunks} (${chunk.files.length} files)...`));
+
+  // Create chunk-specific options
+  const chunkOptions = {
+    ...options,
+    isChunkedReview: true,
+    chunkNumber: chunkNumber,
+    totalChunks: totalChunks,
+    preGatheredContext: sharedContext, // Use shared context
+    // Reduce context per chunk since we have multiple parallel reviews
+    maxExamples: Math.max(3, Math.floor((options.maxExamples || 40) / totalChunks)),
+  };
+
+  // Review this chunk as a smaller PR - call the main function recursively but with chunked flag
+  // to prevent infinite recursion
+  const chunkFilePaths = chunk.files.map((f) => f.filePath);
+
+  // Skip chunking decision for chunk reviews to prevent infinite recursion
+  const skipChunkingOptions = { ...chunkOptions, skipChunking: true };
+
+  return await reviewPullRequestWithCrossFileContext(chunkFilePaths, skipChunkingOptions);
 }
 
 // Export the core review functions
