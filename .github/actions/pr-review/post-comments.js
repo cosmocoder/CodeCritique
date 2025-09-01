@@ -36,12 +36,14 @@ import { shouldSkipSimilarIssue, loadFeedbackData } from '../../../src/feedback-
  */
 export default async ({ github, context, core }) => {
   try {
-    // Get environment variables
-    const postComments = process.env.INPUT_POST_COMMENTS === 'true';
-    const summaryComment = process.env.INPUT_SUMMARY_COMMENT === 'true';
-    const maxComments = parseInt(process.env.INPUT_MAX_COMMENTS) || 25;
+    // Configuration constants
+    const postComments = true;
+    const summaryComment = true;
+    const maxComments = 25;
+    const trackFeedback = true;
+
+    // Get remaining environment variables
     const reviewOutputPath = process.env.REVIEW_OUTPUT_PATH;
-    const trackFeedback = process.env.INPUT_TRACK_FEEDBACK === 'true';
 
     console.log(`💬 Processing review results for PR #${context.issue.number}`);
 

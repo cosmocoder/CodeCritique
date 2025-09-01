@@ -222,11 +222,6 @@ runs:
       if: ${{ github.event_name == 'pull_request' }}
       uses: actions/github-script@v7
       env:
-        INPUT_POST_COMMENTS: 'true'
-        INPUT_SUMMARY_COMMENT: 'true'
-        INPUT_MAX_COMMENTS: '25'
-        INPUT_OUTPUT_FORMAT: 'json'
-        INPUT_TRACK_FEEDBACK: 'true'
         INPUT_FEEDBACK_ARTIFACT_NAME: ${{ env.FEEDBACK_ARTIFACT_NAME }}
         REVIEW_OUTPUT_PATH: ${{ steps.setup-tool.outputs.tool-root }}/review_output.json
       with:
