@@ -312,15 +312,16 @@ ai-code-review embeddings:generate [options]
 
 #### Options
 
-| Option                       | Description                                           | Default |
-| ---------------------------- | ----------------------------------------------------- | ------- |
-| `-d, --directory <dir>`      | Directory to process                                  | `.`     |
-| `-f, --files <files...>`     | Specific files or patterns to process                 | -       |
-| `-c, --concurrency <number>` | Number of concurrent embedding requests               | `10`    |
-| `--verbose`                  | Show verbose output                                   | `false` |
-| `--exclude <patterns...>`    | Patterns to exclude (e.g., "**/\*.test.js" "docs/**") | -       |
-| `--exclude-file <file>`      | File containing patterns to exclude (one per line)    | -       |
-| `--no-gitignore`             | Disable automatic exclusion of files in .gitignore    | `false` |
+| Option                       | Description                                                                    | Default |
+| ---------------------------- | ------------------------------------------------------------------------------ | ------- |
+| `-d, --directory <dir>`      | Directory to process                                                           | `.`     |
+| `-f, --files <files...>`     | Specific files or patterns to process                                          | -       |
+| `-c, --concurrency <number>` | Number of concurrent embedding requests                                        | `10`    |
+| `--verbose`                  | Show verbose output                                                            | `false` |
+| `--exclude <patterns...>`    | Patterns to exclude (e.g., "**/\*.test.js" "docs/**")                          | -       |
+| `--exclude-file <file>`      | File containing patterns to exclude (one per line)                             | -       |
+| `--no-gitignore`             | Disable automatic exclusion of files in .gitignore                             | `false` |
+| `--max-lines`                | Maximum lines per code file that will be considered when generating embeddings | `1000`  |
 
 #### Examples
 
