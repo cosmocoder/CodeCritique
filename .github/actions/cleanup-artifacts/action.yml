@@ -1,0 +1,470 @@
+name: 'Cleanup AI Code Review Artifacts'
+description: 'Comprehensive cleanup of AI Code Review artifacts with selective options and safety features'
+
+branding:
+  icon: 'trash-2'
+  color: 'red'
+
+inputs:
+  # Cleanup Configuration
+  cleanup-type:
+    description: 'Type of cleanup to perform (all, embeddings, models, feedback, reports)'
+    required: false
+    default: 'all'
+
+  older-than-days:
+    description: 'Only cleanup artifacts older than specified days (0 = all artifacts)'
+    required: false
+    default: '30'
+
+  repository:
+    description: 'Repository to cleanup artifacts from (format: owner/repo, default: current repo)'
+    required: false
+    default: ${{ github.repository }}
+
+  # Safety Features
+  dry-run:
+    description: 'Preview cleanup actions without actually deleting artifacts'
+    required: false
+    default: 'false'
+
+  require-confirmation:
+    description: 'Require explicit confirmation before deletion (interactive mode)'
+    required: false
+    default: 'false'
+
+  # Selective Cleanup Options
+  artifact-name-pattern:
+    description: 'Custom artifact name pattern for selective cleanup (supports wildcards)'
+    required: false
+    default: ''
+
+  exclude-patterns:
+    description: 'Comma-separated patterns to exclude from cleanup'
+    required: false
+    default: ''
+
+  max-artifacts-per-run:
+    description: 'Maximum number of artifacts to process in one run (rate limiting)'
+    required: false
+    default: '50'
+
+  # Output Options
+  verbose:
+    description: 'Show detailed cleanup progress and artifact information'
+    required: false
+    default: 'false'
+
+  generate-report:
+    description: 'Generate detailed cleanup report as artifact'
+    required: false
+    default: 'true'
+
+outputs:
+  # Cleanup Results
+  artifacts-deleted:
+    description: 'Number of artifacts successfully deleted'
+    value: ${{ steps.cleanup.outputs.artifacts-deleted }}
+
+  space-reclaimed-mb:
+    description: 'Estimated storage space reclaimed in MB'
+    value: ${{ steps.cleanup.outputs.space-reclaimed }}
+
+  cleanup-summary:
+    description: 'Summary of cleanup actions performed'
+    value: ${{ steps.cleanup.outputs.summary }}
+
+  # Error Tracking
+  errors-count:
+    description: 'Number of errors encountered during cleanup'
+    value: ${{ steps.cleanup.outputs.errors-count }}
+
+  failed-deletions:
+    description: 'List of artifacts that failed to delete'
+    value: ${{ steps.cleanup.outputs.failed-deletions }}
+
+  # Performance Metrics
+  processing-time:
+    description: 'Total time taken for cleanup process (seconds)'
+    value: ${{ steps.timing.outputs.duration }}
+
+  artifacts-processed:
+    description: 'Total number of artifacts processed (including skipped)'
+    value: ${{ steps.cleanup.outputs.artifacts-processed }}
+
+  # Report Information
+  cleanup-report-path:
+    description: 'Path to the detailed cleanup report'
+    value: ${{ steps.cleanup.outputs.report-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate Inputs
+      shell: bash
+      run: |
+        echo "🔍 Validating cleanup action inputs..."
+
+        # Validate cleanup type
+        VALID_TYPES="all embeddings models feedback reports"
+        if [[ ! " $VALID_TYPES " =~ " ${{ inputs.cleanup-type }} " ]]; then
+          echo "❌ Error: Invalid cleanup-type '${{ inputs.cleanup-type }}'. Valid options: $VALID_TYPES"
+          exit 1
+        fi
+
+        # Validate older-than-days is a non-negative integer
+        if ! [[ "${{ inputs.older-than-days }}" =~ ^[0-9]+$ ]]; then
+          echo "❌ Error: older-than-days must be a non-negative integer, got: ${{ inputs.older-than-days }}"
+          exit 1
+        fi
+
+        # Validate repository format
+        if [[ ! "${{ inputs.repository }}" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]]; then
+          echo "❌ Error: Invalid repository format '${{ inputs.repository }}'. Expected: owner/repo"
+          exit 1
+        fi
+
+        # Validate max-artifacts-per-run
+        if ! [[ "${{ inputs.max-artifacts-per-run }}" =~ ^[0-9]+$ ]] || [ "${{ inputs.max-artifacts-per-run }}" -le 0 ]; then
+          echo "❌ Error: max-artifacts-per-run must be a positive integer, got: ${{ inputs.max-artifacts-per-run }}"
+          exit 1
+        fi
+
+        echo "✅ Input validation passed"
+
+    - name: Start Timing
+      id: start-timing
+      shell: bash
+      run: echo "start-time=$(date +%s)" >> $GITHUB_OUTPUT
+
+    - name: Cleanup Artifacts
+      id: cleanup
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        echo "🗑️ Starting artifact cleanup process..."
+
+        # Initialize counters and tracking variables
+        ARTIFACTS_DELETED=0
+        ARTIFACTS_PROCESSED=0
+        SPACE_RECLAIMED=0
+        ERRORS_COUNT=0
+        FAILED_DELETIONS=""
+        CLEANUP_SUMMARY=""
+        REPORT_PATH="cleanup-report-$(date +%Y%m%d-%H%M%S).json"
+
+        # Create report header
+        cat > "$REPORT_PATH" << EOF
+        {
+          "cleanup_metadata": {
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "repository": "${{ inputs.repository }}",
+            "cleanup_type": "${{ inputs.cleanup-type }}",
+            "older_than_days": ${{ inputs.older-than-days }},
+            "dry_run": ${{ inputs.dry-run }}
+          },
+          "artifacts_found": [],
+          "artifacts_deleted": [],
+          "errors": []
+        }
+        EOF
+
+        # Define artifact patterns based on cleanup type
+        case "${{ inputs.cleanup-type }}" in
+          "embeddings")
+            PATTERNS="ai-code-review-embeddings-"
+            ;;
+          "models")
+            PATTERNS="ai-model-cache- ai-fastembed-cache-"
+            ;;
+          "feedback")
+            PATTERNS="ai-review-feedback-"
+            ;;
+          "reports")
+            PATTERNS="ai-review-report-"
+            ;;
+          "all")
+            PATTERNS="ai-code-review-embeddings- ai-model-cache- ai-fastembed-cache- ai-review-feedback- ai-review-report-"
+            ;;
+          *)
+            echo "❌ Unknown cleanup type: ${{ inputs.cleanup-type }}"
+            exit 1
+            ;;
+        esac
+
+        # Add custom pattern if specified
+        if [ -n "${{ inputs.artifact-name-pattern }}" ]; then
+          PATTERNS="$PATTERNS ${{ inputs.artifact-name-pattern }}"
+        fi
+
+        echo "🔍 Searching for artifacts matching patterns: $PATTERNS"
+
+        # Get current time for age comparison
+        CURRENT_TIME=$(date +%s)
+        CUTOFF_TIME=$((CURRENT_TIME - ${{ inputs.older-than-days }} * 24 * 3600))
+
+        # Fetch artifacts from GitHub API
+        echo "📦 Fetching artifacts from repository: ${{ inputs.repository }}"
+
+        # Use GitHub REST API to get artifacts
+        ARTIFACTS_JSON=$(curl -s -H "Authorization: Bearer ${{ github.token }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/repos/${{ inputs.repository }}/actions/artifacts?per_page=100" \
+          | jq -r '.artifacts[]')
+
+        if [ -z "$ARTIFACTS_JSON" ]; then
+          echo "📝 No artifacts found in repository"
+          echo "artifacts-deleted=0" >> $GITHUB_OUTPUT
+          echo "space-reclaimed=0" >> $GITHUB_OUTPUT
+          echo "summary=No artifacts found to cleanup" >> $GITHUB_OUTPUT
+          echo "errors-count=0" >> $GITHUB_OUTPUT
+          echo "failed-deletions=" >> $GITHUB_OUTPUT
+          echo "artifacts-processed=0" >> $GITHUB_OUTPUT
+          echo "report-path=$REPORT_PATH" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        # Process each artifact
+        echo "$ARTIFACTS_JSON" | jq -c '.' | while IFS= read -r artifact; do
+          # Break if we've processed too many artifacts
+          if [ $ARTIFACTS_PROCESSED -ge ${{ inputs.max-artifacts-per-run }} ]; then
+            echo "⚠️ Reached maximum artifacts per run limit (${{ inputs.max-artifacts-per-run }})"
+            break
+          fi
+
+          ARTIFACT_NAME=$(echo "$artifact" | jq -r '.name')
+          ARTIFACT_ID=$(echo "$artifact" | jq -r '.id')
+          ARTIFACT_SIZE=$(echo "$artifact" | jq -r '.size_in_bytes // 0')
+          ARTIFACT_CREATED=$(echo "$artifact" | jq -r '.created_at')
+          ARTIFACT_EXPIRED=$(echo "$artifact" | jq -r '.expired')
+
+          # Skip if artifact is already expired
+          if [ "$ARTIFACT_EXPIRED" = "true" ]; then
+            if [ "${{ inputs.verbose }}" = "true" ]; then
+              echo "⏭️ Skipping expired artifact: $ARTIFACT_NAME"
+            fi
+            continue
+          fi
+
+          # Check if artifact matches any of our patterns
+          MATCHES_PATTERN=false
+          for pattern in $PATTERNS; do
+            if [[ "$ARTIFACT_NAME" == *"$pattern"* ]]; then
+              MATCHES_PATTERN=true
+              break
+            fi
+          done
+
+          if [ "$MATCHES_PATTERN" = "false" ]; then
+            continue
+          fi
+
+          # Check exclude patterns
+          EXCLUDED=false
+          if [ -n "${{ inputs.exclude-patterns }}" ]; then
+            IFS=',' read -ra EXCLUDE_PATTERNS <<< "${{ inputs.exclude-patterns }}"
+            for exclude_pattern in "${EXCLUDE_PATTERNS[@]}"; do
+              if [[ "$ARTIFACT_NAME" == *"$exclude_pattern"* ]]; then
+                EXCLUDED=true
+                if [ "${{ inputs.verbose }}" = "true" ]; then
+                  echo "⏭️ Excluding artifact matching pattern '$exclude_pattern': $ARTIFACT_NAME"
+                fi
+                break
+              fi
+            done
+          fi
+
+          if [ "$EXCLUDED" = "true" ]; then
+            continue
+          fi
+
+          ARTIFACTS_PROCESSED=$((ARTIFACTS_PROCESSED + 1))
+
+          # Check age criteria
+          if [ ${{ inputs.older-than-days }} -gt 0 ]; then
+            ARTIFACT_TIME=$(date -d "$ARTIFACT_CREATED" +%s 2>/dev/null || echo "0")
+            if [ $ARTIFACT_TIME -gt $CUTOFF_TIME ]; then
+              if [ "${{ inputs.verbose }}" = "true" ]; then
+                echo "⏭️ Skipping recent artifact: $ARTIFACT_NAME (created: $ARTIFACT_CREATED)"
+              fi
+              continue
+            fi
+          fi
+
+          echo "🎯 Found matching artifact: $ARTIFACT_NAME (ID: $ARTIFACT_ID, Size: $((ARTIFACT_SIZE / 1024 / 1024))MB)"
+
+          # Add to report
+          echo "$artifact" | jq '. + {"matched": true}' >> artifacts_found.tmp
+
+
+          # Perform deletion
+          if [ "${{ inputs.dry-run }}" = "true" ]; then
+            echo "🔍 [DRY RUN] Would delete artifact: $ARTIFACT_NAME"
+            ARTIFACTS_DELETED=$((ARTIFACTS_DELETED + 1))
+            SPACE_RECLAIMED=$((SPACE_RECLAIMED + ARTIFACT_SIZE / 1024 / 1024))
+          else
+            # Check for confirmation if required
+            if [ "${{ inputs.require-confirmation }}" = "true" ]; then
+              echo "❓ Delete artifact '$ARTIFACT_NAME'? (y/N)"
+              read -r CONFIRM
+              if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+                echo "⏭️ Skipping artifact: $ARTIFACT_NAME"
+                continue
+              fi
+            fi
+
+            echo "🗑️ Deleting artifact: $ARTIFACT_NAME"
+
+            if curl -s -X DELETE \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ inputs.repository }}/actions/artifacts/${ARTIFACT_ID}" >/dev/null 2>&1; then
+              echo "✅ Successfully deleted: $ARTIFACT_NAME"
+              ARTIFACTS_DELETED=$((ARTIFACTS_DELETED + 1))
+              SPACE_RECLAIMED=$((SPACE_RECLAIMED + ARTIFACT_SIZE / 1024 / 1024))
+              echo "$artifact" | jq '. + {"deleted": true}' >> artifacts_deleted.tmp
+            else
+              echo "❌ Failed to delete: $ARTIFACT_NAME"
+              if [ -n "$FAILED_DELETIONS" ]; then
+                FAILED_DELETIONS="$FAILED_DELETIONS,$ARTIFACT_NAME"
+              else
+                FAILED_DELETIONS="$ARTIFACT_NAME"
+              fi
+              echo "{\"artifact_name\": \"$ARTIFACT_NAME\", \"error\": \"deletion_failed\", \"message\": \"API call failed\"}" >> errors.tmp
+              ERRORS_COUNT=$((ERRORS_COUNT + 1))
+            fi
+          fi
+
+          # Rate limiting - small delay between operations
+          sleep 0.1
+        done
+
+        # Generate summary
+        if [ "${{ inputs.dry-run }}" = "true" ]; then
+          CLEANUP_SUMMARY="[DRY RUN] Would delete $ARTIFACTS_DELETED artifacts, reclaiming ~${SPACE_RECLAIMED}MB"
+        else
+          CLEANUP_SUMMARY="Deleted $ARTIFACTS_DELETED artifacts, reclaimed ~${SPACE_RECLAIMED}MB"
+        fi
+
+        if [ $ERRORS_COUNT -gt 0 ]; then
+          CLEANUP_SUMMARY="$CLEANUP_SUMMARY ($ERRORS_COUNT errors)"
+        fi
+
+        # Finalize report
+        {
+          echo "{"
+          echo "  \"cleanup_metadata\": {"
+          echo "    \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\","
+          echo "    \"repository\": \"${{ inputs.repository }}\","
+          echo "    \"cleanup_type\": \"${{ inputs.cleanup-type }}\","
+          echo "    \"older_than_days\": ${{ inputs.older-than-days }},"
+          echo "    \"dry_run\": ${{ inputs.dry-run }}"
+          echo "  },"
+          echo "  \"results\": {"
+          echo "    \"artifacts_processed\": $ARTIFACTS_PROCESSED,"
+          echo "    \"artifacts_deleted\": $ARTIFACTS_DELETED,"
+          echo "    \"space_reclaimed_mb\": $SPACE_RECLAIMED,"
+          echo "    \"errors_count\": $ERRORS_COUNT"
+          echo "  },"
+
+          echo -n "  \"artifacts_found\": ["
+          if [ -f artifacts_found.tmp ]; then
+            cat artifacts_found.tmp | jq -s '.'  | sed 's/^\[//' | sed 's/\]$//'
+          fi
+          echo "],"
+
+          echo -n "  \"artifacts_deleted\": ["
+          if [ -f artifacts_deleted.tmp ]; then
+            cat artifacts_deleted.tmp | jq -s '.' | sed 's/^\[//' | sed 's/\]$//'
+          fi
+          echo "],"
+
+          echo -n "  \"errors\": ["
+          if [ -f errors.tmp ]; then
+            cat errors.tmp | jq -s '.' | sed 's/^\[//' | sed 's/\]$//'
+          fi
+          echo "]"
+          echo "}"
+        } > "$REPORT_PATH"
+
+        # Clean up temporary files
+        rm -f artifacts_found.tmp artifacts_deleted.tmp errors.tmp
+
+        # Set outputs
+        echo "artifacts-deleted=$ARTIFACTS_DELETED" >> $GITHUB_OUTPUT
+        echo "space-reclaimed=$SPACE_RECLAIMED" >> $GITHUB_OUTPUT
+        echo "summary=$CLEANUP_SUMMARY" >> $GITHUB_OUTPUT
+        echo "errors-count=$ERRORS_COUNT" >> $GITHUB_OUTPUT
+        echo "failed-deletions=$FAILED_DELETIONS" >> $GITHUB_OUTPUT
+        echo "artifacts-processed=$ARTIFACTS_PROCESSED" >> $GITHUB_OUTPUT
+        echo "report-path=$REPORT_PATH" >> $GITHUB_OUTPUT
+
+        echo "📊 Cleanup Summary: $CLEANUP_SUMMARY"
+
+    - name: Calculate Processing Time
+      id: timing
+      shell: bash
+      run: |
+        START_TIME="${{ steps.start-timing.outputs.start-time }}"
+        END_TIME=$(date +%s)
+        DURATION=$((END_TIME - START_TIME))
+        echo "duration=${DURATION}" >> $GITHUB_OUTPUT
+        echo "⏱️ Cleanup completed in ${DURATION} seconds"
+
+    - name: Upload Cleanup Report
+      if: inputs.generate-report == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: artifact-cleanup-report-${{ github.run_id }}
+        path: ${{ steps.cleanup.outputs.report-path }}
+        retention-days: 30
+        compression-level: 9
+      continue-on-error: true
+
+    - name: Generate Summary
+      if: always()
+      shell: bash
+      run: |
+        echo "## 🗑️ Artifact Cleanup Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| **Repository** | \`${{ inputs.repository }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Cleanup Type** | \`${{ inputs.cleanup-type }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Mode** | ${{ inputs.dry-run == 'true' && '🔍 Dry Run' || '🗑️ Live Cleanup' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Artifacts Processed** | ${{ steps.cleanup.outputs.artifacts-processed }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Artifacts Deleted** | ${{ steps.cleanup.outputs.artifacts-deleted }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Space Reclaimed** | ${{ steps.cleanup.outputs.space-reclaimed }} MB |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Processing Time** | ${{ steps.timing.outputs.duration }} seconds |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Errors** | ${{ steps.cleanup.outputs.errors-count }} |" >> $GITHUB_STEP_SUMMARY
+
+
+        if [ ${{ steps.cleanup.outputs.errors-count }} -gt 0 ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ❌ Errors Encountered" >> $GITHUB_STEP_SUMMARY
+          echo "Failed to delete: \`${{ steps.cleanup.outputs.failed-deletions }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Check the cleanup report for detailed error information." >> $GITHUB_STEP_SUMMARY
+        fi
+
+        if [ "${{ inputs.verbose }}" = "true" ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔧 Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Age Filter:** Artifacts older than ${{ inputs.older-than-days }} days" >> $GITHUB_STEP_SUMMARY
+          echo "- **Max Artifacts per Run:** ${{ inputs.max-artifacts-per-run }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ inputs.artifact-name-pattern }}" ]; then
+            echo "- **Custom Pattern:** \`${{ inputs.artifact-name-pattern }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -n "${{ inputs.exclude-patterns }}" ]; then
+            echo "- **Exclude Patterns:** \`${{ inputs.exclude-patterns }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 Summary" >> $GITHUB_STEP_SUMMARY
+        echo "${{ steps.cleanup.outputs.summary }}" >> $GITHUB_STEP_SUMMARY
+
+        if [ "${{ inputs.generate-report }}" = "true" ]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📊 **Detailed Report:** \`artifact-cleanup-report-${{ github.run_id }}\`" >> $GITHUB_STEP_SUMMARY
+        fi

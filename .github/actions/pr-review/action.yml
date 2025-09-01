@@ -1,0 +1,248 @@
+name: 'CodeCritique Review'
+description: 'Automated code review using AI analysis with context-aware embeddings'
+
+branding:
+  icon: 'brain'
+  color: 'blue'
+
+inputs:
+  # AI Configuration
+  anthropic-api-key:
+    description: 'Anthropic API key for Claude models'
+    required: true
+
+  verbose:
+    description: 'Show verbose output'
+    required: false
+    default: 'false'
+
+  model:
+    description: 'LLM model to use (e.g., claude-sonnet-4-20250514)'
+    required: false
+
+  max-tokens:
+    description: 'LLM max tokens'
+    required: false
+
+  concurrency:
+    description: 'Concurrency for processing multiple files'
+    required: false
+
+  custom-docs:
+    description: 'Custom documents to provide LLM instructions (format: "title:path,title:path")'
+    required: false
+    default: ''
+
+outputs:
+  # Review Results
+  comments-posted:
+    description: 'Number of review comments posted'
+    value: ${{ steps.review.outputs.comments-posted }}
+
+  issues-found:
+    description: 'Total number of issues found'
+    value: ${{ steps.review.outputs.issues-found }}
+
+  files-analyzed:
+    description: 'Number of files analyzed'
+    value: ${{ steps.review.outputs.files-analyzed }}
+
+  # Performance Metrics
+
+  embedding-cache-hit:
+    description: 'Whether embeddings were found and used'
+    value: ${{ steps.review.outputs.embedding-cache-hit }}
+
+  # Quality Metrics
+  review-score:
+    description: 'Overall review score (0-100)'
+    value: ${{ steps.review.outputs.review-score }}
+
+  security-issues:
+    description: 'Number of security issues found'
+    value: ${{ steps.review.outputs.security-issues }}
+
+  performance-issues:
+    description: 'Number of performance issues found'
+    value: ${{ steps.review.outputs.performance-issues }}
+
+  maintainability-issues:
+    description: 'Number of maintainability issues found'
+    value: ${{ steps.review.outputs.maintainability-issues }}
+
+  # Artifacts
+  feedback-artifact-uploaded:
+    description: 'Whether feedback artifact was uploaded'
+    value: ${{ steps.review.outputs.feedback-artifact-uploaded }}
+
+  review-report-path:
+    description: 'Path to the detailed review report'
+    value: ${{ steps.review.outputs.review-report-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    # Set up environment variables for reuse across steps
+    - name: Set environment variables
+      shell: bash
+      run: |
+        echo "FEEDBACK_ARTIFACT_NAME=ai-review-feedback-${{ github.repository_id }}" >> $GITHUB_ENV
+
+    # Create a symlink to the action repository to access sibling composite actions.
+    # This workaround is needed because GitHub Actions doesn't support relative paths
+    # to sibling actions when the action is used from external repositories.
+    # The symlink allows us to reference ./.action-repo/.github/actions/setup-tool
+    - name: Link current action repo
+      shell: bash
+      run: ln -fs "$(realpath "${{ github.action_path }}/../../..")" "$GITHUB_WORKSPACE/.action-repo"
+
+    - name: Setup CodeCritique Tool
+      id: setup-tool
+      uses: ./.action-repo/.github/actions/setup-tool
+      with:
+        github-token: ${{ github.token }}
+
+    - name: Cleanup link
+      if: always()
+      shell: bash
+      run: rm -f "$GITHUB_WORKSPACE/.action-repo"
+
+    - name: Download feedback artifacts
+      uses: dawidd6/action-download-artifact@v11
+      with:
+        name: ${{ env.FEEDBACK_ARTIFACT_NAME }}
+        path: ${{ github.workspace }}/.ai-feedback
+        github_token: ${{ github.token }}
+        workflow_conclusion: success
+        if_no_artifact_found: warn
+      continue-on-error: true
+
+    - name: Run AI Code Review
+      id: review
+      shell: bash
+      working-directory: ${{ steps.setup-tool.outputs.tool-root }}
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
+        CI: true
+        DEBUG: ${{ inputs.verbose }}
+        VERBOSE: ${{ inputs.verbose }}
+      run: |
+        # Build CLI command arguments - analyze workspace directly
+        CLI_ARGS="analyze -b ${{ github.head_ref }} --directory \"$GITHUB_WORKSPACE\""
+
+        # Add output format and output file (always JSON)
+        CLI_ARGS="$CLI_ARGS --output json --output-file review_output.json"
+
+        # Add verbose flag if enabled
+        if [ "${{ inputs.verbose }}" = "true" ]; then
+          CLI_ARGS="$CLI_ARGS --verbose"
+        fi
+
+        # Add model configuration
+        if [ -n "${{ inputs.model }}" ]; then
+          CLI_ARGS="$CLI_ARGS --model ${{ inputs.model }}"
+        fi
+
+        # Only add optional parameters if they have values
+        if [ -n "${{ inputs.max-tokens }}" ]; then
+          CLI_ARGS="$CLI_ARGS --max-tokens ${{ inputs.max-tokens }}"
+        fi
+
+        if [ -n "${{ inputs.concurrency }}" ]; then
+          CLI_ARGS="$CLI_ARGS --concurrency ${{ inputs.concurrency }}"
+        fi
+
+        # Add custom documents if specified
+        if [ -n "${{ inputs.custom-docs }}" ]; then
+          IFS=',' read -ra DOCS <<< "${{ inputs.custom-docs }}"
+          for doc in "${DOCS[@]}"; do
+            if [ -n "$doc" ]; then
+              CLI_ARGS="$CLI_ARGS --doc \"$doc\""
+            fi
+          done
+        fi
+
+        # Add feedback parameters
+        CLI_ARGS="$CLI_ARGS --track-feedback"
+        CLI_ARGS="$CLI_ARGS --feedback-path \"$GITHUB_WORKSPACE/.ai-feedback\""
+
+        # Run the AI code review
+        echo "🤖 Running AI Code Review..."
+        echo "Command: node src/index.js $CLI_ARGS"
+
+        # Execute the command and capture output
+        # Run the CLI - JSON output goes to file, logs to console
+        eval "node src/index.js $CLI_ARGS" || {
+          echo "❌ AI Code Review failed"
+          exit 1
+        }
+
+        echo "✅ AI Code Review completed"
+
+        # Count results and set outputs from JSON
+        FILES_ANALYZED=$(jq '.summary.totalFilesReviewed // 0' review_output.json 2>/dev/null || echo "0")
+        ISSUES_FOUND=$(jq '.summary.totalIssues // 0' review_output.json 2>/dev/null || echo "0")
+
+        # Set action outputs
+        echo "files-analyzed=$FILES_ANALYZED" >> $GITHUB_OUTPUT
+        echo "issues-found=$ISSUES_FOUND" >> $GITHUB_OUTPUT
+        # Check if embeddings were successfully downloaded
+        EMBEDDING_AVAILABLE="${{ steps.setup-tool.outputs.embeddings-available }}"
+
+        echo "embedding-cache-hit=$EMBEDDING_AVAILABLE" >> $GITHUB_OUTPUT
+
+        if [ "$EMBEDDING_AVAILABLE" != "true" ]; then
+          echo "⚠️  WARNING: No embeddings available! Analysis will be less effective."
+          echo "   Consider running the embedding generation workflow first:"
+          echo "   https://github.com/${{ github.repository }}/actions/workflows/generate-embeddings.yml"
+        fi
+        echo "comments-posted=0" >> $GITHUB_OUTPUT
+        echo "review-score=0" >> $GITHUB_OUTPUT
+        echo "security-issues=0" >> $GITHUB_OUTPUT
+        echo "performance-issues=0" >> $GITHUB_OUTPUT
+        echo "maintainability-issues=0" >> $GITHUB_OUTPUT
+        echo "feedback-artifact-uploaded=false" >> $GITHUB_OUTPUT
+        echo "review-report-path=review_output.json" >> $GITHUB_OUTPUT
+
+        # Display results
+        if [ "${{ inputs.verbose }}" = "true" ]; then
+          echo "📊 Review Results:"
+          echo "  Files analyzed: $FILES_ANALYZED"
+          echo "  Issues found: $ISSUES_FOUND"
+        fi
+
+        # Show the actual output
+        echo "📋 Review Output:"
+        cat review_output.json
+
+    - name: Post PR Comments
+      if: ${{ github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      env:
+        INPUT_FEEDBACK_ARTIFACT_NAME: ${{ env.FEEDBACK_ARTIFACT_NAME }}
+        REVIEW_OUTPUT_PATH: ${{ steps.setup-tool.outputs.tool-root }}/review_output.json
+      with:
+        github-token: ${{ github.token }}
+        script: |
+          const script = await import('${{ github.action_path }}/post-comments.js');
+          await script.default({ github, context, core });
+
+    - name: Upload feedback artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.FEEDBACK_ARTIFACT_NAME }}
+        path: ${{ steps.setup-tool.outputs.tool-root }}/feedback-*.json
+        include-hidden-files: true
+        retention-days: 30
+        if-no-files-found: ignore
+      continue-on-error: true
+
+    - name: Upload review report
+      uses: actions/upload-artifact@v4
+      with:
+        name: ai-review-report-${{ github.event.pull_request.number || 'branch' }}
+        path: ${{ steps.setup-tool.outputs.tool-root }}/review_output.json
+        retention-days: 7
+      continue-on-error: true

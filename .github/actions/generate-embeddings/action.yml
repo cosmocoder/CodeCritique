@@ -1,0 +1,147 @@
+name: 'CodeCritique - Generate Embeddings'
+description: 'Generate embeddings for codebase using the CodeCritique tool'
+
+branding:
+  icon: 'brain'
+  color: 'blue'
+
+inputs:
+  files:
+    description: 'Specific files or patterns to process (space-separated)'
+    required: false
+    default: ''
+  concurrency:
+    description: 'Number of concurrent embedding requests'
+    required: false
+  exclude:
+    description: 'Patterns to exclude (space-separated glob patterns)'
+    required: false
+  exclude-file:
+    description: 'File containing patterns to exclude (one per line)'
+    required: false
+    default: ''
+  verbose:
+    description: 'Show verbose output'
+    required: false
+    default: 'false'
+
+  # Artifact Management
+  embeddings-retention-days:
+    description: 'Number of days to retain embedding artifacts'
+    required: false
+    default: '30'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate Inputs
+      shell: bash
+      run: |
+        echo "🔍 Validating action inputs..."
+
+        # Validate concurrency is a positive integer (only if provided)
+        if [ -n "${{ inputs.concurrency }}" ]; then
+          if ! [[ "${{ inputs.concurrency }}" =~ ^[0-9]+$ ]] || [ "${{ inputs.concurrency }}" -le 0 ]; then
+            echo "❌ Error: concurrency must be a positive integer, got: ${{ inputs.concurrency }}"
+            exit 1
+          fi
+        fi
+
+        # Validate retention days
+        if ! [[ "${{ inputs.embeddings-retention-days }}" =~ ^[0-9]+$ ]] || [ "${{ inputs.embeddings-retention-days }}" -le 0 ]; then
+          echo "❌ Error: embeddings-retention-days must be a positive integer, got: ${{ inputs.embeddings-retention-days }}"
+          exit 1
+        fi
+
+        echo "✅ Input validation passed"
+
+    # Create a symlink to the action repository to access sibling composite actions.
+    # This workaround is needed because GitHub Actions doesn't support relative paths
+    # to sibling actions when the action is used from external repositories.
+    # The symlink allows us to reference ./.action-repo/.github/actions/setup-tool
+    - name: Link current action repo
+      shell: bash
+      run: ln -fs "$(realpath "${{ github.action_path }}/../../..")" "$GITHUB_WORKSPACE/.action-repo"
+
+    - name: Setup CodeCritique Tool
+      id: setup-tool
+      uses: ./.action-repo/.github/actions/setup-tool
+      with:
+        github-token: ${{ github.token }}
+
+    - name: Cleanup link
+      if: always()
+      shell: bash
+      run: rm -f "$GITHUB_WORKSPACE/.action-repo"
+
+    - name: Generate Embeddings
+      id: generate
+      shell: bash
+      working-directory: ${{ steps.setup-tool.outputs.tool-root }}
+      env:
+        DEBUG: ${{ inputs.verbose }}
+        VERBOSE: ${{ inputs.verbose }}
+        GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
+      run: |
+        echo "🧠 Generating embeddings for codebase..."
+
+        # Build command arguments based on actual CLI options
+        ARGS="embeddings:generate"
+        ARGS="${ARGS} --directory \"$GITHUB_WORKSPACE\""
+
+        # Add concurrency only if provided
+        if [ -n "${{ inputs.concurrency }}" ]; then
+          ARGS="${ARGS} --concurrency ${{ inputs.concurrency }}"
+        fi
+
+        # Add specific files if provided
+        if [ -n "${{ inputs.files }}" ]; then
+          for file_pattern in ${{ inputs.files }}; do
+            ARGS="${ARGS} --files '${file_pattern}'"
+          done
+        fi
+
+        # Always exclude action-related directories and files
+        ARGS="${ARGS} --exclude 'ai-code-review-tool/**'"
+        ARGS="${ARGS} --exclude '.ai-code-review-artifacts/**'"
+
+        # Add user-specified exclude patterns
+        if [ -n "${{ inputs.exclude }}" ]; then
+          for pattern in ${{ inputs.exclude }}; do
+            ARGS="${ARGS} --exclude '${pattern}'"
+          done
+        fi
+
+        # Add exclude file if specified
+        if [ -n "${{ inputs.exclude-file }}" ] && [ -f "$GITHUB_WORKSPACE/${{ inputs.exclude-file }}" ]; then
+          ARGS="${ARGS} --exclude-file \"$GITHUB_WORKSPACE/${{ inputs.exclude-file }}\""
+        fi
+
+        # Add verbose flag
+        if [ "${{ inputs.verbose }}" = "true" ]; then
+          ARGS="${ARGS} --verbose"
+        fi
+
+        # Execute with error handling
+        if eval "node src/index.js ${ARGS}"; then
+          echo "✅ Embedding generation completed successfully"
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Embedding generation failed"
+          echo "success=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    - name: Upload Embeddings Artifact
+      id: upload-artifacts
+      if: steps.generate.outputs.success == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ai-code-review-embeddings-${{ github.repository_id }}
+        include-hidden-files: true
+        path: |
+          ${{ github.workspace }}/.ai-review-lancedb/
+          ${{ github.workspace }}/.ai-review-fastembed-cache/
+        retention-days: ${{ inputs.embeddings-retention-days }}
+        if-no-files-found: warn
+      continue-on-error: true

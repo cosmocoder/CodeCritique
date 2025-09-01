@@ -469,29 +469,33 @@ function createCodeChunks(codeContent, chunkSize = HYBRID_SEARCH_CONFIG.CHUNK_SI
   return chunks;
 }
 
-// Initialize the classifier with better error handling and configuration
-let classifier;
-try {
-  classifier = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', {
-    quantized: true,
-    // Reduce precision to avoid dimension issues
-    dtype: 'fp32',
-    device: 'cpu',
-  });
-  console.log(chalk.green('✓ Local MobileBERT classifier initialized successfully'));
-} catch {
-  console.warn(chalk.yellow('⚠ Failed to initialize MobileBERT, trying fallback model...'));
+// Classifier is initialized lazily on first use to avoid heavy startup for non-PR tasks
+let classifier = null;
+async function getClassifier() {
+  if (classifier) return classifier;
   try {
-    // Fallback to a smaller, more stable model
-    classifier = await pipeline('zero-shot-classification', 'Xenova/distilbert-base-uncased-mnli', {
+    classifier = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', {
       quantized: true,
       dtype: 'fp32',
       device: 'cpu',
     });
-    console.log(chalk.green('✓ Local DistilBERT classifier initialized successfully (fallback)'));
-  } catch (fallbackError) {
-    console.warn(chalk.yellow('⚠ Failed to initialize any local classifier:'), fallbackError.message);
-    classifier = null;
+    console.log(chalk.green('✓ Local MobileBERT classifier initialized successfully'));
+    return classifier;
+  } catch {
+    console.warn(chalk.yellow('⚠ Failed to initialize MobileBERT, trying fallback model...'));
+    try {
+      classifier = await pipeline('zero-shot-classification', 'Xenova/distilbert-base-uncased-mnli', {
+        quantized: true,
+        dtype: 'fp32',
+        device: 'cpu',
+      });
+      console.log(chalk.green('✓ Local DistilBERT classifier initialized successfully (fallback)'));
+      return classifier;
+    } catch (fallbackError) {
+      console.warn(chalk.yellow('⚠ Failed to initialize any local classifier:'), fallbackError.message);
+      classifier = null;
+      return null;
+    }
   }
 }
 
@@ -529,6 +533,9 @@ async function verifyLocally(candidates) {
   }
 
   // Check if classifier is available
+  if (!classifier) {
+    classifier = await getClassifier();
+  }
   if (!classifier) {
     console.warn(chalk.yellow('Local classifier not available, assuming all candidates relevant'));
     return candidates;

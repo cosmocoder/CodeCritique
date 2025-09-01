@@ -1,0 +1,80 @@
+name: 'CodeCritique - Setup Tool'
+description: 'Common setup steps for CodeCritique actions: checkout, resolve tool root, setup Node.js, install dependencies, and download artifacts'
+
+inputs:
+  github-token:
+    description: 'GitHub token for authentication'
+    required: true
+
+outputs:
+  tool-root:
+    description: 'Root directory of the CodeCritique tool'
+    value: ${{ steps.tool.outputs.tool-root }}
+
+  embeddings-available:
+    description: 'Whether embeddings artifacts were successfully downloaded'
+    value: ${{ steps.setup-artifacts.outcome == 'success' }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set Tool Root from Action Repository
+      id: tool
+      shell: bash
+      run: |
+        # Use the action repository that GitHub Actions already checked out
+        # The .action-repo symlink points to the correct CodeCritique repository
+        if [ -L "$GITHUB_WORKSPACE/.action-repo" ]; then
+          TOOL_ROOT="$(readlink -f "$GITHUB_WORKSPACE/.action-repo")"
+          echo "tool-root=$TOOL_ROOT" >> $GITHUB_OUTPUT
+          echo "✅ Using tool from symlinked action repo: $TOOL_ROOT"
+        else
+          echo "❌ .action-repo symlink not found"
+          exit 1
+        fi
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: '.action-repo/package-lock.json'
+
+    - name: Install AI Tool Dependencies
+      shell: bash
+      working-directory: ${{ steps.tool.outputs.tool-root }}
+      run: |
+        echo "📦 Installing AI Code Review tool dependencies..."
+        npm ci --no-audit --silent
+
+    - name: Download Embeddings Artifacts
+      id: setup-artifacts
+      uses: dawidd6/action-download-artifact@v11
+      with:
+        name: ai-code-review-embeddings-${{ github.repository_id }}
+        search_artifacts: true
+        github_token: ${{ inputs.github-token }}
+        workflow_conclusion: success
+        if_no_artifact_found: warn
+      continue-on-error: true
+
+    - name: Setup Embeddings Directories
+      shell: bash
+      run: |
+        # Check if artifacts were downloaded to a subdirectory (common with artifact actions)
+        ARTIFACT_SUBDIR="ai-code-review-embeddings-${{ github.repository_id }}"
+
+        if [ -d "$ARTIFACT_SUBDIR" ]; then
+          # Move .ai-review-lancedb if it exists in subdirectory
+          if [ -d "$ARTIFACT_SUBDIR/.ai-review-lancedb" ]; then
+            mv "$ARTIFACT_SUBDIR/.ai-review-lancedb" "${{ github.workspace }}/.ai-review-lancedb"
+          fi
+
+          # Move .ai-review-fastembed-cache if it exists in subdirectory
+          if [ -d "$ARTIFACT_SUBDIR/.ai-review-fastembed-cache" ]; then
+            mv "$ARTIFACT_SUBDIR/.ai-review-fastembed-cache" "${{ github.workspace }}/.ai-review-fastembed-cache"
+          fi
+
+          # Clean up artifact subdirectory
+          rmdir "$ARTIFACT_SUBDIR" 2>/dev/null || true
+        fi

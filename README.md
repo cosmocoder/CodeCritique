@@ -7,6 +7,7 @@ A self-hosted, AI-powered code review tool using **RAG (Retrieval-Augmented Gene
 - [Overview](#overview)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [GitHub Actions Integration](#github-actions-integration)
 - [Commands Reference](#commands-reference)
 - [RAG Architecture](#rag-architecture)
 - [Configuration](#configuration)
@@ -242,6 +243,197 @@ npx ai-code-review analyze --files "**/*.rb"
 # Any language with git diff
 npx ai-code-review analyze --diff-with feature-branch
 ```
+
+## GitHub Actions Integration
+
+This project provides **two reusable GitHub Actions** that can be used in any repository for automated AI-powered code review:
+
+1. **🧠 Generate Embeddings Action** - Creates semantic embeddings for your codebase
+2. **🔍 PR Review Action** - Performs AI-powered code reviews on pull requests
+
+These actions can be used independently or together for a complete AI code review workflow in your CI/CD pipeline.
+
+---
+
+### 🧠 Generate Embeddings Action
+
+**Action Path:** `cosmocoder/CodeCritique/.github/actions/generate-embeddings@main`
+
+This action generates semantic embeddings for your codebase, enabling context-aware code analysis. The embeddings are stored as GitHub Actions artifacts and can be reused across workflow runs. It is recommended to generated embeddings for your project every time the `main` branch is updated.
+
+#### Basic Usage
+
+```yaml
+name: Generate Code Embeddings
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  generate-embeddings:
+    name: Generate Code Embeddings
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # needed for downloading artifacts
+
+    steps:
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+
+      - name: Generate Embeddings
+        uses: cosmocoder/CodeCritique/.github/actions/generate-embeddings@main
+        with:
+          verbose: true
+```
+
+#### Input Parameters
+
+| Parameter                   | Description                                             | Required | Default          |
+| --------------------------- | ------------------------------------------------------- | -------- | ---------------- |
+| `files`                     | Specific files or patterns to process (space-separated) | No       | `''` (all files) |
+| `concurrency`               | Number of concurrent embedding requests                 | No       | Auto-detected    |
+| `exclude`                   | Patterns to exclude (space-separated glob patterns)     | No       | `''`             |
+| `exclude-file`              | File containing patterns to exclude (one per line)      | No       | `''`             |
+| `verbose`                   | Show verbose output                                     | No       | `false`          |
+| `embeddings-retention-days` | Number of days to retain embedding artifacts            | No       | `30`             |
+
+#### Advanced Configuration Examples
+
+##### Processing Specific Files
+
+```yaml
+- name: Generate Embeddings for TypeScript Files
+  uses: cosmocoder/CodeCritique/.github/actions/generate-embeddings@main
+  with:
+    files: 'src/**/*.ts src/**/*.tsx'
+    exclude: '**/*.test.ts **/*.spec.ts'
+    verbose: true
+```
+
+##### High Performance Setup
+
+```yaml
+- name: Generate Embeddings (High Performance)
+  uses: cosmocoder/CodeCritique/.github/actions/generate-embeddings@main
+  with:
+    concurrency: 20
+    embeddings-retention-days: 60
+```
+
+---
+
+### 🔍 PR Review Action
+
+**Action Path:** `cosmocoder/CodeCritique/.github/actions/pr-review@main`
+
+This action performs AI-powered code reviews on pull requests using Anthropic Claude models. It automatically downloads any available embeddings to provide context-aware analysis and posts review comments directly to the PR.
+
+The action includes intelligent feedback tracking that monitors user reactions and replies to review comments. When users dismiss suggestions (through reactions like 👎 or replies with keywords like "disagree", "ignore", or "not relevant"), the action automatically resolves those conversation threads and avoids reposting similar issues in subsequent runs on the same PR, creating a more streamlined review experience.
+
+#### Basic Usage
+
+```yaml
+name: AI PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  pr-review:
+    name: AI PR Review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # needed for marking conversations as resolved
+      pull-requests: write # needed for posting comments
+      actions: read # needed for downloading artifacts
+
+    steps:
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup master branch for diff analysis
+        run: git fetch --no-tags --prune origin main:main
+
+      - name: Code Review
+        uses: cosmocoder/CodeCritique/.github/actions/pr-review@main
+        with:
+          verbose: true
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+#### Required Setup
+
+1. **Anthropic API Key**: Store your Anthropic API key as a repository secret named `ANTHROPIC_API_KEY`
+2. **Permissions**: The workflow must have `contents: write`, `actions: read`, and `pull-requests: write` permissions
+3. **Git Setup**: Ensure the base branch is available for diff analysis (see example above)
+
+#### Input Parameters
+
+| Parameter           | Description                                          | Required | Default         |
+| ------------------- | ---------------------------------------------------- | -------- | --------------- |
+| `anthropic-api-key` | Anthropic API key for Claude models                  | **Yes**  | -               |
+| `verbose`           | Show verbose output                                  | No       | `false`         |
+| `model`             | LLM model to use (e.g., `claude-sonnet-4-20250514`)  | No       | Auto-selected   |
+| `max-tokens`        | Maximum tokens for LLM response                      | No       | Auto-calculated |
+| `concurrency`       | Concurrency for processing multiple files            | No       | `3`             |
+| `custom-docs`       | Custom documents (format: `"title:path,title:path"`) | No       | `''`            |
+
+> **Note**: The action uses sensible defaults for all review parameters. It always:
+>
+> - Uses JSON output format for parsing results
+> - Posts both individual comments and summary comments to PRs
+> - Limits to 25 comments maximum
+> - Tracks feedback to improve future reviews
+> - Uses optimal temperature and similarity thresholds
+
+#### Output Values
+
+The action provides several outputs that can be used in subsequent workflow steps:
+
+| Output                   | Description                            |
+| ------------------------ | -------------------------------------- |
+| `comments-posted`        | Number of review comments posted       |
+| `issues-found`           | Total number of issues found           |
+| `files-analyzed`         | Number of files analyzed               |
+| `analysis-time`          | Time taken for analysis (seconds)      |
+| `embedding-cache-hit`    | Whether embeddings were found and used |
+| `review-score`           | Overall review score (0-100)           |
+| `security-issues`        | Number of security issues found        |
+| `performance-issues`     | Number of performance issues found     |
+| `maintainability-issues` | Number of maintainability issues found |
+| `review-report-path`     | Path to the detailed review report     |
+
+#### Advanced Configuration Examples
+
+##### Custom Model and Performance Settings
+
+```yaml
+- name: AI Code Review with Custom Settings
+  uses: cosmocoder/CodeCritique/.github/actions/pr-review@main
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    model: 'claude-3-5-sonnet-20241022'
+    max-tokens: '4000'
+    concurrency: '5'
+    verbose: true
+```
+
+##### With Custom Documentation
+
+```yaml
+- name: AI Code Review with Team Guidelines
+  uses: cosmocoder/CodeCritique/.github/actions/pr-review@main
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    custom-docs: 'Style Guide:./docs/style-guide.md,API Standards:./docs/api-standards.md'
+    verbose: true
+```
+
+---
 
 ## Commands Reference
 

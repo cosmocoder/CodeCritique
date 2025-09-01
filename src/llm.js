@@ -11,26 +11,19 @@ import { Anthropic } from '@anthropic-ai/sdk';
 import chalk from 'chalk';
 import dotenv from 'dotenv';
 
-// dotenv will automatically load .env from the current working directory
+// Load env variables if present; do not enforce key at import time
 dotenv.config();
 
-// Check if API key is available
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error(chalk.red('ERROR: ANTHROPIC_API_KEY not found in environment variables.'));
-  console.error(chalk.red('Please provide your API key using one of these methods:'));
-  console.error(chalk.red('1. Create a .env file in your project directory with:'));
-  console.error(chalk.red('   ANTHROPIC_API_KEY=your_api_key_here'));
-  console.error(chalk.red('2. Set the environment variable directly when running the command:'));
-  console.error(chalk.red('   ANTHROPIC_API_KEY=your_api_key_here npx ai-code-review analyze ...'));
-
-  // Throw an error to stop script execution
-  throw new Error('ANTHROPIC_API_KEY is required for code analysis. Please set it in your environment variables.');
+let anthropic = null;
+function getAnthropicClient() {
+  if (anthropic) return anthropic;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error('ANTHROPIC_API_KEY is required for analysis. Set it in env or .env before running analyze.');
+  }
+  anthropic = new Anthropic({ apiKey });
+  return anthropic;
 }
-
-// Initialize Anthropic client
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
 
 // Default model
 const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
@@ -51,7 +44,8 @@ async function sendPromptToClaude(prompt, options = {}) {
   try {
     console.log(chalk.cyan('Sending prompt to Claude...'));
 
-    const response = await anthropic.messages.create({
+    const client = getAnthropicClient();
+    const response = await client.messages.create({
       model,
       max_tokens: maxTokens,
       temperature,

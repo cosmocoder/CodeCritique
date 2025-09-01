@@ -19,8 +19,14 @@ export const LANCEDB_DIR_NAME = '.ai-review-lancedb';
 export const FASTEMBED_CACHE_DIR_NAME = '.ai-review-fastembed-cache';
 
 // Directory Paths
-export const LANCEDB_PATH = path.join(process.env.HOME || process.env.USERPROFILE || process.cwd(), LANCEDB_DIR_NAME);
-export const FASTEMBED_CACHE_DIR = path.join(process.env.HOME || process.env.USERPROFILE || process.cwd(), FASTEMBED_CACHE_DIR_NAME);
+// Use workspace-relative paths in CI environments, HOME-based paths locally
+const BASE_DIR = process.env.CI
+  ? // Prioritize the explicitly passed workspace path
+    process.env.GITHUB_WORKSPACE_PATH || process.cwd()
+  : process.env.HOME || process.env.USERPROFILE || process.cwd();
+
+export const LANCEDB_PATH = path.join(BASE_DIR, LANCEDB_DIR_NAME);
+export const FASTEMBED_CACHE_DIR = path.join(BASE_DIR, FASTEMBED_CACHE_DIR_NAME);
 
 // Database Table Names
 export const TABLE_NAMES = {
