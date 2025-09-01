@@ -345,16 +345,7 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
     contextSections.push({
       title: 'Historical Review Comments',
       description: 'Similar code patterns and issues identified by human reviewers in past PRs',
-      items: prCommentContext.map((comment) => ({
-        type: 'pr_comment',
-        pr_number: comment.prNumber,
-        author: comment.author,
-        comment_text: comment.body,
-        file_path: comment.filePath,
-        comment_type: comment.commentType,
-        similarity_score: comment.relevanceScore,
-        created_at: comment.createdAt,
-      })),
+      items: prCommentContext,
     });
   }
 
@@ -1119,11 +1110,11 @@ ${g.content}
       ?.items?.slice(0, MAX_PR_COMMENTS_FOR_CONTEXT)
       .map((comment, idx) => {
         return `### Historical Comment ${idx + 1}
-- **PR**: #${comment.pr_number} by ${comment.author}
-- **File**: ${comment.file_path}
-- **Type**: ${comment.comment_type}
-- **Relevance**: ${(comment.similarity_score * 100).toFixed(1)}%
-- **Review**: ${comment.comment_text}
+- **PR**: #${comment.prNumber} by ${comment.author}
+- **File**: ${comment.filePath}
+- **Type**: ${comment.commentType || 'review'}
+- **Relevance**: ${(comment.relevanceScore * 100).toFixed(1)}%
+- **Review**: ${comment.body}
 
 `;
       })
