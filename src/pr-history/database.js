@@ -472,30 +472,53 @@ function createCodeChunks(codeContent, chunkSize = HYBRID_SEARCH_CONFIG.CHUNK_SI
 
 // Classifier is initialized lazily on first use to avoid heavy startup for non-PR tasks
 let classifier = null;
+let isInitializingClassifier = false;
+let classifierInitializationPromise = null;
 
 async function getClassifier() {
+  // If already initialized, return immediately
   if (classifier) return classifier;
+
+  // If currently initializing, wait for the existing initialization
+  if (isInitializingClassifier && classifierInitializationPromise) {
+    return await classifierInitializationPromise;
+  }
+
+  // Start initialization
+  isInitializingClassifier = true;
+  classifierInitializationPromise = _initializeClassifier();
+
   try {
-    classifier = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', {
+    classifier = await classifierInitializationPromise;
+    return classifier;
+  } finally {
+    isInitializingClassifier = false;
+    classifierInitializationPromise = null;
+  }
+}
+
+async function _initializeClassifier() {
+  try {
+    console.log(chalk.blue('Initializing MobileBERT classifier...'));
+    const cls = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', {
       quantized: true,
       dtype: 'fp32',
       device: 'cpu',
     });
     console.log(chalk.green('✓ Local MobileBERT classifier initialized successfully'));
-    return classifier;
+    return cls;
   } catch {
     console.warn(chalk.yellow('⚠ Failed to initialize MobileBERT, trying fallback model...'));
     try {
-      classifier = await pipeline('zero-shot-classification', 'Xenova/distilbert-base-uncased-mnli', {
+      const cls = await pipeline('zero-shot-classification', 'Xenova/distilbert-base-uncased-mnli', {
         quantized: true,
         dtype: 'fp32',
         device: 'cpu',
       });
       console.log(chalk.green('✓ Local DistilBERT classifier initialized successfully (fallback)'));
-      return classifier;
+      return cls;
     } catch (fallbackError) {
       console.warn(chalk.yellow('⚠ Failed to initialize any local classifier:'), fallbackError.message);
-      classifier = null;
       return null;
     }
   }
