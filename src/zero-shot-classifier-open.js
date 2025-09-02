@@ -10,6 +10,7 @@ import * as linguistLanguages from 'linguist-languages';
 import { LRUCache } from 'lru-cache';
 import stopwords from 'stopwords-iso/stopwords-iso.json' with { type: 'json' };
 import techKeywords from './technology-keywords.json' with { type: 'json' };
+import { truncateToTokenLimit } from './utils/mobilebert-tokenizer.js';
 
 // Configure Transformers.js environment
 env.allowLocalModels = false;
@@ -99,16 +100,26 @@ class OpenZeroShotClassifier {
   }
 
   /**
-   * Initialize the zero-shot classification pipeline
+   * Initialize the zero-shot classification pipeline (singleton pattern)
    */
   async initialize() {
+    // If already initialized, return immediately
     if (this.isInitialized) return;
 
-    if (!this.initializationPromise) {
-      this.initializationPromise = this._doInitialize();
+    // If currently initializing, wait for the existing initialization
+    if (this.initializationPromise) {
+      return await this.initializationPromise;
     }
 
-    await this.initializationPromise;
+    // Start initialization
+    this.initializationPromise = this._doInitialize();
+
+    try {
+      await this.initializationPromise;
+    } finally {
+      // Clean up the promise after initialization (success or failure)
+      this.initializationPromise = null;
+    }
   }
 
   async _doInitialize() {
@@ -120,7 +131,7 @@ class OpenZeroShotClassifier {
       });
 
       this.isInitialized = true;
-      console.log('Open-ended zero-shot classifier initialized successfully');
+      console.log('✓ Open-ended zero-shot classifier initialized successfully');
     } catch (error) {
       console.error('Error initializing classifier:', error);
       this.isInitialized = false;
@@ -261,8 +272,8 @@ class OpenZeroShotClassifier {
         return [];
       }
 
-      // Truncate text for classification
-      const truncatedText = text.substring(0, 1000); // Reduced to avoid token limit errors
+      // Truncate text using exact token counting to avoid MobileBERT's 512 token limit
+      const truncatedText = await truncateToTokenLimit(text, 450); // Conservative limit
 
       // Create hypotheses for each candidate
       const hypotheses = candidates.map((tech) => `This text is about ${tech}`);
@@ -311,7 +322,8 @@ class OpenZeroShotClassifier {
     }
 
     try {
-      const truncatedText = text.substring(0, 1000); // Reduced to avoid token limit errors
+      // Use exact token counting to avoid MobileBERT's 512 token limit
+      const truncatedText = await truncateToTokenLimit(text, 450);
 
       // Open-ended domain hypotheses
       const domainHypotheses = [

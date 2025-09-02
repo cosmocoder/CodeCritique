@@ -12,6 +12,7 @@ import chalk from 'chalk';
 import stopwords from 'stopwords-iso/stopwords-iso.json' with { type: 'json' };
 import { EMBEDDING_DIMENSIONS, TABLE_NAMES } from '../embeddings/constants.js';
 import { getDefaultEmbeddingsSystem } from '../embeddings/factory.js';
+import { truncateToTokenLimit, cleanupTokenizer } from '../utils/mobilebert-tokenizer.js';
 
 // Create embeddings system instance
 const embeddingsSystem = getDefaultEmbeddingsSystem();
@@ -471,53 +472,79 @@ function createCodeChunks(codeContent, chunkSize = HYBRID_SEARCH_CONFIG.CHUNK_SI
 
 // Classifier is initialized lazily on first use to avoid heavy startup for non-PR tasks
 let classifier = null;
+let isInitializingClassifier = false;
+let classifierInitializationPromise = null;
+
 async function getClassifier() {
+  // If already initialized, return immediately
   if (classifier) return classifier;
+
+  // If currently initializing, wait for the existing initialization
+  if (isInitializingClassifier && classifierInitializationPromise) {
+    return await classifierInitializationPromise;
+  }
+
+  // Start initialization
+  isInitializingClassifier = true;
+  classifierInitializationPromise = _initializeClassifier();
+
   try {
-    classifier = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', {
+    classifier = await classifierInitializationPromise;
+    return classifier;
+  } finally {
+    isInitializingClassifier = false;
+    classifierInitializationPromise = null;
+  }
+}
+
+async function _initializeClassifier() {
+  try {
+    console.log(chalk.blue('Initializing MobileBERT classifier...'));
+    const cls = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', {
       quantized: true,
       dtype: 'fp32',
       device: 'cpu',
     });
     console.log(chalk.green('✓ Local MobileBERT classifier initialized successfully'));
-    return classifier;
+    return cls;
   } catch {
     console.warn(chalk.yellow('⚠ Failed to initialize MobileBERT, trying fallback model...'));
     try {
-      classifier = await pipeline('zero-shot-classification', 'Xenova/distilbert-base-uncased-mnli', {
+      const cls = await pipeline('zero-shot-classification', 'Xenova/distilbert-base-uncased-mnli', {
         quantized: true,
         dtype: 'fp32',
         device: 'cpu',
       });
       console.log(chalk.green('✓ Local DistilBERT classifier initialized successfully (fallback)'));
-      return classifier;
+      return cls;
     } catch (fallbackError) {
       console.warn(chalk.yellow('⚠ Failed to initialize any local classifier:'), fallbackError.message);
-      classifier = null;
       return null;
     }
   }
 }
 
 /**
- * Clean up the classifier resources to prevent hanging
+ * Clean up the classifier and tokenizer resources to prevent hanging
  */
 export async function cleanupClassifier() {
   if (classifier) {
     try {
       await classifier.dispose();
-
       classifier = null;
       console.log(chalk.green('✓ Local classifier resources cleaned up'));
-
-      // Force garbage collection if available
-      if (global.gc) {
-        global.gc();
-      }
     } catch (error) {
       console.warn(chalk.yellow('⚠ Error cleaning up classifier:'), error.message);
       classifier = null;
     }
+  }
+
+  // Clean up shared tokenizer
+  await cleanupTokenizer();
+
+  // Force garbage collection if available
+  if (global.gc) {
+    global.gc();
   }
 }
 
@@ -542,40 +569,43 @@ async function verifyLocally(candidates) {
   }
 
   // MobileBERT has a max sequence length of 512 tokens.
-  // We need to be very conservative to avoid ONNX dimension mismatches.
-  // Use a much smaller limit and clean the text more aggressively
-  const maxChars = 400; // Very conservative limit
+  // Use exact token counting to stay well under the limit
+  const maxTokensPerContext = 450; // Conservative limit to avoid ONNX dimension issues
 
   // 1. Create an array of text contexts for the entire batch.
-  const contexts = candidates.map((candidate) => {
-    // Clean and normalize the text inputs to prevent tokenization issues
-    const commentText = (candidate.comment_text || '')
-      .trim()
-      .replace(/\s+/g, ' ') // Normalize whitespace
-      .replace(/[^\w\s.,;:!?()-]/g, '') // Remove special characters that might cause issues
-      .substring(0, maxChars / 2);
+  const contexts = await Promise.all(
+    candidates.map(async (candidate) => {
+      // Clean and normalize the text inputs
+      const commentText = (candidate.comment_text || '').trim().replace(/\s+/g, ' ');
+      const codeText = (candidate.matchedChunk.code || '').trim().replace(/\s+/g, ' ');
 
-    const codeText = (candidate.matchedChunk.code || '')
-      .trim()
-      .replace(/\s+/g, ' ') // Normalize whitespace
-      .replace(/[^\w\s.,;:!?(){}[\]<>=+\-*/]/g, '') // Keep basic code characters
-      .substring(0, maxChars / 2);
+      // Smart truncation: prioritize beginning and key parts of comment
+      let selectedCommentText = commentText;
+      if (commentText.length > 500) {
+        const firstPart = commentText.substring(0, 300);
+        const lastPart = commentText.substring(commentText.length - 100);
+        // Check if the last part contains important keywords
+        if (lastPart.match(/\b(fix|bug|issue|error|problem|solution|should|recommend)\b/i)) {
+          selectedCommentText = firstPart + '... ' + lastPart;
+        } else {
+          selectedCommentText = commentText.substring(0, 400);
+        }
+      }
 
-    // Create a simple, clean input format
-    const problemContext = `Comment: ${commentText} Code: ${codeText}`;
+      // For code, prioritize the beginning as it usually contains the most context
+      let selectedCodeText = codeText;
+      if (codeText.length > 400) {
+        selectedCodeText = codeText.substring(0, 400) + '...';
+      }
 
-    // Final safety truncation with word boundary respect
-    let truncatedContext = problemContext.substring(0, maxChars);
+      // Create the context string
+      const problemContext = `Comment: ${selectedCommentText} Code: ${selectedCodeText}`;
 
-    // Ensure we don't cut off in the middle of a word
-    const lastSpaceIndex = truncatedContext.lastIndexOf(' ');
-    if (lastSpaceIndex > maxChars * 0.8) {
-      // Only trim if we're not losing too much
-      truncatedContext = truncatedContext.substring(0, lastSpaceIndex);
-    }
-
-    return truncatedContext;
-  });
+      // Use exact token counting to truncate properly
+      const finalContext = await truncateToTokenLimit(problemContext, maxTokensPerContext);
+      return finalContext;
+    })
+  );
 
   const candidateLabels = ['relevant issue', 'irrelevant'];
   const relevanceThreshold = 0.75; // Tune this value (75% confidence)
@@ -597,9 +627,10 @@ async function verifyLocally(candidates) {
 
     return verifiedCandidates;
   } catch (error) {
-    // Check if it's the specific ONNX broadcasting error
-    if (error.message && error.message.includes('BroadcastIterator')) {
-      console.warn(chalk.yellow(`Local batch verification skipped due to tensor dimension mismatch. Batch size: ${candidates.length}`));
+    // Check if it's the specific ONNX broadcasting error or token limit exceeded
+    if (error.message && (error.message.includes('BroadcastIterator') || error.message.includes('Non-zero status code'))) {
+      console.warn(chalk.yellow(`Local batch verification skipped due to token/tensor dimension issues. Batch size: ${candidates.length}`));
+      console.warn(chalk.yellow(`Using exact token counting to prevent this issue in the future.`));
     } else {
       console.error(chalk.red('Local batch verification failed:'), error.message || error);
     }

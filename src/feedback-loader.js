@@ -137,7 +137,7 @@ export function shouldSkipSimilarIssue(issueDescription, feedbackData, options =
  * @param {string} text2 - Second text
  * @returns {number} Similarity score (0-1)
  */
-export function calculateSimilarity(text1, text2) {
+function calculateSimilarity(text1, text2) {
   if (!text1 || !text2) return 0;
 
   const words1 = text1.toLowerCase().split(/\s+/);
