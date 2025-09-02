@@ -10,6 +10,7 @@ import * as linguistLanguages from 'linguist-languages';
 import { LRUCache } from 'lru-cache';
 import stopwords from 'stopwords-iso/stopwords-iso.json' with { type: 'json' };
 import techKeywords from './technology-keywords.json' with { type: 'json' };
+import { truncateToTokenLimit } from './utils/mobilebert-tokenizer.js';
 
 // Configure Transformers.js environment
 env.allowLocalModels = false;
@@ -261,8 +262,8 @@ class OpenZeroShotClassifier {
         return [];
       }
 
-      // Truncate text for classification
-      const truncatedText = text.substring(0, 1000); // Reduced to avoid token limit errors
+      // Truncate text using exact token counting to avoid MobileBERT's 512 token limit
+      const truncatedText = await truncateToTokenLimit(text, 450); // Conservative limit
 
       // Create hypotheses for each candidate
       const hypotheses = candidates.map((tech) => `This text is about ${tech}`);
@@ -311,7 +312,8 @@ class OpenZeroShotClassifier {
     }
 
     try {
-      const truncatedText = text.substring(0, 1000); // Reduced to avoid token limit errors
+      // Use exact token counting to avoid MobileBERT's 512 token limit
+      const truncatedText = await truncateToTokenLimit(text, 450);
 
       // Open-ended domain hypotheses
       const domainHypotheses = [
