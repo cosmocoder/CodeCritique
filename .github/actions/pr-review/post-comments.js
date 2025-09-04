@@ -490,7 +490,7 @@ ${issue.suggestion}`;
           if (trackFeedback) {
             commentBody += `
 
-*💬 Your feedback helps improve future reviews. React with 👍/👎 or reply to let us know if this suggestion is helpful.*`;
+*💬 React with 👍/👎 or reply with "ignore" or "false positive" to prevent similar comments in future runs on this PR.*`;
           }
 
           commentBody += `
