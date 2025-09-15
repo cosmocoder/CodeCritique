@@ -33,6 +33,7 @@ export const TABLE_NAMES = {
   FILE_EMBEDDINGS: 'file_embeddings',
   DOCUMENT_CHUNK: 'document_chunk_embeddings',
   PR_COMMENTS: 'pr_comments',
+  PROJECT_SUMMARIES: 'project_summaries',
 };
 
 // Cache Configuration

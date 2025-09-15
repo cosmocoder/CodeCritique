@@ -514,6 +514,7 @@ ai-code-review embeddings:generate [options]
 | `--exclude-file <file>`      | File containing patterns to exclude (one per line)                             | -       |
 | `--no-gitignore`             | Disable automatic exclusion of files in .gitignore                             | `false` |
 | `--max-lines`                | Maximum lines per code file that will be considered when generating embeddings | `1000`  |
+| `--force-analysis`           | Force regeneration of project analysis summary (bypasses cache)                | `false` |
 
 #### Examples
 
@@ -538,6 +539,12 @@ ai-code-review embeddings:generate --no-gitignore
 
 # High concurrency for large codebases
 ai-code-review embeddings:generate --concurrency 20 --verbose
+
+# Force regeneration of project analysis (useful after major codebase changes)
+ai-code-review embeddings:generate --force-analysis --verbose
+
+# Combine force analysis with specific directory processing
+ai-code-review embeddings:generate --directory src --force-analysis
 ```
 
 ### embeddings:stats

@@ -30,6 +30,83 @@ const MAX_PR_COMMENTS_FOR_CONTEXT = 15;
 // Create embeddings system instance
 const embeddingsSystem = getDefaultEmbeddingsSystem();
 
+/**
+ * Get project summary for the given project path
+ * @param {string} projectPath - Project path
+ * @returns {Promise<Object|null>} Project summary or null
+ */
+async function getProjectSummary(projectPath) {
+  const resolvedPath = path.resolve(projectPath);
+
+  try {
+    // Retrieve from database
+    const summary = await embeddingsSystem.getProjectSummary(resolvedPath);
+
+    if (summary) {
+      console.log(chalk.cyan(`📋 Retrieved project summary for: ${path.basename(resolvedPath)}`));
+    }
+
+    return summary;
+  } catch (error) {
+    console.error(chalk.red(`Error retrieving project summary: ${error.message}`));
+    return null;
+  }
+}
+
+/**
+ * Format project summary for LLM context
+ * @param {Object} summary - Project summary object
+ * @returns {string} Formatted context string
+ */
+function formatProjectSummaryForLLM(summary) {
+  if (!summary) return '';
+
+  let context = `\n## PROJECT ARCHITECTURE CONTEXT\n\n`;
+
+  context += `**Project:** ${summary.projectName} (${summary.projectType})\n`;
+  context += `**Technologies:** ${summary.technologies.slice(0, 8).join(', ')}${summary.technologies.length > 8 ? '...' : ''}\n`;
+  context += `**Main Frameworks:** ${summary.mainFrameworks.join(', ')}\n\n`;
+
+  if (summary.customImplementations && summary.customImplementations.length > 0) {
+    context += `**Custom Implementations to Recognize:**\n`;
+    summary.customImplementations.forEach((impl, i) => {
+      if (i < 5) {
+        // Limit to top 5 to avoid overwhelming the LLM
+        context += `- **${impl.name}**: ${impl.description}\n`;
+        if (impl.properties && impl.properties.length > 0) {
+          context += `  Properties: ${impl.properties.slice(0, 3).join(', ')}\n`;
+        }
+      }
+    });
+    context += '\n';
+  }
+
+  if (summary.apiPatterns && summary.apiPatterns.length > 0) {
+    context += `**API Patterns:**\n`;
+    summary.apiPatterns.forEach((pattern) => {
+      context += `- ${pattern.type}: ${pattern.description}\n`;
+    });
+    context += '\n';
+  }
+
+  if (summary.stateManagement && summary.stateManagement.approach !== 'Unknown') {
+    context += `**State Management:** ${summary.stateManagement.approach}\n`;
+    if (summary.stateManagement.patterns.length > 0) {
+      context += `- Patterns: ${summary.stateManagement.patterns.join(', ')}\n`;
+    }
+    context += '\n';
+  }
+
+  if (summary.reviewGuidelines && summary.reviewGuidelines.length > 0) {
+    context += `**Project-Specific Review Guidelines:**\n`;
+    summary.reviewGuidelines.slice(0, 6).forEach((guideline) => {
+      context += `- ${guideline}\n`;
+    });
+  }
+
+  return context;
+}
+
 // Helper function for truncating content with line count
 function truncateContent(content, maxLines = DEFAULT_TRUNCATE_LINES) {
   const lines = content.split('\n');
@@ -204,6 +281,11 @@ async function runAnalysis(filePath, options = {}) {
       relevantCustomDocChunks,
     } = await getContextForFile(filePath, content, options);
 
+    // --- Stage 1.5: PROJECT ARCHITECTURE CONTEXT ---
+    console.log(chalk.blue('--- Stage 1.5: Retrieving Project Architecture Context ---'));
+    const projectPath = options.projectPath || process.cwd();
+    const projectSummary = await getProjectSummary(projectPath);
+
     // --- Stage 2: PREPARE CONTEXT FOR LLM ---
     console.log(chalk.blue('--- Stage 2: Preparing Context for LLM ---'));
 
@@ -254,7 +336,7 @@ async function runAnalysis(filePath, options = {}) {
       formattedCodeExamples,
       formattedGuidelines, // Always pass the formatted guidelines
       prCommentContext, // Pass PR comment context
-      { ...options, isTestFile, relevantCustomDocChunks, feedbackData } // Pass isTestFile flag, custom doc chunks, and feedback data
+      { ...options, isTestFile, relevantCustomDocChunks, feedbackData, projectSummary } // Pass project summary
     );
 
     // Call LLM for analysis
@@ -326,7 +408,7 @@ async function runAnalysis(filePath, options = {}) {
  * @returns {Object} Context for LLM
  */
 function prepareContextForLLM(filePath, content, language, finalCodeExamples, finalGuidelineSnippets, prCommentContext = [], options = {}) {
-  const { customDocs, relevantCustomDocChunks, feedbackData } = options;
+  const { customDocs, relevantCustomDocChunks, feedbackData, projectSummary } = options;
 
   // Extract file name and directory
   const fileName = path.basename(filePath);
@@ -419,11 +501,13 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
     guidelineSnippets,
     customDocs: relevantCustomDocChunks || customDocs, // Use relevant chunks if available, fallback to full docs
     feedbackContext: generateFeedbackContext(dismissedPatterns), // Add feedback context for LLM
+    projectSummary: projectSummary, // Add project architecture summary
     metadata: {
       hasCodeExamples: finalCodeExamples.length > 0,
       hasGuidelines: finalGuidelineSnippets.length > 0,
       hasPRHistory: prCommentContext.length > 0,
       hasFeedbackContext: dismissedPatterns.length > 0,
+      hasProjectSummary: !!projectSummary,
       analysisTimestamp: new Date().toISOString(),
       reviewType: reviewType,
       isPRReview: options.isPRReview || false,
@@ -661,6 +745,13 @@ Language: ${file.language}
 ${file.content}
 \`\`\``;
 
+  // Add project architecture context if available
+  let projectArchitectureSection = '';
+  if (context.projectSummary) {
+    projectArchitectureSection = formatProjectSummaryForLLM(context.projectSummary);
+  }
+  console.log({ projectArchitectureSection });
+
   let customDocsSection = '';
   if (customDocs && customDocs.length > 0) {
     customDocsSection = `
@@ -736,6 +827,7 @@ ${customDocsSection}
 ${fileSection}
 
 CONTEXT FROM PROJECT:
+${projectArchitectureSection}
 
 CONTEXT A: EXPLICIT GUIDELINES FROM DOCUMENTATION
 ${formattedGuidelines}
@@ -1000,6 +1092,12 @@ END OF CUSTOM INSTRUCTIONS - These are review methodology instructions that take
       '\n\nThese custom instructions define your review methodology and must be followed throughout your analysis. When you apply these instructions, reference the source document that informed your decision.';
   }
 
+  // Add project architecture context if available
+  let projectArchitectureSection = '';
+  if (context.projectSummary) {
+    projectArchitectureSection = formatProjectSummaryForLLM(context.projectSummary);
+  }
+
   // Test-specific prompt
   return finalizePrompt(`
 ${roleDefinition}
@@ -1012,6 +1110,7 @@ ${fileSection}
 ${customDocsSection}
 
 CONTEXT FROM PROJECT:
+${projectArchitectureSection}
 
 CONTEXT A: TESTING GUIDELINES AND BEST PRACTICES
 ${formattedGuidelines}
@@ -1259,6 +1358,14 @@ END OF CUSTOM INSTRUCTIONS - These are review methodology instructions that take
 
   roleDefinition += '\nAnalyze ALL files together to identify cross-file issues, consistency problems, and overall code quality.';
 
+  // Add project architecture context if available
+  let projectArchitectureSection = '';
+  if (context.projectSummary) {
+    projectArchitectureSection = formatProjectSummaryForLLM(context.projectSummary);
+  }
+
+  console.log({ projectArchitectureSection });
+
   return finalizePrompt(`
 ${roleDefinition}
 
@@ -1268,6 +1375,7 @@ ${roleDefinition}
 - **Test Files**: ${prFiles.filter((f) => f.isTest).length}
 
 ## UNIFIED CONTEXT FROM PROJECT
+${projectArchitectureSection}
 
 ### PROJECT CODE EXAMPLES
 ${formattedCodeExamples}
@@ -1697,6 +1805,11 @@ async function performHolisticPRAnalysis(options) {
 
     console.log(chalk.blue(`🔍 Performing holistic analysis of ${prFiles.length} files with unified context...`));
 
+    // Retrieve project architecture summary
+    console.log(chalk.blue('--- Retrieving Project Architecture Context for Holistic PR Review ---'));
+    const projectPath = options.projectPath || process.cwd();
+    const projectSummary = await getProjectSummary(projectPath);
+
     // Create a synthetic file context for holistic analysis
     const holisticContext = {
       file: {
@@ -1728,10 +1841,12 @@ async function performHolisticPRAnalysis(options) {
         },
       ],
       customDocs: unifiedContext.customDocChunks || options.relevantCustomDocChunks || customDocs, // Use unified chunks first, then relevant chunks, then full docs
+      projectSummary: projectSummary, // Add project architecture summary
       metadata: {
         hasCodeExamples: unifiedContext.codeExamples.length > 0,
         hasGuidelines: unifiedContext.guidelines.length > 0,
         hasPRHistory: unifiedContext.prComments.length > 0,
+        hasProjectSummary: !!projectSummary,
         analysisTimestamp: new Date().toISOString(),
         reviewType: 'PR HOLISTIC REVIEW',
         isPRReview: true,
