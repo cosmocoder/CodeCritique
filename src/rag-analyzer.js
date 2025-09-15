@@ -750,7 +750,6 @@ ${file.content}
   if (context.projectSummary) {
     projectArchitectureSection = formatProjectSummaryForLLM(context.projectSummary);
   }
-  console.log({ projectArchitectureSection });
 
   let customDocsSection = '';
   if (customDocs && customDocs.length > 0) {
@@ -1363,8 +1362,6 @@ END OF CUSTOM INSTRUCTIONS - These are review methodology instructions that take
   if (context.projectSummary) {
     projectArchitectureSection = formatProjectSummaryForLLM(context.projectSummary);
   }
-
-  console.log({ projectArchitectureSection });
 
   return finalizePrompt(`
 ${roleDefinition}
