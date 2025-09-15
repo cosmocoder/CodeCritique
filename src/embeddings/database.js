@@ -501,8 +501,15 @@ export class DatabaseManager {
         deletedCount += await this._clearProjectTableRecords(db, this.documentChunkTable, resolvedProjectPath, projectName, 'project_path');
       }
 
+      // Clear project summaries for this project
+      if (tableNames.includes(PROJECT_SUMMARIES_TABLE)) {
+        const summariesTable = await db.openTable(PROJECT_SUMMARIES_TABLE);
+        await this._validateTableHasProjectPath(summariesTable, PROJECT_SUMMARIES_TABLE);
+        deletedCount += await this._clearProjectTableRecords(db, PROJECT_SUMMARIES_TABLE, resolvedProjectPath, projectName, 'project_path');
+      }
+
       // Note: PR comments are cleared via separate pr-history:clear command
-      // This embeddings:clear command only handles file and document embeddings
+      // This embeddings:clear command handles file embeddings, document embeddings, and project summaries
 
       if (deletedCount > 0) {
         console.log(chalk.green(`Successfully cleared ${deletedCount} embeddings for project: ${resolvedProjectPath}`));
