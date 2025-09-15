@@ -296,6 +296,27 @@ class EmbeddingsSystem {
     return this.databaseManager.clearAllEmbeddings();
   }
 
+  /**
+   * Store project summary for later retrieval during reviews
+   * @param {string} projectPath - Project path
+   * @param {Object} projectSummary - Project analysis summary
+   * @returns {Promise<boolean>}
+   */
+  async storeProjectSummary(projectPath, projectSummary) {
+    await this.databaseManager.getDBConnection();
+    return this.databaseManager.storeProjectSummary(projectPath, projectSummary);
+  }
+
+  /**
+   * Get stored project summary
+   * @param {string} projectPath - Project path
+   * @returns {Promise<Object|null>}
+   */
+  async getProjectSummary(projectPath) {
+    await this.databaseManager.getDBConnection();
+    return this.databaseManager.getProjectSummary(projectPath);
+  }
+
   // ============================================================================
   // PR COMMENTS TABLE METHODS
   // ============================================================================

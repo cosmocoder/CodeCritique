@@ -26,6 +26,7 @@ import {
   validateGitHubToken,
 } from './pr-history/cli-utils.js';
 import { cleanupClassifier, clearPRComments, getPRCommentsStats, hasPRComments } from './pr-history/database.js';
+import { ProjectAnalyzer } from './project-analyzer.js';
 import { reviewFile, reviewFiles, reviewPullRequest } from './rag-review.js';
 import { execGitSafe } from './utils/command.js';
 import { ensureBranchExists, findBaseBranch } from './utils/git.js';
@@ -81,6 +82,7 @@ program
   .option('--exclude <patterns...>', 'Patterns to exclude (e.g., "**/*.test.js" "docs/**")')
   .option('--exclude-file <file>', 'File containing patterns to exclude (one per line)')
   .option('--no-gitignore', 'Disable automatic exclusion of files in .gitignore')
+  .option('--force-analysis', 'Force regeneration of project architecture analysis (bypass cache)')
   .action(generateEmbeddings); // Assumes generateEmbeddings function exists and is correct
 
 program
@@ -165,6 +167,7 @@ Examples:
   $ ai-code-review embeddings:generate --exclude "**/*.test.js" "**/*.spec.js"
   $ ai-code-review embeddings:generate --exclude-file .embedignore
   $ ai-code-review embeddings:generate --no-gitignore
+  $ ai-code-review embeddings:generate --force-analysis
   $ ai-code-review embeddings:stats
   $ ai-code-review embeddings:stats --directory /path/to/project
   $ ai-code-review embeddings:clear
@@ -609,6 +612,32 @@ async function generateEmbeddings(options) {
 
     if (results.failed > 0) {
       console.log(chalk.red(`Failed: ${results.failed} files`));
+    }
+
+    // Generate project analysis after embeddings are complete
+    console.log(chalk.cyan('\n🏗️ Generating project architecture analysis...'));
+    const projectAnalyzer = new ProjectAnalyzer();
+    try {
+      const projectSummary = await projectAnalyzer.analyzeProject(projectDir, {
+        verbose: options.verbose,
+        forceAnalysis: options.forceAnalysis,
+      });
+
+      // Store project summary in embeddings system for later use
+      await embeddingsSystem.storeProjectSummary(projectDir, projectSummary);
+
+      console.log(chalk.green('✅ Project analysis complete and stored'));
+      if (options.verbose) {
+        console.log(chalk.gray(`   Project: ${projectSummary.projectName}`));
+        console.log(
+          chalk.gray(
+            `   Technologies: ${projectSummary.technologies.slice(0, 5).join(', ')}${projectSummary.technologies.length > 5 ? '...' : ''}`
+          )
+        );
+        console.log(chalk.gray(`   Key patterns: ${projectSummary.keyPatterns.length}`));
+      }
+    } catch (error) {
+      console.error(chalk.red('⚠️ Project analysis failed but continuing:'), error.message);
     }
 
     // Clean up resources to allow the process to exit naturally

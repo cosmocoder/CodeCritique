@@ -36,6 +36,7 @@ import { createDatabaseError, ERROR_CODES } from './errors.js';
 const FILE_EMBEDDINGS_TABLE = TABLE_NAMES.FILE_EMBEDDINGS;
 const DOCUMENT_CHUNK_TABLE = TABLE_NAMES.DOCUMENT_CHUNK;
 const PR_COMMENTS_TABLE = TABLE_NAMES.PR_COMMENTS;
+const PROJECT_SUMMARIES_TABLE = TABLE_NAMES.PROJECT_SUMMARIES;
 
 // ============================================================================
 // DATABASE MANAGER CLASS
@@ -500,8 +501,15 @@ export class DatabaseManager {
         deletedCount += await this._clearProjectTableRecords(db, this.documentChunkTable, resolvedProjectPath, projectName, 'project_path');
       }
 
+      // Clear project summaries for this project
+      if (tableNames.includes(PROJECT_SUMMARIES_TABLE)) {
+        const summariesTable = await db.openTable(PROJECT_SUMMARIES_TABLE);
+        await this._validateTableHasProjectPath(summariesTable, PROJECT_SUMMARIES_TABLE);
+        deletedCount += await this._clearProjectTableRecords(db, PROJECT_SUMMARIES_TABLE, resolvedProjectPath, projectName, 'project_path');
+      }
+
       // Note: PR comments are cleared via separate pr-history:clear command
-      // This embeddings:clear command only handles file and document embeddings
+      // This embeddings:clear command handles file embeddings, document embeddings, and project summaries
 
       if (deletedCount > 0) {
         console.log(chalk.green(`Successfully cleared ${deletedCount} embeddings for project: ${resolvedProjectPath}`));
@@ -683,5 +691,133 @@ export class DatabaseManager {
       console.error(chalk.red(`Error updating PR comments index: ${error.message}`));
       throw createDatabaseError(`Failed to update PR comments index: ${error.message}`, ERROR_CODES.INDEX_UPDATE_ERROR, error);
     }
+  }
+
+  /**
+   * Store project summary in database
+   * @param {string} projectPath - Project path
+   * @param {Object} projectSummary - Project analysis summary
+   * @returns {Promise<boolean>} Success status
+   */
+  async storeProjectSummary(projectPath, projectSummary) {
+    try {
+      const resolvedProjectPath = path.resolve(projectPath);
+      const projectName = path.basename(resolvedProjectPath);
+
+      // Get database connection
+      const db = await this.getDBConnection();
+      const tableNames = await db.tableNames();
+
+      // Create project summaries table if it doesn't exist
+      if (!tableNames.includes(PROJECT_SUMMARIES_TABLE)) {
+        await this._createProjectSummariesTable(db);
+      }
+
+      const table = await db.openTable(PROJECT_SUMMARIES_TABLE);
+
+      // Prepare the record
+      const record = {
+        id: `project_summary_${projectName}_${Date.now()}`,
+        project_path: resolvedProjectPath,
+        project_name: projectName,
+        summary: JSON.stringify(projectSummary),
+        created_at: new Date().toISOString(),
+        last_updated: new Date().toISOString(),
+      };
+
+      // Remove any existing summary for this project first
+      try {
+        const existingRecords = await table
+          .query()
+          .where(`project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`)
+          .toArray();
+
+        for (const existing of existingRecords) {
+          await table.delete(`id = '${existing.id.replace(/'/g, "''")}'`);
+        }
+      } catch {
+        // Continue if no existing records found
+      }
+
+      // Add the new record
+      await table.add([record]);
+
+      console.log(chalk.green(`✅ Project summary stored for: ${resolvedProjectPath}`));
+      return true;
+    } catch (error) {
+      console.error(chalk.red(`Error storing project summary: ${error.message}`));
+      throw createDatabaseError(`Failed to store project summary: ${error.message}`, ERROR_CODES.STORAGE_ERROR, error);
+    }
+  }
+
+  /**
+   * Get stored project summary from database
+   * @param {string} projectPath - Project path
+   * @returns {Promise<Object|null>} Project summary or null if not found
+   */
+  async getProjectSummary(projectPath) {
+    try {
+      const resolvedProjectPath = path.resolve(projectPath);
+
+      // Get database connection
+      const db = await this.getDBConnection();
+      const tableNames = await db.tableNames();
+
+      // Check if table exists
+      if (!tableNames.includes(PROJECT_SUMMARIES_TABLE)) {
+        return null;
+      }
+
+      const table = await db.openTable(PROJECT_SUMMARIES_TABLE);
+
+      // Query for the project summary
+      const records = await table
+        .query()
+        .where(`project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`)
+        .toArray();
+
+      if (records.length === 0) {
+        return null;
+      }
+
+      // Get the most recent record (in case there are duplicates)
+      const latestRecord = records.sort((a, b) => new Date(b.last_updated).getTime() - new Date(a.last_updated).getTime())[0];
+
+      // Parse and return the summary
+      const summary = JSON.parse(latestRecord.summary);
+      summary._metadata = {
+        created_at: latestRecord.created_at,
+        last_updated: latestRecord.last_updated,
+        project_name: latestRecord.project_name,
+      };
+
+      return summary;
+    } catch (error) {
+      console.error(chalk.red(`Error retrieving project summary: ${error.message}`));
+      return null; // Return null instead of throwing to allow graceful fallback
+    }
+  }
+
+  /**
+   * Create project summaries table
+   * @param {LanceDBConnection} db - Database connection
+   * @returns {Promise<void>}
+   * @private
+   */
+  async _createProjectSummariesTable(db) {
+    console.log(chalk.blue('Creating project summaries table...'));
+
+    const schema = new Schema([
+      new Field('id', new Utf8()),
+      new Field('project_path', new Utf8()),
+      new Field('project_name', new Utf8()),
+      new Field('summary', new Utf8()),
+      new Field('created_at', new Utf8()),
+      new Field('last_updated', new Utf8()),
+    ]);
+
+    // Create table with empty initial data
+    await db.createEmptyTable(PROJECT_SUMMARIES_TABLE, schema);
+    console.log(chalk.green(`✅ Project summaries table created: ${PROJECT_SUMMARIES_TABLE}`));
   }
 }
