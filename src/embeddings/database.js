@@ -735,7 +735,7 @@ export class DatabaseManager {
         for (const existing of existingRecords) {
           await table.delete(`id = '${existing.id.replace(/'/g, "''")}'`);
         }
-      } catch (error) {
+      } catch {
         // Continue if no existing records found
       }
 
