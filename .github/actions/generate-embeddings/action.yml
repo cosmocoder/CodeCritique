@@ -6,6 +6,11 @@ branding:
   color: 'blue'
 
 inputs:
+  # AI Configuration
+  anthropic-api-key:
+    description: 'Anthropic API key for Claude models'
+    required: true
+
   files:
     description: 'Specific files or patterns to process (space-separated)'
     required: false
@@ -79,6 +84,7 @@ runs:
       shell: bash
       working-directory: ${{ steps.setup-tool.outputs.tool-root }}
       env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         DEBUG: ${{ inputs.verbose }}
         VERBOSE: ${{ inputs.verbose }}
         GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
