@@ -323,6 +323,7 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
           isTest: file.isTest,
           isComponent: file.isComponent,
           summary: file.summary,
+          fullContent: file.content, // Add full file content for context
           diff: file.diffContent,
           baseBranch: file.baseBranch,
           targetBranch: file.targetBranch,
@@ -448,6 +449,7 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
               // Add diff-specific options
               diffOnly: true,
               diffContent: file.diffContent,
+              fullFileContent: file.content, // Pass full file content for context awareness
               diffInfo: file.diffInfo,
               baseBranch: file.baseBranch,
               targetBranch: file.targetBranch,
