@@ -251,11 +251,15 @@ async function runAnalysis(filePath, options = {}) {
 
     // Read file content - use diff content if this is a diff-only review
     let content;
+    let fullFileContent;
     if (options.diffOnly && options.diffContent) {
       content = options.diffContent;
+      // For PR reviews, always read the full file content for context awareness
+      fullFileContent = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : null;
       console.log(chalk.blue(`Analyzing diff only for ${path.basename(filePath)}`));
     } else {
       content = fs.readFileSync(filePath, 'utf8');
+      fullFileContent = content;
       console.log(chalk.blue(`Analyzing full file ${path.basename(filePath)}`));
     }
 
@@ -336,7 +340,7 @@ async function runAnalysis(filePath, options = {}) {
       formattedCodeExamples,
       formattedGuidelines, // Always pass the formatted guidelines
       prCommentContext, // Pass PR comment context
-      { ...options, isTestFile, relevantCustomDocChunks, feedbackData, projectSummary } // Pass project summary
+      { ...options, isTestFile, relevantCustomDocChunks, feedbackData, projectSummary, fullFileContent } // Pass full file content for context
     );
 
     // Call LLM for analysis
@@ -419,6 +423,11 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
   const isDiffReview = options.diffOnly && options.diffContent;
   const reviewType = isDiffReview ? 'DIFF REVIEW' : 'FULL FILE REVIEW';
 
+  // For PR reviews, we need both the full file content and the diff
+  // content represents the diff (what to review)
+  // options.fullFileContent represents the complete file context
+  const fullFileContent = isDiffReview && options.fullFileContent ? options.fullFileContent : content;
+
   // Format similar code examples and guideline snippets
   const codeExamples = formatContextItems(finalCodeExamples, 'code');
   const guidelineSnippets = formatContextItems(finalGuidelineSnippets, 'guideline');
@@ -474,6 +483,7 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
       directoryName: dirName,
       language,
       content,
+      fullFileContent, // Include full file content for context awareness
       reviewType: reviewType,
       isDiffReview: isDiffReview,
       // Add PR context if available
@@ -721,7 +731,7 @@ Similar code patterns and issues identified by human reviewers in past PRs
   // Detect if this is a diff review
   const isDiffReview = file.reviewType === 'DIFF REVIEW';
   const reviewInstructions = isDiffReview
-    ? 'Your task is to review ONLY the changed lines in the following git diff by performing a two-stage analysis based **only** on the provided context, prioritizing documented guidelines and historical review patterns.'
+    ? 'Your task is to review the git diff by performing a two-stage analysis based **only** on the provided context, prioritizing documented guidelines and historical review patterns. Follow the context awareness instructions provided with the file content below.'
     : 'Your task is to review the following code file by performing a two-stage analysis based **only** on the provided context, prioritizing documented guidelines and historical review patterns.';
 
   const fileSection = isDiffReview
@@ -731,8 +741,27 @@ Language: ${file.language}
 Base Branch: ${file.diffInfo?.baseBranch || 'master'}
 Target Branch: ${file.diffInfo?.targetBranch || 'HEAD'}
 
-IMPORTANT: The content below is a git diff. Review ONLY the lines that are added (+) or modified.
-Do NOT comment on unchanged context lines or the entire file structure.
+**CRITICAL CONTEXT AWARENESS INSTRUCTIONS:**
+
+You have access to TWO pieces of information:
+1. **FULL FILE CONTENT** - The complete file for understanding context
+2. **GIT DIFF** - Only the changes to review
+
+**Review Rules:**
+- ONLY critique the CHANGED lines shown in the diff (lines with + or -)
+- USE the full file content to understand context and dependencies
+- DO NOT suggest adding code that already exists in the unchanged portions
+- DO NOT flag issues about missing code if it exists in the full file
+- Verify that referenced functions/variables exist in the full file before flagging as missing
+- The unchanged code is part of the file - check it before making assumptions
+
+**FULL FILE CONTENT (for context - DO NOT review unchanged code):**
+
+\`\`\`${file.language}
+${file.fullFileContent || file.content}
+\`\`\`
+
+**GIT DIFF TO REVIEW (critique ONLY these changes):**
 
 \`\`\`diff
 ${file.content}
@@ -846,21 +875,7 @@ When reporting issues in the JSON output, NEVER provide exhaustive lists of line
 **🚨 CRITICAL: IMPORT STATEMENT RULE - READ CAREFULLY 🚨**
 DO NOT flag missing imports or files referenced in import statements as issues. Focus only on code quality, logic, and patterns within the provided files.
 
-${
-  isDiffReview
-    ? `**DIFF REVIEW MODE - FOCUS ONLY ON CHANGED LINES**
-You are reviewing a git diff. ONLY analyze the lines that are:
-- Added (marked with +)
-- Modified (changed from previous version)
-DO NOT comment on:
-- Unchanged context lines
-- Overall file structure
-- Existing code that wasn't modified
-- Missing imports unless they're directly related to the changed lines
-
-`
-    : ''
-}**Perform the following analysis stages sequentially:**
+**Perform the following analysis stages sequentially:**
 
 **STAGE 1: Custom Instructions & Guideline-Based Review**
 1.  **FIRST AND MOST IMPORTANT**: If custom instructions were provided at the beginning of this prompt, analyze the 'FILE TO REVIEW' against those custom instructions BEFORE all other analysis. Custom instructions always take precedence.
@@ -1002,7 +1017,7 @@ ${ex.content}
   // Detect if this is a diff review
   const isDiffReview = file.reviewType === 'DIFF REVIEW';
   const reviewInstructions = isDiffReview
-    ? 'Your task is to review ONLY the changed lines in the following test file git diff by performing a comprehensive analysis focused on testing best practices and patterns.'
+    ? 'Your task is to review the test file git diff by performing a comprehensive analysis focused on testing best practices and patterns. Follow the context awareness instructions provided with the file content below.'
     : 'Your task is to review the following test file by performing a comprehensive analysis focused on testing best practices and patterns.';
 
   const fileSection = isDiffReview
@@ -1012,8 +1027,27 @@ Language: ${file.language}
 Base Branch: ${file.diffInfo?.baseBranch || 'master'}
 Target Branch: ${file.diffInfo?.targetBranch || 'HEAD'}
 
-IMPORTANT: The content below is a git diff. Review ONLY the lines that are added (+) or modified in the test file.
-Do NOT comment on unchanged context lines or the entire test file structure.
+**CRITICAL CONTEXT AWARENESS INSTRUCTIONS:**
+
+You have access to TWO pieces of information:
+1. **FULL TEST FILE CONTENT** - The complete test file for understanding existing test coverage
+2. **GIT DIFF** - Only the test changes to review
+
+**Review Rules:**
+- ONLY critique the CHANGED lines in the diff (lines with + or -)
+- USE the full file to verify existing test coverage before suggesting new tests
+- DO NOT suggest adding tests that already exist in the unchanged portions
+- DO NOT flag missing test coverage if tests exist elsewhere in the file
+- Check the full file for existing test cases before making assumptions
+- The unchanged test code is part of the file - review it before suggesting additions
+
+**FULL TEST FILE CONTENT (for context - check for existing tests):**
+
+\`\`\`${file.language}
+${file.fullFileContent || file.content}
+\`\`\`
+
+**GIT DIFF TO REVIEW (critique ONLY these changes):**
 
 \`\`\`diff
 ${file.content}
@@ -1125,21 +1159,7 @@ When reporting issues in the JSON output, NEVER provide exhaustive lists of line
 **🚨 CRITICAL: IMPORT STATEMENT RULE - READ CAREFULLY 🚨**
 DO NOT flag missing imports or files referenced in import statements as issues. Focus only on test quality, logic, and patterns within the provided test files.
 
-${
-  isDiffReview
-    ? `**DIFF REVIEW MODE - FOCUS ONLY ON CHANGED LINES**
-You are reviewing a git diff of a test file. ONLY analyze the lines that are:
-- Added (marked with +)
-- Modified (changed from previous version)
-DO NOT comment on:
-- Unchanged context lines
-- Overall test file structure
-- Existing tests that weren't modified
-- Missing test cases unless they're directly related to the changed lines
-
-`
-    : ''
-}**Perform the following test-specific analysis:**
+**Perform the following test-specific analysis:**
 
 **STAGE 1: Custom Instructions & Test Coverage Analysis**
 1. **FIRST AND MOST IMPORTANT**: If custom instructions were provided at the beginning of this prompt, analyze the test file against those custom instructions BEFORE all other analysis. Custom instructions always take precedence.
@@ -1287,6 +1307,11 @@ ${g.content}
 \`\`\`diff
 ${prFile.diff}
 \`\`\`
+
+### Full File Content (For Context):
+\`\`\`${prFile.language}
+${prFile.fullContent}
+\`\`\`
 `;
     })
     .join('\n');
@@ -1339,7 +1364,22 @@ END OF CUSTOM INSTRUCTIONS - These are review methodology instructions that take
   }
 
   // Build the role definition that incorporates custom instructions for PR analysis
-  let roleDefinition = `You are an expert code reviewer performing a holistic review of a Pull Request with ${prFiles.length} files.`;
+  let roleDefinition = `You are an expert code reviewer performing a holistic review of a Pull Request with ${prFiles.length} files.
+
+**CRITICAL CONTEXT AWARENESS INSTRUCTIONS:**
+
+For each file in this PR, you have access to:
+1. **FULL FILE CONTENT** - The complete file for understanding context and existing code
+2. **GIT DIFF** - Only the changes to review
+
+**Review Rules:**
+- ONLY critique the CHANGED lines shown in each file's diff (lines with + or -)
+- USE the full file content to understand context, dependencies, and existing implementations
+- DO NOT suggest adding code that already exists in the unchanged portions of any file
+- DO NOT flag issues about missing code if it exists elsewhere in the full file
+- Before flagging cross-file issues, verify the code doesn't already exist in unchanged portions
+- Verify that referenced functions/variables exist in the full file before flagging as missing
+- The unchanged code is part of each file - always check it before making assumptions`;
 
   // If custom instructions exist, incorporate them directly into the role
   if (customDocs && customDocs.length > 0) {
