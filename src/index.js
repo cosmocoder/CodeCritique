@@ -51,7 +51,7 @@ program
   .option('--output-file <file>', 'Save output to file (useful with --output json)')
   .option('--no-color', 'Disable colored output')
   .option('--verbose', 'Show verbose output')
-  .option('--model <model>', 'LLM model to use (e.g., claude-sonnet-4-20250514)')
+  .option('--model <model>', 'LLM model to use (e.g., claude-sonnet-4-5)')
   .option('--temperature <number>', 'LLM temperature', parseFloat, 0.2)
   .option('--max-tokens <number>', 'LLM max tokens', parseInt, 8192)
   .option('--similarity-threshold <number>', 'Threshold for finding similar code examples', parseFloat, 0.6)
