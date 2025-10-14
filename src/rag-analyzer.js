@@ -536,7 +536,7 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
 async function callLLMForAnalysis(context, options = {}) {
   try {
     let prompt;
-    const model = options.model || 'claude-sonnet-4-20250514';
+    const model = options.model || 'claude-sonnet-4-5';
     const maxTokens = options.maxTokens || 8192; // Default to a safe limit
 
     if (options.isHolisticPRReview) {
@@ -1582,7 +1582,21 @@ You must respond with EXACTLY this JSON structure, with no additional text:
  */
 function parseAnalysisResponse(rawResponse) {
   try {
-    const parsedResponse = JSON.parse(rawResponse);
+    // Strip only the OUTER markdown code fences if present (e.g., ```json...```)
+    // This handles Claude Sonnet 4.5 wrapping the entire JSON response in code fences
+    // Any markdown within the JSON field values is preserved
+    let cleanedResponse = rawResponse.trim();
+
+    // Check if response starts with ```json or ``` and ends with ```
+    const codeBlockRegex = /^```(?:json)?\s*\n([\s\S]*)\n```$/;
+    const match = cleanedResponse.match(codeBlockRegex);
+
+    if (match) {
+      cleanedResponse = match[1].trim();
+      console.log(chalk.gray('Removed outer code fence wrapper from LLM response'));
+    }
+
+    const parsedResponse = JSON.parse(cleanedResponse);
 
     // Check for holistic review structure, which contains fileSpecificIssues
     if (parsedResponse.fileSpecificIssues || parsedResponse.crossFileIssues || parsedResponse.recommendations) {
@@ -1603,6 +1617,7 @@ function parseAnalysisResponse(rawResponse) {
     };
   } catch (error) {
     console.error(chalk.red(`Error parsing LLM response: ${error.message}`));
+    console.error(chalk.gray(`Response starts with: ${rawResponse.substring(0, 100)}...`));
     return {
       summary: 'Error parsing LLM response',
       issues: [],
