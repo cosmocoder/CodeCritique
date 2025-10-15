@@ -305,24 +305,92 @@ export default async ({ github, context, core }) => {
     }
 
     // Fetch CodeCritique review comments once to avoid race conditions
+    // NOTE: We need to fetch both active AND resolved comments for proper feedback analysis
     let botReviewComments = [];
     if (postComments) {
-      console.log('🔍 Fetching CodeCritique review comments...');
+      console.log('🔍 Fetching CodeCritique review comments (including resolved)...');
 
-      const { data: reviewComments } = await github.rest.pulls.listReviewComments({
-        pull_number: context.issue.number,
-        owner: context.repo.owner,
-        repo: context.repo.repo,
-      });
+      // GitHub API: listReviewComments might not return resolved comments by default
+      // So we need to use GraphQL to get ALL review comments including resolved ones
+      try {
+        const reviewCommentsQuery = `
+          query($owner: String!, $repo: String!, $number: Int!) {
+            repository(owner: $owner, name: $repo) {
+              pullRequest(number: $number) {
+                reviewThreads(first: 100) {
+                  nodes {
+                    comments(first: 50) {
+                      nodes {
+                        id
+                        databaseId
+                        body
+                        author {
+                          login
+                        }
+                        createdAt
+                        path
+                        line
+                        diffHunk
+                      }
+                    }
+                    isResolved
+                  }
+                }
+              }
+            }
+          }
+        `;
 
-      // Filter to only include comments made by this specific CodeCritique tool
-      botReviewComments = reviewComments.filter(
-        (comment) => comment.body.includes(uniqueCommentId) && comment.user.login === 'github-actions[bot]'
-      );
+        const graphqlResult = await github.graphql(reviewCommentsQuery, {
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          number: context.issue.number,
+        });
 
-      console.log(
-        `📊 Found ${botReviewComments.length} existing CodeCritique comments (filtered from ${reviewComments.length} total comments)`
-      );
+        // Extract all comments from all threads (resolved and unresolved)
+        const allReviewComments = [];
+        const threads = graphqlResult.repository.pullRequest.reviewThreads.nodes;
+
+        for (const thread of threads) {
+          for (const comment of thread.comments.nodes) {
+            allReviewComments.push({
+              id: comment.databaseId,
+              body: comment.body,
+              user: { login: comment.author.login },
+              created_at: comment.createdAt,
+              path: comment.path,
+              line: comment.line,
+              diff_hunk: comment.diffHunk,
+              isResolved: thread.isResolved,
+            });
+          }
+        }
+
+        // Filter to only include comments made by this specific CodeCritique tool
+        botReviewComments = allReviewComments.filter(
+          (comment) => comment.body.includes(uniqueCommentId) && comment.user.login === 'github-actions[bot]'
+        );
+
+        const resolvedCount = botReviewComments.filter((c) => c.isResolved).length;
+        console.log(
+          `📊 Found ${botReviewComments.length} existing CodeCritique comments (${resolvedCount} resolved, ${botReviewComments.length - resolvedCount} active)`
+        );
+      } catch (graphqlError) {
+        console.log(`⚠️ GraphQL query failed, falling back to REST API: ${graphqlError.message}`);
+
+        // Fallback to REST API (might miss resolved comments)
+        const { data: reviewComments } = await github.rest.pulls.listReviewComments({
+          pull_number: context.issue.number,
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+        });
+
+        botReviewComments = reviewComments.filter(
+          (comment) => comment.body.includes(uniqueCommentId) && comment.user.login === 'github-actions[bot]'
+        );
+
+        console.log(`📊 Found ${botReviewComments.length} existing CodeCritique comments (REST API - may miss resolved comments)`);
+      }
     }
 
     // Analyze feedback from previous comments before cleanup
@@ -402,12 +470,18 @@ export default async ({ github, context, core }) => {
         // Also preserve comments where analysis failed to be safe
         const preserveOnError = commentFeedback?.analysisError;
 
-        if (hasUserInteraction || preserveOnError) {
-          const reason = preserveOnError ? 'failed analysis (safety)' : 'user feedback';
+        // Don't attempt to delete resolved comments (they can't be deleted and shouldn't be)
+        const isResolved = comment.isResolved;
+
+        if (hasUserInteraction || preserveOnError || isResolved) {
+          let reason = 'user feedback';
+          if (preserveOnError) reason = 'failed analysis (safety)';
+          if (isResolved) reason = 'resolved conversation';
+
           console.log(`📌 Preserving comment ${comment.id} due to ${reason}`);
           preservedCount++;
         } else {
-          // No user interaction - safe to delete
+          // No user interaction and not resolved - safe to delete
           let deleteAttempts = 0;
           let deleted = false;
 
@@ -444,7 +518,13 @@ export default async ({ github, context, core }) => {
       }
 
       console.log(`🗑️ Deleted ${deletedCount} comments without user feedback`);
-      console.log(`📌 Preserved ${preservedCount} comments with user feedback`);
+      console.log(`📌 Preserved ${preservedCount} comments with user feedback or resolved status`);
+    }
+
+    // Save feedback data early (including from resolved comments) for future runs
+    if (trackFeedback && Object.keys(currentFeedback).length > 0) {
+      console.log('💾 Saving feedback data for future similarity matching...');
+      await saveFeedbackData(currentFeedback);
     }
 
     // Post or update summary comment
