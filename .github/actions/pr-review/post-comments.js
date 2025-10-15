@@ -647,7 +647,7 @@ ${uniqueCommentId}`;
           console.log(`📍 Posting comment for ${relativePath}:${lineNum}`);
 
           try {
-            // Try posting as inline comment
+            // Only post as inline comment - no fallback to standalone comments
             await github.rest.pulls.createReviewComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -660,25 +660,20 @@ ${uniqueCommentId}`;
 
             commentsPosted++;
             console.log(`✅ Posted inline comment for ${relativePath}:${lineNum}`);
-          } catch (error) {
-            console.log(`⚠️ Failed to post inline comment for ${relativePath}:${lineNum}: ${error.message}`);
+          } catch (inlineError) {
+            // Enhanced error logging to understand why inline comments fail
+            console.log(`❌ Skipped comment for ${relativePath}:${lineNum} - cannot post inline comment`);
 
-            // Fallback to general PR comment
-            try {
-              await github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: `**File: \`${relativePath}\` (Line ${lineNum})**
-
-${commentBody}`,
-              });
-
-              commentsPosted++;
-              console.log(`✅ Posted fallback comment for ${relativePath}`);
-            } catch (fallbackError) {
-              console.log(`❌ Failed to post fallback comment for ${relativePath}: ${fallbackError.message}`);
+            if (inlineError.status === 422) {
+              console.log(`   Reason: Line ${lineNum} is not within the PR diff (GitHub only allows comments on changed lines)`);
+            } else if (inlineError.status === 404) {
+              console.log(`   Reason: File ${relativePath} or commit ${commitId.substring(0, 7)} not found in PR`);
+            } else {
+              console.log(`   Reason: ${inlineError.message}`);
             }
+
+            // No fallback - if we can't post an inline comment, we skip it entirely
+            // This ensures only actual inline comments are posted, never standalone comments
           }
         }
       }
