@@ -63,17 +63,27 @@ function formatProjectSummaryForLLM(summary) {
 
   let context = `\n## PROJECT ARCHITECTURE CONTEXT\n\n`;
 
-  context += `**Project:** ${summary.projectName} (${summary.projectType})\n`;
-  context += `**Technologies:** ${summary.technologies.slice(0, 8).join(', ')}${summary.technologies.length > 8 ? '...' : ''}\n`;
-  context += `**Main Frameworks:** ${summary.mainFrameworks.join(', ')}\n\n`;
+  context += `**Project:** ${summary.projectName || 'Unknown'} (${summary.projectType || 'Unknown'})\n`;
 
-  if (summary.customImplementations && summary.customImplementations.length > 0) {
+  // Safe access to technologies array
+  if (summary.technologies && Array.isArray(summary.technologies) && summary.technologies.length > 0) {
+    context += `**Technologies:** ${summary.technologies.slice(0, 8).join(', ')}${summary.technologies.length > 8 ? '...' : ''}\n`;
+  }
+
+  // Safe access to mainFrameworks array
+  if (summary.mainFrameworks && Array.isArray(summary.mainFrameworks) && summary.mainFrameworks.length > 0) {
+    context += `**Main Frameworks:** ${summary.mainFrameworks.join(', ')}\n`;
+  }
+
+  context += '\n';
+
+  if (summary.customImplementations && Array.isArray(summary.customImplementations) && summary.customImplementations.length > 0) {
     context += `**Custom Implementations to Recognize:**\n`;
     summary.customImplementations.forEach((impl, i) => {
-      if (i < 5) {
+      if (i < 5 && impl) {
         // Limit to top 5 to avoid overwhelming the LLM
-        context += `- **${impl.name}**: ${impl.description}\n`;
-        if (impl.properties && impl.properties.length > 0) {
+        context += `- **${impl.name || 'Unknown'}**: ${impl.description || 'No description'}\n`;
+        if (impl.properties && Array.isArray(impl.properties) && impl.properties.length > 0) {
           context += `  Properties: ${impl.properties.slice(0, 3).join(', ')}\n`;
         }
       }
@@ -81,26 +91,34 @@ function formatProjectSummaryForLLM(summary) {
     context += '\n';
   }
 
-  if (summary.apiPatterns && summary.apiPatterns.length > 0) {
+  if (summary.apiPatterns && Array.isArray(summary.apiPatterns) && summary.apiPatterns.length > 0) {
     context += `**API Patterns:**\n`;
     summary.apiPatterns.forEach((pattern) => {
-      context += `- ${pattern.type}: ${pattern.description}\n`;
+      if (pattern) {
+        context += `- ${pattern.type || 'Unknown'}: ${pattern.description || 'No description'}\n`;
+      }
     });
     context += '\n';
   }
 
-  if (summary.stateManagement && summary.stateManagement.approach !== 'Unknown') {
+  if (summary.stateManagement && summary.stateManagement.approach && summary.stateManagement.approach !== 'Unknown') {
     context += `**State Management:** ${summary.stateManagement.approach}\n`;
-    if (summary.stateManagement.patterns.length > 0) {
+    if (
+      summary.stateManagement.patterns &&
+      Array.isArray(summary.stateManagement.patterns) &&
+      summary.stateManagement.patterns.length > 0
+    ) {
       context += `- Patterns: ${summary.stateManagement.patterns.join(', ')}\n`;
     }
     context += '\n';
   }
 
-  if (summary.reviewGuidelines && summary.reviewGuidelines.length > 0) {
+  if (summary.reviewGuidelines && Array.isArray(summary.reviewGuidelines) && summary.reviewGuidelines.length > 0) {
     context += `**Project-Specific Review Guidelines:**\n`;
     summary.reviewGuidelines.slice(0, 6).forEach((guideline) => {
-      context += `- ${guideline}\n`;
+      if (guideline) {
+        context += `- ${guideline}\n`;
+      }
     });
   }
 
