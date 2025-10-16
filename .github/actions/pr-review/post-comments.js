@@ -224,23 +224,9 @@ export default async ({ github, context, core }) => {
         const feedbackDir = path.join(process.env.GITHUB_WORKSPACE || process.cwd(), '.ai-feedback');
         const feedbackFileName = `feedback-${context.issue.number}-${Date.now()}.json`;
 
-        console.log(`🔍 Debug: toolRoot = "${toolRoot}"`);
-        console.log(`🔍 Debug: feedbackDir = "${feedbackDir}"`);
-        console.log(`🔍 Debug: REVIEW_OUTPUT_PATH = "${process.env.REVIEW_OUTPUT_PATH}"`);
-        console.log(`🔍 Debug: GITHUB_WORKSPACE = "${process.env.GITHUB_WORKSPACE}"`);
-
         // Ensure feedback directory exists
         if (!fs.existsSync(feedbackDir)) {
           fs.mkdirSync(feedbackDir, { recursive: true });
-          console.log(`📁 Created feedback directory: ${feedbackDir}`);
-        } else {
-          console.log(`📁 Feedback directory already exists: ${feedbackDir}`);
-        }
-
-        // Ensure tool root exists
-        if (!fs.existsSync(toolRoot)) {
-          fs.mkdirSync(toolRoot, { recursive: true });
-          console.log(`📁 Created tool root directory: ${toolRoot}`);
         }
 
         // Save to .ai-feedback for CLI to find
@@ -249,20 +235,11 @@ export default async ({ github, context, core }) => {
         const uploadPath = path.join(toolRoot, feedbackFileName);
 
         const feedbackJson = JSON.stringify(feedbackReport, null, 2);
+        fs.writeFileSync(feedbackPath, feedbackJson);
+        fs.writeFileSync(uploadPath, feedbackJson);
 
-        try {
-          fs.writeFileSync(feedbackPath, feedbackJson);
-          console.log(`💾 Saved feedback data to ${feedbackPath} (for CLI)`);
-        } catch (error) {
-          console.log(`⚠️ Failed to save feedback to CLI path: ${error.message}`);
-        }
-
-        try {
-          fs.writeFileSync(uploadPath, feedbackJson);
-          console.log(`💾 Saved feedback data to ${uploadPath} (for upload)`);
-        } catch (error) {
-          console.log(`⚠️ Failed to save feedback to upload path: ${error.message}`);
-        }
+        console.log(`💾 Saved feedback data to ${feedbackPath} (for CLI)`);
+        console.log(`💾 Saved feedback data to ${uploadPath} (for upload)`);
         core.setOutput('feedback-artifact-uploaded', 'true');
         core.setOutput('feedback-report-path', uploadPath);
 
@@ -327,161 +304,30 @@ export default async ({ github, context, core }) => {
       }
     }
 
-    // Fetch CodeCritique review comments once to avoid race conditions
-    // NOTE: We need to fetch both active AND resolved comments for proper feedback analysis
-    let botReviewComments = [];
-    if (postComments) {
-      console.log('🔍 Fetching CodeCritique review comments (including resolved)...');
-
-      // GitHub API: listReviewComments might not return resolved comments by default
-      // So we need to use GraphQL to get ALL review comments including resolved ones
-      try {
-        const reviewCommentsQuery = `
-          query($owner: String!, $repo: String!, $number: Int!) {
-            repository(owner: $owner, name: $repo) {
-              pullRequest(number: $number) {
-                reviewThreads(first: 100) {
-                  nodes {
-                    comments(first: 50) {
-                      nodes {
-                        id
-                        databaseId
-                        body
-                        author {
-                          login
-                        }
-                        createdAt
-                        path
-                        line
-                        diffHunk
-                      }
-                    }
-                    isResolved
-                  }
-                }
-              }
-            }
-          }
-        `;
-
-        const graphqlResult = await github.graphql(reviewCommentsQuery, {
-          owner: context.repo.owner,
-          repo: context.repo.repo,
-          number: context.issue.number,
-        });
-
-        // Extract all comments from all threads (resolved and unresolved)
-        const allReviewComments = [];
-        const threads = graphqlResult.repository.pullRequest.reviewThreads.nodes;
-
-        for (const thread of threads) {
-          for (const comment of thread.comments.nodes) {
-            allReviewComments.push({
-              id: comment.databaseId,
-              body: comment.body,
-              user: { login: comment.author.login },
-              created_at: comment.createdAt,
-              path: comment.path,
-              line: comment.line,
-              diff_hunk: comment.diffHunk,
-              isResolved: thread.isResolved,
-            });
-          }
-        }
-
-        // Debug: Log all comments to understand what we're working with
-        console.log(`🔍 Debug: Found ${allReviewComments.length} total review comments in PR`);
-        const botComments = allReviewComments.filter(
-          (comment) => comment.user.login === 'github-actions[bot]' || comment.user.login.includes('github-actions')
-        );
-        console.log(`🔍 Debug: Found ${botComments.length} comments from GitHub Actions`);
-
-        const commentsWithUniqueId = allReviewComments.filter((comment) => comment.body.includes(uniqueCommentId));
-        console.log(`🔍 Debug: Found ${commentsWithUniqueId.length} comments with unique ID "${uniqueCommentId}"`);
-
-        // More flexible filtering to catch CodeCritique comments
-        botReviewComments = allReviewComments.filter((comment) => {
-          const isBot = comment.user.login === 'github-actions[bot]' || comment.user.login.includes('github-actions');
-          const hasUniqueId = comment.body.includes(uniqueCommentId);
-          const hasCodeCritique = comment.body.includes('CodeCritique') || comment.body.includes('codecritique');
-
-          return isBot && (hasUniqueId || hasCodeCritique);
-        });
-
-        const resolvedCount = botReviewComments.filter((c) => c.isResolved).length;
-        console.log(
-          `📊 Found ${botReviewComments.length} existing CodeCritique comments (${resolvedCount} resolved, ${botReviewComments.length - resolvedCount} active)`
-        );
-      } catch (graphqlError) {
-        console.log(`⚠️ GraphQL query failed, falling back to REST API: ${graphqlError.message}`);
-
-        // Fallback to REST API (might miss resolved comments)
-        const { data: reviewComments } = await github.rest.pulls.listReviewComments({
-          pull_number: context.issue.number,
-          owner: context.repo.owner,
-          repo: context.repo.repo,
-        });
-
-        botReviewComments = reviewComments.filter(
-          (comment) => comment.body.includes(uniqueCommentId) && comment.user.login === 'github-actions[bot]'
-        );
-
-        console.log(`📊 Found ${botReviewComments.length} existing CodeCritique comments (REST API - may miss resolved comments)`);
-      }
-    }
-
     // Analyze feedback from previous comments before cleanup
-    if (postComments && trackFeedback && botReviewComments.length > 0) {
-      console.log('📊 Analyzing feedback from previous CodeCritique comments...');
+    if (postComments && trackFeedback) {
+      console.log('📊 Analyzing feedback from previous AI comments...');
 
-      // Analyze feedback for each existing comment with retry logic
+      const { data: reviewComments } = await github.rest.pulls.listReviewComments({
+        pull_number: context.issue.number,
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+      });
+
+      const botReviewComments = reviewComments.filter(
+        (comment) => comment.body.includes(uniqueCommentId) && comment.user.login === 'github-actions[bot]'
+      );
+
+      // Analyze feedback for each existing comment
       for (const comment of botReviewComments) {
-        let feedback = null;
-        let retryCount = 0;
-        const maxRetries = 2;
-
-        while (!feedback && retryCount <= maxRetries) {
-          try {
-            feedback = await analyzeFeedback(comment.id, comment.body);
-            if (feedback) {
-              // Store original issue description for similarity matching
-              const reviewHeaderMatch = comment.body.match(/\*\*CodeCritique Review\*\*\s*\n\n(.*?)(?:\n\n|\*\*|$)/s);
-              feedback.originalIssue = reviewHeaderMatch ? reviewHeaderMatch[1].trim() : comment.body.substring(0, 100);
-              currentFeedback[comment.id] = feedback;
-              console.log(`📝 Collected feedback for comment ${comment.id}: ${feedback.overallSentiment}`);
-            } else if (retryCount < maxRetries) {
-              console.log(`⚠️ Feedback analysis failed for comment ${comment.id}, retrying...`);
-              // Add exponential backoff delay
-              await new Promise((resolve) => setTimeout(resolve, 1000 * Math.pow(2, retryCount)));
-            } else {
-              console.log(`❌ Failed to analyze feedback for comment ${comment.id} after ${maxRetries + 1} attempts`);
-              // Create a minimal feedback entry to prevent deletion
-              currentFeedback[comment.id] = {
-                commentId: comment.id,
-                positiveReactions: 0,
-                negativeReactions: 0,
-                userReplies: [],
-                overallSentiment: 'unknown',
-                contextAdded: false,
-                analysisError: true,
-              };
-            }
-          } catch (error) {
-            console.log(`⚠️ Error analyzing feedback for comment ${comment.id} (attempt ${retryCount + 1}): ${error.message}`);
-            if (retryCount === maxRetries) {
-              // Preserve comment on analysis failure
-              currentFeedback[comment.id] = {
-                commentId: comment.id,
-                positiveReactions: 0,
-                negativeReactions: 0,
-                userReplies: [],
-                overallSentiment: 'unknown',
-                contextAdded: false,
-                analysisError: true,
-              };
-            }
-          }
-          retryCount++;
+        const feedback = await analyzeFeedback(comment.id, comment.body);
+        if (feedback) {
+          // Store original issue description for similarity matching
+          // Extract the actual issue description (the text after "**CodeCritique Review**")
+          const reviewHeaderMatch = comment.body.match(/\*\*CodeCritique Review\*\*\s*\n\n(.*?)(?:\n\n|\*\*|$)/s);
+          feedback.originalIssue = reviewHeaderMatch ? reviewHeaderMatch[1].trim() : comment.body.substring(0, 100);
+          currentFeedback[comment.id] = feedback;
+          console.log(`📝 Collected feedback for comment ${comment.id}: ${feedback.overallSentiment}`);
         }
       }
 
@@ -489,79 +335,49 @@ export default async ({ github, context, core }) => {
     }
 
     // Delete previous line comments (but preserve ones with user feedback)
-    if (postComments && botReviewComments.length > 0) {
-      console.log('🔄 Cleaning up previous CodeCritique line comments...');
+    if (postComments) {
+      console.log('🔄 Cleaning up previous line comments...');
+
+      const { data: reviewComments } = await github.rest.pulls.listReviewComments({
+        pull_number: context.issue.number,
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+      });
+
+      const botReviewComments = reviewComments.filter(
+        (comment) => comment.body.includes(uniqueCommentId) && comment.user.login === 'github-actions[bot]'
+      );
 
       let deletedCount = 0;
       let preservedCount = 0;
-      let failedDeletions = [];
 
       for (const comment of botReviewComments) {
         // Check if this comment has user feedback - if so, preserve it
         const commentFeedback = currentFeedback[comment.id];
         const hasUserInteraction =
           commentFeedback &&
-          !commentFeedback.analysisError &&
           (commentFeedback.userReplies.length > 0 || commentFeedback.positiveReactions > 0 || commentFeedback.negativeReactions > 0);
 
-        // Also preserve comments where analysis failed to be safe
-        const preserveOnError = commentFeedback?.analysisError;
-
-        // Don't attempt to delete resolved comments (they can't be deleted and shouldn't be)
-        const isResolved = comment.isResolved;
-
-        if (hasUserInteraction || preserveOnError || isResolved) {
-          let reason = 'user feedback';
-          if (preserveOnError) reason = 'failed analysis (safety)';
-          if (isResolved) reason = 'resolved conversation';
-
-          console.log(`📌 Preserving comment ${comment.id} due to ${reason}`);
+        if (hasUserInteraction) {
+          console.log(`📌 Preserving comment ${comment.id} due to user feedback`);
           preservedCount++;
         } else {
-          // No user interaction and not resolved - safe to delete
-          let deleteAttempts = 0;
-          let deleted = false;
-
-          while (!deleted && deleteAttempts < 2) {
-            try {
-              await github.rest.pulls.deleteReviewComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: comment.id,
-              });
-              deletedCount++;
-              deleted = true;
-            } catch (deleteError) {
-              deleteAttempts++;
-              if (deleteAttempts === 1) {
-                // Retry once after a short delay
-                console.log(`⚠️ Delete attempt 1 failed for comment ${comment.id}, retrying...`);
-                await new Promise((resolve) => setTimeout(resolve, 1000));
-              } else {
-                console.log(`❌ Could not delete comment ${comment.id} after 2 attempts: ${deleteError.message}`);
-                failedDeletions.push({ commentId: comment.id, error: deleteError.message });
-              }
-            }
+          // No user interaction - safe to delete
+          try {
+            await github.rest.pulls.deleteReviewComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: comment.id,
+            });
+            deletedCount++;
+          } catch (deleteError) {
+            console.log(`⚠️ Could not delete comment ${comment.id}: ${deleteError.message}`);
           }
         }
       }
 
-      if (failedDeletions.length > 0) {
-        console.log(`⚠️ Warning: ${failedDeletions.length} comments could not be deleted. They may be duplicated in the next run.`);
-        // Log failed deletions for debugging
-        failedDeletions.forEach((failure) => {
-          console.log(`   Comment ${failure.commentId}: ${failure.error}`);
-        });
-      }
-
       console.log(`🗑️ Deleted ${deletedCount} comments without user feedback`);
-      console.log(`📌 Preserved ${preservedCount} comments with user feedback or resolved status`);
-    }
-
-    // Save feedback data early (including from resolved comments) for future runs
-    if (trackFeedback && Object.keys(currentFeedback).length > 0) {
-      console.log('💾 Saving feedback data for future similarity matching...');
-      await saveFeedbackData(currentFeedback);
+      console.log(`📌 Preserved ${preservedCount} comments with user feedback`);
     }
 
     // Post or update summary comment
@@ -684,7 +500,7 @@ ${uniqueCommentId}`;
           console.log(`📍 Posting comment for ${relativePath}:${lineNum}`);
 
           try {
-            // Only post as inline comment - no fallback to standalone comments
+            // Try posting as inline comment
             await github.rest.pulls.createReviewComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -697,16 +513,16 @@ ${uniqueCommentId}`;
 
             commentsPosted++;
             console.log(`✅ Posted inline comment for ${relativePath}:${lineNum}`);
-          } catch (inlineError) {
+          } catch (error) {
             // Enhanced error logging to understand why inline comments fail
             console.log(`❌ Skipped comment for ${relativePath}:${lineNum} - cannot post inline comment`);
 
-            if (inlineError.status === 422) {
+            if (error.status === 422) {
               console.log(`   Reason: Line ${lineNum} is not within the PR diff (GitHub only allows comments on changed lines)`);
-            } else if (inlineError.status === 404) {
+            } else if (error.status === 404) {
               console.log(`   Reason: File ${relativePath} or commit ${commitId.substring(0, 7)} not found in PR`);
             } else {
-              console.log(`   Reason: ${inlineError.message}`);
+              console.log(`   Reason: ${error.message}`);
             }
 
             // No fallback - if we can't post an inline comment, we skip it entirely
