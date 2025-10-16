@@ -224,9 +224,23 @@ export default async ({ github, context, core }) => {
         const feedbackDir = path.join(process.env.GITHUB_WORKSPACE || process.cwd(), '.ai-feedback');
         const feedbackFileName = `feedback-${context.issue.number}-${Date.now()}.json`;
 
+        console.log(`🔍 Debug: toolRoot = "${toolRoot}"`);
+        console.log(`🔍 Debug: feedbackDir = "${feedbackDir}"`);
+        console.log(`🔍 Debug: REVIEW_OUTPUT_PATH = "${process.env.REVIEW_OUTPUT_PATH}"`);
+        console.log(`🔍 Debug: GITHUB_WORKSPACE = "${process.env.GITHUB_WORKSPACE}"`);
+
         // Ensure feedback directory exists
         if (!fs.existsSync(feedbackDir)) {
           fs.mkdirSync(feedbackDir, { recursive: true });
+          console.log(`📁 Created feedback directory: ${feedbackDir}`);
+        } else {
+          console.log(`📁 Feedback directory already exists: ${feedbackDir}`);
+        }
+
+        // Ensure tool root exists
+        if (!fs.existsSync(toolRoot)) {
+          fs.mkdirSync(toolRoot, { recursive: true });
+          console.log(`📁 Created tool root directory: ${toolRoot}`);
         }
 
         // Save to .ai-feedback for CLI to find
@@ -235,11 +249,20 @@ export default async ({ github, context, core }) => {
         const uploadPath = path.join(toolRoot, feedbackFileName);
 
         const feedbackJson = JSON.stringify(feedbackReport, null, 2);
-        fs.writeFileSync(feedbackPath, feedbackJson);
-        fs.writeFileSync(uploadPath, feedbackJson);
 
-        console.log(`💾 Saved feedback data to ${feedbackPath} (for CLI)`);
-        console.log(`💾 Saved feedback data to ${uploadPath} (for upload)`);
+        try {
+          fs.writeFileSync(feedbackPath, feedbackJson);
+          console.log(`💾 Saved feedback data to ${feedbackPath} (for CLI)`);
+        } catch (error) {
+          console.log(`⚠️ Failed to save feedback to CLI path: ${error.message}`);
+        }
+
+        try {
+          fs.writeFileSync(uploadPath, feedbackJson);
+          console.log(`💾 Saved feedback data to ${uploadPath} (for upload)`);
+        } catch (error) {
+          console.log(`⚠️ Failed to save feedback to upload path: ${error.message}`);
+        }
         core.setOutput('feedback-artifact-uploaded', 'true');
         core.setOutput('feedback-report-path', uploadPath);
 
@@ -366,10 +389,24 @@ export default async ({ github, context, core }) => {
           }
         }
 
-        // Filter to only include comments made by this specific CodeCritique tool
-        botReviewComments = allReviewComments.filter(
-          (comment) => comment.body.includes(uniqueCommentId) && comment.user.login === 'github-actions[bot]'
+        // Debug: Log all comments to understand what we're working with
+        console.log(`🔍 Debug: Found ${allReviewComments.length} total review comments in PR`);
+        const botComments = allReviewComments.filter(
+          (comment) => comment.user.login === 'github-actions[bot]' || comment.user.login.includes('github-actions')
         );
+        console.log(`🔍 Debug: Found ${botComments.length} comments from GitHub Actions`);
+
+        const commentsWithUniqueId = allReviewComments.filter((comment) => comment.body.includes(uniqueCommentId));
+        console.log(`🔍 Debug: Found ${commentsWithUniqueId.length} comments with unique ID "${uniqueCommentId}"`);
+
+        // More flexible filtering to catch CodeCritique comments
+        botReviewComments = allReviewComments.filter((comment) => {
+          const isBot = comment.user.login === 'github-actions[bot]' || comment.user.login.includes('github-actions');
+          const hasUniqueId = comment.body.includes(uniqueCommentId);
+          const hasCodeCritique = comment.body.includes('CodeCritique') || comment.body.includes('codecritique');
+
+          return isBot && (hasUniqueId || hasCodeCritique);
+        });
 
         const resolvedCount = botReviewComments.filter((c) => c.isResolved).length;
         console.log(
