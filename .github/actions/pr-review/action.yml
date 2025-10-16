@@ -113,7 +113,11 @@ runs:
         name: ${{ env.FEEDBACK_ARTIFACT_NAME }}
         path: ${{ github.workspace }}/.ai-feedback
         github_token: ${{ github.token }}
+        # Look for feedback artifacts in the same PR review workflow
+        workflow: ${{ github.workflow }}
         workflow_conclusion: success
+        # Only look at PR-related runs
+        pr: ${{ github.event.pull_request.number }}
         if_no_artifact_found: warn
       continue-on-error: true
 
