@@ -514,25 +514,27 @@ Select files that define HOW this project works, especially custom implementatio
    * Unified JSON parsing for LLM responses (handles both objects and arrays)
    */
   parseJsonFromResponse(content, expectArray = false) {
+    // Enhanced patterns for better JSON extraction
     const patterns = expectArray
       ? [
+          /```(?:json)?\s*(\[[\s\S]*?\])\s*```/, // Code block array (prioritized)
           /\[[\s\S]*?\]/, // Standard JSON array
-          /```(?:json)?\s*(\[[\s\S]*?\])\s*```/, // Code block array
           /\[[\s\S]*\]/, // Any array-like structure
         ]
       : [
-          /\{[\s\S]*\}/, // Standard JSON object
-          /```(?:json)?\s*(\{[\s\S]*\})\s*```/, // Code block object
-          /\[[\s\S]*?\]/, // Fallback to array
-          /```(?:json)?\s*(\[[\s\S]*?\])\s*```/, // Code block array fallback
+          /```(?:json)?\s*(\{[\s\S]*?\})\s*```/, // Code block object (prioritized)
+          /\{[\s\S]*?\}/, // Standard JSON object (non-greedy)
+          // Remove array fallback patterns that cause confusion
         ];
 
     for (const pattern of patterns) {
       const match = content.match(pattern);
       if (match) {
         try {
+          // Use captured group if available (for code blocks), otherwise full match
           const jsonStr = match[1] || match[0];
-          return JSON.parse(jsonStr);
+          const parsed = JSON.parse(jsonStr);
+          return parsed;
         } catch {
           continue;
         }
@@ -718,11 +720,14 @@ Be thorough but concise. This summary will be used to provide context during aut
 
       const summary = this.parseJsonFromResponse(response.content, false);
       if (summary) {
+        // Validate and ensure required fields exist (Sonnet 4.5 compatibility)
+        const validatedSummary = this.validateProjectSummary(summary);
+
         // Add metadata
-        summary.analysisDate = new Date().toISOString();
-        summary.projectPath = projectPath;
-        summary.keyFilesCount = keyFiles.length;
-        return summary;
+        validatedSummary.analysisDate = new Date().toISOString();
+        validatedSummary.projectPath = projectPath;
+        validatedSummary.keyFilesCount = keyFiles.length;
+        return validatedSummary;
       } else {
         console.error(chalk.red('Failed to parse LLM response as JSON'));
         console.error(chalk.gray('Response content preview:'), response.content.substring(0, 500));
@@ -761,6 +766,47 @@ Be thorough but concise. This summary will be used to provide context during aut
     }
 
     return content;
+  }
+
+  /**
+   * Validate and ensure project summary has all required fields (Sonnet 4.5 compatibility)
+   */
+  validateProjectSummary(summary) {
+    // Ensure all required fields exist with safe defaults
+    const validatedSummary = {
+      projectName: summary.projectName || 'Unknown Project',
+      projectType: summary.projectType || 'Unknown',
+      mainFrameworks: Array.isArray(summary.mainFrameworks) ? summary.mainFrameworks : [],
+      technologies: Array.isArray(summary.technologies) ? summary.technologies : [],
+      architecturalPatterns: Array.isArray(summary.architecturalPatterns) ? summary.architecturalPatterns : [],
+      keyPatterns: Array.isArray(summary.keyPatterns) ? summary.keyPatterns : [],
+      customImplementations: Array.isArray(summary.customImplementations) ? summary.customImplementations : [],
+      apiPatterns: Array.isArray(summary.apiPatterns) ? summary.apiPatterns : [],
+      stateManagement: summary.stateManagement || {
+        approach: 'Unknown',
+        patterns: [],
+      },
+      reviewGuidelines: Array.isArray(summary.reviewGuidelines) ? summary.reviewGuidelines : [],
+      // Preserve any other fields that might exist
+      ...summary,
+    };
+
+    // Ensure stateManagement has required structure
+    if (validatedSummary.stateManagement && typeof validatedSummary.stateManagement === 'object') {
+      validatedSummary.stateManagement = {
+        approach: validatedSummary.stateManagement.approach || 'Unknown',
+        patterns: Array.isArray(validatedSummary.stateManagement.patterns) ? validatedSummary.stateManagement.patterns : [],
+        ...validatedSummary.stateManagement,
+      };
+    }
+
+    console.log(
+      chalk.cyan(
+        `✅ Project summary validated - Technologies: ${validatedSummary.technologies.length}, Frameworks: ${validatedSummary.mainFrameworks.length}`
+      )
+    );
+
+    return validatedSummary;
   }
 
   /**

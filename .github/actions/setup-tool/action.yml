@@ -52,10 +52,17 @@ runs:
       uses: dawidd6/action-download-artifact@v11
       with:
         name: ai-code-review-embeddings-${{ github.repository_id }}
-        search_artifacts: true
-        github_token: ${{ inputs.github-token }}
+        # Look specifically in the default branch where embeddings are generated daily
+        branch: ${{ github.event.repository.default_branch }}
+        # Only look for successful workflow conclusions
         workflow_conclusion: success
+        search_artifacts: false
+        # Common embeddings workflow names to search for
+        workflow: generate-embeddings.yml
+        # Warn but don't fail if no artifacts found
         if_no_artifact_found: warn
+        # Use provided GitHub token
+        github_token: ${{ inputs.github-token }}
       continue-on-error: true
 
     - name: Setup Embeddings Directories
