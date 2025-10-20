@@ -17,6 +17,7 @@ import { findRelevantPRComments } from './pr-history/database.js';
 import { inferContextFromCodeContent, inferContextFromDocumentContent } from './utils/context-inference.js';
 import { isGenericDocument, getGenericDocumentContext } from './utils/document-detection.js';
 import { isTestFile, shouldProcessFile } from './utils/file-validation.js';
+import { parseJsonFromLLMResponse } from './utils/json-parser.js';
 import { detectFileType, detectLanguageFromExtension } from './utils/language-detection.js';
 import { debug } from './utils/logging.js';
 
@@ -1599,43 +1600,9 @@ You must respond with EXACTLY this JSON structure, with no additional text:
  * @returns {Object} Parsed analysis response
  */
 function parseAnalysisResponse(rawResponse) {
-  try {
-    // Strip only the OUTER markdown code fences if present (e.g., ```json...```)
-    // This handles Claude Sonnet 4.5 wrapping the entire JSON response in code fences
-    // Any markdown within the JSON field values is preserved
-    let cleanedResponse = rawResponse.trim();
+  const parsedResponse = parseJsonFromLLMResponse(rawResponse);
 
-    // Check if response starts with ```json or ``` and ends with ```
-    const codeBlockRegex = /^```(?:json)?\s*\n([\s\S]*)\n```$/;
-    const match = cleanedResponse.match(codeBlockRegex);
-
-    if (match) {
-      cleanedResponse = match[1].trim();
-      console.log(chalk.gray('Removed outer code fence wrapper from LLM response'));
-    }
-
-    const parsedResponse = JSON.parse(cleanedResponse);
-
-    // Check for holistic review structure, which contains fileSpecificIssues
-    if (parsedResponse.fileSpecificIssues || parsedResponse.crossFileIssues || parsedResponse.recommendations) {
-      return {
-        summary: parsedResponse.summary || 'No summary provided',
-        crossFileIssues: parsedResponse.crossFileIssues || [],
-        fileSpecificIssues: parsedResponse.fileSpecificIssues || {},
-        recommendations: parsedResponse.recommendations || [],
-        rawResponse,
-      };
-    }
-
-    // Fallback to single-file review structure
-    return {
-      summary: parsedResponse.summary || 'No summary provided',
-      issues: parsedResponse.issues || [],
-      rawResponse,
-    };
-  } catch (error) {
-    console.error(chalk.red(`Error parsing LLM response: ${error.message}`));
-    console.error(chalk.gray(`Response starts with: ${rawResponse.substring(0, 100)}...`));
+  if (!parsedResponse) {
     return {
       summary: 'Error parsing LLM response',
       issues: [],
@@ -1643,9 +1610,27 @@ function parseAnalysisResponse(rawResponse) {
       fileSpecificIssues: {},
       recommendations: [],
       rawResponse,
-      parseError: error.message,
+      parseError: 'Failed to parse JSON from LLM response',
     };
   }
+
+  // Check for holistic review structure, which contains fileSpecificIssues
+  if (parsedResponse.fileSpecificIssues || parsedResponse.crossFileIssues || parsedResponse.recommendations) {
+    return {
+      summary: parsedResponse.summary || 'No summary provided',
+      crossFileIssues: parsedResponse.crossFileIssues || [],
+      fileSpecificIssues: parsedResponse.fileSpecificIssues || {},
+      recommendations: parsedResponse.recommendations || [],
+      rawResponse,
+    };
+  }
+
+  // Fallback to single-file review structure
+  return {
+    summary: parsedResponse.summary || 'No summary provided',
+    issues: parsedResponse.issues || [],
+    rawResponse,
+  };
 }
 
 /**

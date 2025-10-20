@@ -15,6 +15,10 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 let anthropic = null;
+/**
+ * Get the Anthropic client
+ * @returns {Anthropic} The Anthropic client
+ */
 function getAnthropicClient() {
   if (anthropic) return anthropic;
   const apiKey = process.env.ANTHROPIC_API_KEY;
