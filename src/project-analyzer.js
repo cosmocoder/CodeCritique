@@ -12,6 +12,7 @@ import chalk from 'chalk';
 import { getDefaultEmbeddingsSystem } from './embeddings/factory.js';
 import * as llm from './llm.js';
 import { isDocumentationFile, isTestFile } from './utils/file-validation.js';
+import { parseJsonFromLLMResponse } from './utils/json-parser.js';
 
 // Consolidated file classification configuration
 const FILE_PATTERNS = {
@@ -474,7 +475,7 @@ Select files that define HOW this project works, especially custom implementatio
 
       console.log(chalk.gray('   📄 LLM Response preview:'), response.content.substring(0, 200));
 
-      const selectedPaths = this.parseJsonFromResponse(response.content, true);
+      const selectedPaths = parseJsonFromLLMResponse(response.content);
 
       if (selectedPaths && Array.isArray(selectedPaths) && selectedPaths.length > 0) {
         const keyFiles = selectedPaths
@@ -508,39 +509,6 @@ Select files that define HOW this project works, especially custom implementatio
       console.log(chalk.yellow('   🔄 Falling back to automatic selection...'));
       return this.fallbackFileSelection(candidates, projectPath);
     }
-  }
-
-  /**
-   * Unified JSON parsing for LLM responses (handles both objects and arrays)
-   */
-  parseJsonFromResponse(content, expectArray = false) {
-    // Enhanced patterns for better JSON extraction
-    const patterns = expectArray
-      ? [
-          /```(?:json)?\s*(\[[\s\S]*?\])\s*```/, // Code block array (prioritized)
-          /\[[\s\S]*?\]/, // Standard JSON array
-          /\[[\s\S]*\]/, // Any array-like structure
-        ]
-      : [
-          /```(?:json)?\s*(\{[\s\S]*?\})\s*```/, // Code block object (prioritized)
-          /\{[\s\S]*?\}/, // Standard JSON object (non-greedy)
-          // Remove array fallback patterns that cause confusion
-        ];
-
-    for (const pattern of patterns) {
-      const match = content.match(pattern);
-      if (match) {
-        try {
-          // Use captured group if available (for code blocks), otherwise full match
-          const jsonStr = match[1] || match[0];
-          const parsed = JSON.parse(jsonStr);
-          return parsed;
-        } catch {
-          continue;
-        }
-      }
-    }
-    return null;
   }
 
   /**
@@ -718,7 +686,7 @@ Be thorough but concise. This summary will be used to provide context during aut
         maxTokens: 4000,
       });
 
-      const summary = this.parseJsonFromResponse(response.content, false);
+      const summary = parseJsonFromLLMResponse(response.content);
       if (summary) {
         // Validate and ensure required fields exist (Sonnet 4.5 compatibility)
         const validatedSummary = this.validateProjectSummary(summary);
