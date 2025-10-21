@@ -112,7 +112,25 @@ const FILE_PATTERNS = {
 
 // Database query configurations
 const DB_SEARCH_CONFIGS = [
-  { category: 'package', terms: ['package.json', 'requirements.txt', 'gemfile', 'cargo.toml'], limit: 30, matcher: 'dependency' },
+  {
+    category: 'package',
+    terms: [
+      'package.json',
+      'package-lock.json',
+      'yarn.lock',
+      'pnpm-lock.yaml',
+      'requirements.txt',
+      'pipfile',
+      'pyproject.toml',
+      'gemfile',
+      'cargo.toml',
+      'pom.xml',
+      'build.gradle',
+      'composer.json',
+    ],
+    limit: 30,
+    matcher: 'dependency',
+  },
   { category: 'config', terms: ['config', 'dockerfile', 'makefile', 'eslint', 'prettier', 'jest'], limit: 30, matcher: 'config' },
   {
     category: 'setup',
@@ -362,20 +380,32 @@ export class ProjectAnalyzer {
           if (config.whereClause) {
             query = query.where(`project_path = '${projectPath}' AND (${config.whereClause})`);
           } else if (config.terms) {
+            // For term-based searches, query ALL files and sort by depth to prioritize shallow config files
             const allFiles = await table
               .query()
               .select(['path', 'name', 'content', 'type', 'language'])
               .where(`project_path = '${projectPath}'`)
-              .limit(100)
-              .toArray();
+              .toArray(); // NO LIMIT - get all files
 
-            return allFiles.filter((result) => {
+            // Sort by path depth (shorter paths first) to prioritize config files
+            allFiles.sort((a, b) => {
+              const depthA = (a.path || '').split('/').length;
+              const depthB = (b.path || '').split('/').length;
+              return depthA - depthB;
+            });
+
+            // Take only the first 500 after sorting to ensure we have shallow files
+            const sortedFiles = allFiles.slice(0, 500);
+
+            return sortedFiles.filter((result) => {
               const content = (result.content || '').toLowerCase();
               const pathName = (result.path || '').toLowerCase();
               const name = (result.name || '').toLowerCase();
-              return config.terms.some(
+              const matches = config.terms.some(
                 (term) => content.includes(term.toLowerCase()) || pathName.includes(term.toLowerCase()) || name.includes(term.toLowerCase())
               );
+
+              return matches;
             });
           } else {
             query = query.where(`project_path = '${projectPath}'`);
@@ -396,7 +426,7 @@ export class ProjectAnalyzer {
         console.log(chalk.gray(`   📦 Found ${results.length} ${config.category} file candidates`));
 
         results.forEach((result) => {
-          if (this.matchesFileType(result.path, result.name, config.matcher, result.content)) {
+          if (this.matchesFileType(result.path, result.name, config.matcher)) {
             keyFiles.set(result.path, { ...result, category: config.category, source: `${config.category}-search` });
           }
         });
