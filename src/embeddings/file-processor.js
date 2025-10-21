@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import chalk from 'chalk';
-import { isDocumentationFile, shouldProcessFile as utilsShouldProcessFile } from '../utils/file-validation.js';
+import { isDocumentationFile, shouldProcessFile as utilsShouldProcessFile, batchCheckGitignore } from '../utils/file-validation.js';
 import { detectLanguageFromExtension } from '../utils/language-detection.js';
 import { debug } from '../utils/logging.js';
 import { extractMarkdownChunks } from '../utils/markdown.js';
@@ -348,85 +348,33 @@ export class FileProcessor {
    */
   async _processBatch(filePaths, baseDir, exclusionOptions, onProgress, maxLines = 1000) {
     const results = { processed: 0, failed: 0, skipped: 0, excluded: 0, files: [], failedFiles: [], excludedFiles: [] };
-    const filesToProcess = [];
-    const contentsForBatch = [];
 
-    // Filter and prepare files for processing
-    for (const filePath of filePaths) {
-      const absoluteFilePath = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(baseDir, filePath);
-      const consistentRelativePath = path.relative(baseDir, absoluteFilePath);
-
-      // Check if file should be processed
-      if (
-        !utilsShouldProcessFile(absoluteFilePath, '', {
-          ...exclusionOptions,
-          baseDir: baseDir,
-          relativePathToCheck: consistentRelativePath,
-        })
-      ) {
-        results.excluded++;
-        results.excludedFiles.push(filePath);
-        this.progressTracker.update('skipped');
-        if (typeof onProgress === 'function') onProgress('excluded', filePath);
-        this.processedFiles.set(filePath, 'excluded');
-        continue;
-      }
-
-      try {
-        const stats = fs.statSync(absoluteFilePath);
-
-        // Read file content
-        let content = await fs.promises.readFile(absoluteFilePath, 'utf8');
-
-        // Truncate content to maximum specified lines for code files only (documentation files are chunked separately)
-        const isDocFile = isDocumentationFile(absoluteFilePath);
-        if (!isDocFile) {
-          const lines = content.split('\n');
-          if (lines.length > maxLines) {
-            content = lines.slice(0, maxLines).join('\n') + '\n... (truncated from ' + lines.length + ' lines)';
-            debug(`Truncated code file ${consistentRelativePath} from ${lines.length} lines to ${maxLines} lines`);
-          }
-        }
-
-        if (content.trim().length === 0) {
-          results.skipped++;
-          this.progressTracker.update('skipped');
-          if (typeof onProgress === 'function') onProgress('skipped', filePath);
-          this.processedFiles.set(filePath, 'skipped_empty');
-          continue;
-        }
-
-        filesToProcess.push({
-          filePath: absoluteFilePath,
-          originalInputPath: filePath,
-          content,
-          relativePath: consistentRelativePath,
-          stats,
-        });
-        contentsForBatch.push(content);
-      } catch {
-        results.failed++;
-        results.failedFiles.push(filePath);
-        this.progressTracker.update('failed');
-        if (typeof onProgress === 'function') onProgress('failed', filePath);
-        this.processedFiles.set(filePath, 'failed_read');
-      }
+    // ============================================================================
+    // PHASE 1: BATCH GITIGNORE CHECK
+    // ============================================================================
+    let gitignoreCache = new Map();
+    if (exclusionOptions.respectGitignore !== false) {
+      console.log(chalk.cyan(`Performing batch gitignore check for ${filePaths.length} files...`));
+      const gitStartTime = Date.now();
+      const absoluteFilePaths = filePaths.map((fp) => (path.isAbsolute(fp) ? path.resolve(fp) : path.resolve(baseDir, fp)));
+      gitignoreCache = await batchCheckGitignore(absoluteFilePaths, baseDir);
+      const gitDuration = ((Date.now() - gitStartTime) / 1000).toFixed(2);
+      console.log(chalk.green(`✓ Batch gitignore check completed in ${gitDuration}s`));
     }
 
-    // Efficient batch check: Get all existing embeddings for this project in one query
+    // ============================================================================
+    // PHASE 2: GET EXISTING EMBEDDINGS (for early filtering)
+    // ============================================================================
+    // Query existing embeddings BEFORE reading any files
     const fileTable = await this.databaseManager.getTable(this.fileEmbeddingsTable);
-    const filesToActuallyProcess = [];
-    const contentsToActuallyProcess = [];
     let existingFilesMap = new Map();
 
     try {
-      // Single query to get all existing file embeddings for this project
       const existingRecords = await fileTable
         .query()
         .where(`project_path = '${baseDir.replace(/'/g, "''")}'`)
         .toArray();
 
-      // Build a map for fast lookup: path -> [records]
       for (const record of existingRecords) {
         if (!existingFilesMap.has(record.path)) {
           existingFilesMap.set(record.path, []);
@@ -436,18 +384,135 @@ export class FileProcessor {
 
       console.log(chalk.cyan(`Found ${existingRecords.length} existing embeddings for comparison`));
     } catch (queryError) {
-      console.warn(chalk.yellow(`Warning: Could not query existing embeddings, will process all files: ${queryError.message}`));
-      existingFilesMap = new Map(); // Empty map means process all files
+      console.warn(chalk.yellow(`Warning: Could not query existing embeddings: ${queryError.message}`));
     }
 
-    // Now check each file against the existing embeddings map
+    // ============================================================================
+    // PHASE 3: FAST PRE-FILTERING (without reading file contents)
+    // ============================================================================
+    // Filter files based on basic checks and file timestamps before reading content
+    const candidateFiles = [];
+
+    for (const filePath of filePaths) {
+      const absoluteFilePath = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(baseDir, filePath);
+      const consistentRelativePath = path.relative(baseDir, absoluteFilePath);
+
+      try {
+        // Get file stats (size, mtime, etc.)
+        const stats = fs.statSync(absoluteFilePath);
+
+        // Check if file should be processed (using cached gitignore results)
+        if (
+          !utilsShouldProcessFile(absoluteFilePath, '', {
+            ...exclusionOptions,
+            baseDir: baseDir,
+            relativePathToCheck: consistentRelativePath,
+            gitignoreCache, // Pass the pre-computed cache
+            fileStats: stats, // Pass stats to avoid re-reading
+          })
+        ) {
+          results.excluded++;
+          results.excludedFiles.push(filePath);
+          this.progressTracker.update('skipped');
+          if (typeof onProgress === 'function') onProgress('excluded', filePath);
+          this.processedFiles.set(filePath, 'excluded');
+          continue;
+        }
+
+        // Early skip based on modification time if file exists in database
+        const existingRecords = existingFilesMap.get(consistentRelativePath) || [];
+        let potentiallyUnchanged = false;
+
+        if (existingRecords.length > 0) {
+          // Check if any existing record has the same modification time
+          for (const existing of existingRecords) {
+            const existingMtime = new Date(existing.last_modified).getTime();
+            const currentMtime = stats.mtime.getTime();
+
+            // If modification times match (within 1 second to account for filesystem precision)
+            if (Math.abs(existingMtime - currentMtime) < 1000) {
+              potentiallyUnchanged = true;
+              break;
+            }
+          }
+        }
+
+        candidateFiles.push({
+          filePath: absoluteFilePath,
+          originalInputPath: filePath,
+          relativePath: consistentRelativePath,
+          stats,
+          potentiallyUnchanged,
+          existingRecords,
+        });
+      } catch {
+        results.failed++;
+        results.failedFiles.push(filePath);
+        this.progressTracker.update('failed');
+        if (typeof onProgress === 'function') onProgress('failed', filePath);
+        this.processedFiles.set(filePath, 'failed_stat');
+      }
+    }
+
+    console.log(chalk.cyan(`Pre-filtered to ${candidateFiles.length} candidate files (excluded ${results.excluded})`));
+
+    // ============================================================================
+    // PHASE 4: READ FILES AND CONTENT HASH CHECK
+    // ============================================================================
+    // Now read file contents only for candidates that passed initial filtering
+    const filesToProcess = [];
+    const contentsForBatch = [];
+
+    for (const fileData of candidateFiles) {
+      try {
+        // Read file content
+        let content = await fs.promises.readFile(fileData.filePath, 'utf8');
+
+        // Check if empty
+        if (content.trim().length === 0) {
+          results.skipped++;
+          this.progressTracker.update('skipped');
+          if (typeof onProgress === 'function') onProgress('skipped', fileData.originalInputPath);
+          this.processedFiles.set(fileData.originalInputPath, 'skipped_empty');
+          continue;
+        }
+
+        // Truncate content to maximum specified lines for code files only
+        const isDocFile = isDocumentationFile(fileData.filePath);
+        if (!isDocFile) {
+          const lines = content.split('\n');
+          if (lines.length > maxLines) {
+            content = lines.slice(0, maxLines).join('\n') + '\n... (truncated from ' + lines.length + ' lines)';
+            debug(`Truncated code file ${fileData.relativePath} from ${lines.length} lines to ${maxLines} lines`);
+          }
+        }
+
+        // Add content to file data
+        fileData.content = content;
+        filesToProcess.push(fileData);
+        contentsForBatch.push(content);
+      } catch {
+        results.failed++;
+        results.failedFiles.push(fileData.originalInputPath);
+        this.progressTracker.update('failed');
+        if (typeof onProgress === 'function') onProgress('failed', fileData.originalInputPath);
+        this.processedFiles.set(fileData.originalInputPath, 'failed_read');
+      }
+    }
+
+    // ============================================================================
+    // PHASE 5: CONTENT HASH CHECK AND DEDUPLICATION
+    // ============================================================================
+    // Check each file against existing embeddings using content hash
+    const filesToActuallyProcess = [];
+    const contentsToActuallyProcess = [];
     const recordsToDelete = [];
 
     for (let i = 0; i < filesToProcess.length; i++) {
       const fileData = filesToProcess[i];
       const contentHash = createHash('md5').update(fileData.content).digest('hex').substring(0, 8);
 
-      const existingRecords = existingFilesMap.get(fileData.relativePath) || [];
+      const existingRecords = fileData.existingRecords || [];
       let needsUpdate = true;
 
       if (existingRecords.length > 0) {

@@ -105,6 +105,8 @@ export function isDocumentationFile(filePath) {
  * @param {Array<string>} options.excludePatterns - Patterns to exclude
  * @param {boolean} options.respectGitignore - Whether to respect .gitignore files
  * @param {string} options.baseDir - Base directory for relative paths
+ * @param {Map<string, boolean>} options.gitignoreCache - Optional cache for gitignore results
+ * @param {fs.Stats} options.fileStats - Optional pre-computed file stats to avoid re-reading
  * @returns {boolean} Whether the file should be processed
  *
  * @example
@@ -114,16 +116,22 @@ export function isDocumentationFile(filePath) {
  * });
  */
 export function shouldProcessFile(filePath, _, options = {}) {
-  const { excludePatterns = [], respectGitignore = true, baseDir = process.cwd() } = options;
+  const { excludePatterns = [], respectGitignore = true, baseDir = process.cwd(), gitignoreCache = null, fileStats = null } = options;
 
-  // Skip files that are too large (>1MB)
-  try {
-    const stats = fs.statSync(filePath);
-    if (stats.size > 1024 * 1024) {
+  // Skip files that are too large (>1MB) - use provided stats if available
+  if (fileStats) {
+    if (fileStats.size > 1024 * 1024) {
       return false;
     }
-  } catch {
-    // If we can't get file stats, assume it's processable
+  } else {
+    try {
+      const stats = fs.statSync(filePath);
+      if (stats.size > 1024 * 1024) {
+        return false;
+      }
+    } catch {
+      // If we can't get file stats, assume it's processable
+    }
   }
 
   // Skip binary files
@@ -157,10 +165,15 @@ export function shouldProcessFile(filePath, _, options = {}) {
 
   // Check gitignore patterns if enabled
   if (respectGitignore) {
-    try {
-      // Calculate relative path from baseDir for git check-ignore
-      const relativePath = path.relative(baseDir, filePath);
+    const relativePath = path.relative(baseDir, filePath);
 
+    // Use cache if provided
+    if (gitignoreCache && gitignoreCache.has(relativePath)) {
+      return !gitignoreCache.get(relativePath); // Cache stores isIgnored, we return shouldProcess
+    }
+
+    // Fallback to individual check (slow path)
+    try {
       // Use git check-ignore to determine if a file is ignored
       // This is the most accurate way to check as it uses Git's own ignore logic
       // Use baseDir as cwd to ensure git runs in the correct context
@@ -170,12 +183,76 @@ export function shouldProcessFile(filePath, _, options = {}) {
       });
 
       // If we get here, the file is ignored by git
+      if (gitignoreCache) gitignoreCache.set(relativePath, true);
       return false;
     } catch {
       // If git check-ignore exits with non-zero status, the file is not ignored
       // This is expected behavior, so we continue processing
+      if (gitignoreCache) gitignoreCache.set(relativePath, false);
     }
   }
 
   return true;
+}
+
+/**
+ * Batch check multiple files against gitignore in a single git command
+ * This is much faster than calling git check-ignore for each file individually
+ *
+ * @param {string[]} filePaths - Array of file paths to check
+ * @param {string} baseDir - Base directory for git operations
+ * @returns {Promise<Map<string, boolean>>} Map of relative paths to isIgnored boolean
+ */
+export async function batchCheckGitignore(filePaths, baseDir = process.cwd()) {
+  const resultMap = new Map();
+
+  if (filePaths.length === 0) {
+    return resultMap;
+  }
+
+  try {
+    // Convert to relative paths
+    const relativePaths = filePaths.map((fp) => path.relative(baseDir, fp));
+
+    // Write paths to temp file to avoid command line length limits
+    const tmpFile = path.join(baseDir, `.gitignore-check-${Date.now()}.tmp`);
+    await fs.promises.writeFile(tmpFile, relativePaths.join('\n'), 'utf8');
+
+    try {
+      // Use --stdin flag for batch checking
+      const result = execGitSafe('git check-ignore', ['--stdin'], {
+        stdio: ['pipe', 'pipe', 'ignore'],
+        cwd: baseDir,
+        input: relativePaths.join('\n'),
+      });
+
+      // Parse output - git check-ignore outputs the ignored files
+      const ignoredFiles = result.stdout
+        .trim()
+        .split('\n')
+        .filter((line) => line.length > 0);
+      const ignoredSet = new Set(ignoredFiles);
+
+      // Build result map
+      for (const relPath of relativePaths) {
+        resultMap.set(relPath, ignoredSet.has(relPath));
+      }
+    } finally {
+      // Clean up temp file
+      try {
+        await fs.promises.unlink(tmpFile);
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  } catch {
+    // If batch check fails, assume no files are ignored
+    // Individual checks can still be performed as fallback
+    const relativePaths = filePaths.map((fp) => path.relative(baseDir, fp));
+    for (const relPath of relativePaths) {
+      resultMap.set(relPath, false);
+    }
+  }
+
+  return resultMap;
 }
