@@ -101,6 +101,20 @@ export async function storePRCommentsBatch(commentsData, projectPath = process.c
         try {
           await table.add(validRecords);
           successCount += validRecords.length;
+
+          // Optimize table to sync indices with data and prevent TakeExec panics
+          try {
+            await table.optimize();
+          } catch (optimizeError) {
+            if (optimizeError.message && optimizeError.message.includes('legacy format')) {
+              console.log(
+                chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`)
+              );
+            } else {
+              console.warn(chalk.yellow(`Warning: Failed to optimize PR comments table after adding records: ${optimizeError.message}`));
+            }
+          }
+
           console.log(chalk.green(`Stored batch of ${validRecords.length} PR comments`));
         } catch (batchError) {
           console.error(chalk.red(`Error storing batch: ${batchError.message}`));

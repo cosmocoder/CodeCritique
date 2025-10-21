@@ -513,6 +513,9 @@ export class DatabaseManager {
 
       if (deletedCount > 0) {
         console.log(chalk.green(`Successfully cleared ${deletedCount} embeddings for project: ${resolvedProjectPath}`));
+
+        // Optimize tables after cleanup to maintain performance
+        await this._optimizeTablesAfterCleanup(db, tableNames);
       } else {
         console.log(chalk.yellow(`No embeddings found for project: ${resolvedProjectPath}`));
       }
@@ -618,6 +621,36 @@ export class DatabaseManager {
   }
 
   /**
+   * Optimize tables to sync indices with data and prevent TakeExec panics
+   * @param {Array} tableSpecs - Array of [table, tableName] tuples
+   * @private
+   */
+  async _optimizeTables(tableSpecs) {
+    console.log(chalk.blue('Optimizing tables to sync indices with data...'));
+
+    for (const [table, tableName] of tableSpecs) {
+      try {
+        console.log(chalk.blue(`Optimizing table: ${tableName}`));
+        await table.optimize();
+        console.log(chalk.green(`✓ Table ${tableName} optimized successfully`));
+      } catch (error) {
+        // Handle legacy FTS index upgrade issues in v0.22.2
+        if (error.message && error.message.includes('legacy format')) {
+          console.warn(
+            chalk.yellow(
+              `Skipping optimization for ${tableName} due to legacy index format - will be auto-upgraded during normal operations`
+            )
+          );
+        } else {
+          console.warn(chalk.yellow(`Warning: Failed to optimize table ${tableName}: ${error.message}`));
+        }
+      }
+    }
+
+    console.log(chalk.green('Table optimization complete'));
+  }
+
+  /**
    * Clear records from a specific table for a project
    * @param {LanceDBConnection} db - Database connection
    * @param {string} tableName - Table name
@@ -685,7 +718,20 @@ export class DatabaseManager {
       if (table) {
         console.log(chalk.blue(`Updating vector index for ${this.prCommentsTable}...`));
         await this.createAdaptiveVectorIndexes(table, this.prCommentsTable, 'combined_embedding');
-        console.log(chalk.green(`Vector index for ${this.prCommentsTable} updated.`));
+
+        // Optimize table to sync indices with data (conditional due to legacy index issues)
+        console.log(chalk.blue(`Optimizing ${this.prCommentsTable} table...`));
+        try {
+          await table.optimize();
+        } catch (optimizeError) {
+          if (optimizeError.message && optimizeError.message.includes('legacy format')) {
+            console.warn(chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
+          } else {
+            throw optimizeError; // Re-throw non-legacy errors
+          }
+        }
+
+        console.log(chalk.green(`Vector index for ${this.prCommentsTable} updated and optimized.`));
       }
     } catch (error) {
       console.error(chalk.red(`Error updating PR comments index: ${error.message}`));
@@ -742,6 +788,18 @@ export class DatabaseManager {
       // Add the new record
       await table.add([record]);
 
+      // Optimize table to sync indices with data (conditional due to legacy index issues)
+      try {
+        await table.optimize();
+        console.log(chalk.blue(`✓ Project summaries table optimized`));
+      } catch (optimizeError) {
+        if (optimizeError.message && optimizeError.message.includes('legacy format')) {
+          console.warn(chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
+        } else {
+          console.warn(chalk.yellow(`Warning: Failed to optimize project summaries table: ${optimizeError.message}`));
+        }
+      }
+
       console.log(chalk.green(`✅ Project summary stored for: ${resolvedProjectPath}`));
       return true;
     } catch (error) {
@@ -796,6 +854,46 @@ export class DatabaseManager {
       console.error(chalk.red(`Error retrieving project summary: ${error.message}`));
       return null; // Return null instead of throwing to allow graceful fallback
     }
+  }
+
+  /**
+   * Optimize tables after cleanup operations
+   * @param {LanceDBConnection} db - Database connection
+   * @param {Array<string>} availableTableNames - Available table names
+   * @private
+   */
+  async _optimizeTablesAfterCleanup(db, availableTableNames) {
+    console.log(chalk.blue('Optimizing tables after cleanup...'));
+
+    const tablesToOptimize = [
+      { name: this.fileEmbeddingsTable, displayName: 'File embeddings' },
+      { name: this.documentChunkTable, displayName: 'Document chunks' },
+      { name: this.prCommentsTable, displayName: 'PR comments' },
+      { name: PROJECT_SUMMARIES_TABLE, displayName: 'Project summaries' },
+    ];
+
+    for (const { name, displayName } of tablesToOptimize) {
+      if (availableTableNames.includes(name)) {
+        try {
+          const table = await db.openTable(name);
+          console.log(chalk.blue(`Optimizing ${displayName} table...`));
+          await table.optimize();
+          console.log(chalk.green(`✓ ${displayName} table optimized`));
+        } catch (error) {
+          if (error.message && error.message.includes('legacy format')) {
+            console.warn(
+              chalk.yellow(
+                `Skipping optimization for ${displayName} due to legacy index format - will be auto-upgraded during normal operations`
+              )
+            );
+          } else {
+            console.warn(chalk.yellow(`Warning: Failed to optimize ${displayName} table: ${error.message}`));
+          }
+        }
+      }
+    }
+
+    console.log(chalk.green('Post-cleanup table optimization complete'));
   }
 
   /**

@@ -339,6 +339,17 @@ export class ProjectAnalyzer {
     const db = await embeddingsSystem.databaseManager.getDB();
     const table = await db.openTable(embeddingsSystem.databaseManager.fileEmbeddingsTable);
 
+    // Optimize table to sync indices with data and prevent TakeExec panics
+    try {
+      await table.optimize();
+    } catch (optimizeError) {
+      if (optimizeError.message && optimizeError.message.includes('legacy format')) {
+        console.log(chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
+      } else {
+        console.warn(chalk.yellow(`Warning: Failed to optimize file embeddings table: ${optimizeError.message}`));
+      }
+    }
+
     const keyFiles = new Map();
 
     try {
