@@ -12,7 +12,6 @@ import chalk from 'chalk';
 import { getDefaultEmbeddingsSystem } from './embeddings/factory.js';
 import * as llm from './llm.js';
 import { isDocumentationFile, isTestFile } from './utils/file-validation.js';
-import { parseJsonFromLLMResponse } from './utils/json-parser.js';
 
 // Consolidated file classification configuration
 const FILE_PATTERNS = {
@@ -479,14 +478,30 @@ IMPORTANT: Return ONLY a JSON array of file paths, nothing else:
 Select files that define HOW this project works, especially custom implementations.`;
 
     try {
+      const fileSelectionSchema = {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          selectedFiles: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+            description: 'Array of file paths selected as architecturally important',
+          },
+        },
+        required: ['selectedFiles'],
+      };
+
       const response = await this.llm.sendPromptToClaude(prompt, {
         temperature: 0.1,
         maxTokens: 1000,
+        jsonSchema: fileSelectionSchema,
       });
 
       console.log(chalk.gray('   📄 LLM Response preview:'), response.content.substring(0, 200));
 
-      const selectedPaths = parseJsonFromLLMResponse(response.content);
+      const selectedPaths = response.json.selectedFiles;
 
       if (selectedPaths && Array.isArray(selectedPaths) && selectedPaths.length > 0) {
         const keyFiles = selectedPaths
@@ -692,12 +707,82 @@ Focus on identifying patterns that would help in code review, especially:
 Be thorough but concise. This summary will be used to provide context during automated code reviews to prevent false positives about "non-standard" properties that are actually valid custom implementations in this project.`;
 
     try {
+      const projectSummarySchema = {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          projectName: { type: 'string' },
+          projectType: { type: 'string' },
+          mainFrameworks: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+          technologies: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+          architecture: {
+            type: 'object',
+            properties: {
+              pattern: { type: 'string' },
+              description: { type: 'string' },
+              layers: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+            },
+          },
+          keyComponents: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                type: { type: 'string' },
+                description: { type: 'string' },
+                dependencies: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+              },
+              required: ['name', 'type', 'description'],
+            },
+          },
+          customImplementations: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                description: { type: 'string' },
+                extendsStandard: { type: 'string' },
+                files: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+              },
+              required: ['name', 'description', 'extendsStandard'],
+            },
+          },
+        },
+        required: [
+          'projectName',
+          'projectType',
+          'mainFrameworks',
+          'technologies',
+          'architecture',
+          'keyComponents',
+          'customImplementations',
+        ],
+      };
+
       const response = await this.llm.sendPromptToClaude(prompt, {
         temperature: 0.1,
         maxTokens: 4000,
+        jsonSchema: projectSummarySchema,
       });
 
-      const summary = parseJsonFromLLMResponse(response.content);
+      const summary = response.json;
       if (summary) {
         // Validate and ensure required fields exist (Sonnet 4.5 compatibility)
         const validatedSummary = this.validateProjectSummary(summary);

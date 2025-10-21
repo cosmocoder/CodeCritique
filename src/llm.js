@@ -36,39 +36,84 @@ const DEFAULT_MODEL = 'claude-sonnet-4-5';
 const MAX_TOKENS = 4096;
 
 /**
- * Send a prompt to Claude and get a response
+ * Send a prompt to Claude and get a structured JSON response using tool calling
  *
  * @param {string} prompt - The prompt to send to Claude
  * @param {Object} options - Options for the request
- * @returns {Promise<Object>} The response from Claude
+ * @param {Object} options.jsonSchema - JSON schema for structured output
+ * @returns {Promise<Object>} The response from Claude with structured data
  */
 async function sendPromptToClaude(prompt, options = {}) {
-  const { model = DEFAULT_MODEL, maxTokens = MAX_TOKENS, temperature = 0.7, system = '' } = options;
+  const { model = DEFAULT_MODEL, maxTokens = MAX_TOKENS, temperature = 0.7, system = '', jsonSchema = null } = options;
 
   try {
     console.log(chalk.cyan('Sending prompt to Claude...'));
 
     const client = getAnthropicClient();
-    const response = await client.messages.create({
-      model,
-      max_tokens: maxTokens,
-      temperature,
-      system:
-        system ||
-        'You are an expert code reviewer with deep knowledge of software engineering principles, design patterns, and best practices.',
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-    });
 
-    return {
-      content: response.content[0].text,
-      model: response.model,
-      usage: response.usage,
-    };
+    // Use structured output with tool calling if schema is provided
+    if (jsonSchema) {
+      const tools = [
+        {
+          name: 'return_json',
+          description: 'Return the final answer strictly as JSON matching the schema.',
+          input_schema: jsonSchema,
+        },
+      ];
+
+      const response = await client.messages.create({
+        model,
+        max_tokens: maxTokens,
+        temperature,
+        tools,
+        tool_choice: { type: 'tool', name: 'return_json' },
+        system:
+          system ||
+          'You are an expert code reviewer with deep knowledge of software engineering principles, design patterns, and best practices.',
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+      });
+
+      // Find the tool_use block and extract the structured data
+      const toolUse = response.content.find((block) => block.type === 'tool_use' && block.name === 'return_json');
+
+      if (!toolUse) {
+        throw new Error('No structured output received from Claude');
+      }
+
+      return {
+        content: JSON.stringify(toolUse.input, null, 2), // For backward compatibility
+        model: response.model,
+        usage: response.usage,
+        json: toolUse.input, // The parsed JavaScript object
+      };
+    } else {
+      // Fallback to regular text response
+      const response = await client.messages.create({
+        model,
+        max_tokens: maxTokens,
+        temperature,
+        system:
+          system ||
+          'You are an expert code reviewer with deep knowledge of software engineering principles, design patterns, and best practices.',
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+      });
+
+      return {
+        content: response.content[0].text,
+        model: response.model,
+        usage: response.usage,
+      };
+    }
   } catch (error) {
     console.error(chalk.red(`Error sending prompt to Claude: ${error.message}`));
     throw error;
