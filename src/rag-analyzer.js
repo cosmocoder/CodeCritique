@@ -17,7 +17,6 @@ import { findRelevantPRComments } from './pr-history/database.js';
 import { inferContextFromCodeContent, inferContextFromDocumentContent } from './utils/context-inference.js';
 import { isGenericDocument, getGenericDocumentContext } from './utils/document-detection.js';
 import { isTestFile, shouldProcessFile } from './utils/file-validation.js';
-import { parseJsonFromLLMResponse } from './utils/json-parser.js';
 import { detectFileType, detectLanguageFromExtension } from './utils/language-detection.js';
 import { debug } from './utils/logging.js';
 
@@ -644,16 +643,93 @@ async function sendPromptToLLM(prompt, llmOptions) {
       throw new Error('LLM module does not contain required function: sendPromptToClaude');
     }
 
-    const response = await llm.sendPromptToClaude(prompt, llmOptions);
+    // Define schema for code review responses
+    const codeReviewSchema = {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        summary: { type: 'string' },
+        issues: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string' },
+              severity: { type: 'string' },
+              description: { type: 'string' },
+              lineNumbers: {
+                type: 'array',
+                items: { type: 'number' },
+              },
+              suggestion: { type: 'string' },
+              category: { type: 'string' },
+            },
+            required: ['type', 'severity', 'description', 'lineNumbers'],
+          },
+        },
+        crossFileIssues: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string' },
+              severity: { type: 'string' },
+              message: { type: 'string' },
+              files: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+              suggestion: { type: 'string' },
+              category: { type: 'string' },
+            },
+            required: ['type', 'severity', 'message', 'files'],
+          },
+        },
+        fileSpecificIssues: {
+          type: 'object',
+          additionalProperties: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                type: { type: 'string' },
+                severity: { type: 'string' },
+                description: { type: 'string' },
+                lineNumbers: {
+                  type: 'array',
+                  items: { type: 'number' },
+                },
+                suggestion: { type: 'string' },
+                category: { type: 'string' },
+              },
+              required: ['type', 'severity', 'description', 'lineNumbers'],
+            },
+          },
+        },
+        recommendations: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              category: { type: 'string' },
+              suggestion: { type: 'string' },
+              priority: { type: 'string' },
+              impact: { type: 'string' },
+            },
+            required: ['category', 'suggestion'],
+          },
+        },
+      },
+      required: ['summary'],
+    };
 
-    // The real function returns an object with {content, model, usage}
-    // We need to return just the content part
-    if (response && typeof response === 'object' && response.content) {
-      return response.content;
-    } else {
-      console.warn(chalk.yellow('Unexpected LLM response format, attempting to use response directly'));
-      return response;
-    }
+    const response = await llm.sendPromptToClaude(prompt, {
+      ...llmOptions,
+      jsonSchema: codeReviewSchema,
+    });
+
+    // Return the response object so parseAnalysisResponse can access the json property
+    return response;
   } catch (error) {
     console.error(chalk.red(`Error in LLM call: ${error.message}`));
     throw error; // Re-throw to properly handle the error
@@ -950,11 +1026,15 @@ DO NOT flag missing imports or files referenced in import statements as issues. 
 6.  Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
 7.  Ensure all reported issue descriptions clearly state the deviation/problem and suggestions align with the prioritized context (guidelines first, then examples, then historical patterns). Avoid general advice conflicting with context.
 8.  **CRITICAL 'lineNumbers' RULE - MANDATORY COMPLIANCE**:
+    - **ALWAYS provide line numbers** - this field is REQUIRED for every issue
+    - If you can identify specific lines, provide them (max 3-5 for repeated issues)
+    - If the issue affects the entire file or cannot be pinpointed, provide [1] or relevant section line numbers
     - For ANY issue that occurs multiple times in a file, list ONLY the first 3-5 occurrences maximum
     - NEVER provide exhaustive lists of line numbers (e.g., [1,2,3,4,5,6,7,8,9,10...])
     - If an issue affects many lines, use representative examples only
     - Exhaustive line number lists are considered hallucination and must be avoided
-    - Example: Instead of listing 20+ line numbers, use [15, 23, 47, "...and 12 other occurrences"]
+    - Example: Instead of listing 20+ line numbers, use [15, 23, 47]
+    - **NEVER omit lineNumbers** - empty arrays [] are not allowed
 9.  Format the final, consolidated, and prioritized list of issues, along with a brief overall summary, **strictly** according to the JSON structure below.
 10. CRITICAL: Respond ONLY with valid JSON - start with { and end with }, no additional text.
 
@@ -968,7 +1048,7 @@ When you identify issues that violate custom instructions provided at the beginn
 
 REQUIRED JSON OUTPUT FORMAT:
 
-**REMINDER: For lineNumbers array, use ONLY 3-5 representative line numbers for repeated issues. NEVER provide exhaustive lists.**
+**REMINDER: lineNumbers is REQUIRED - always provide at least one line number. Use ONLY 3-5 representative line numbers for repeated issues. NEVER provide exhaustive lists or empty arrays.**
 
 You must respond with EXACTLY this JSON structure, with no additional text:
 
@@ -1600,7 +1680,8 @@ You must respond with EXACTLY this JSON structure, with no additional text:
  * @returns {Object} Parsed analysis response
  */
 function parseAnalysisResponse(rawResponse) {
-  const parsedResponse = parseJsonFromLLMResponse(rawResponse);
+  // rawResponse is now the full LLM response object with structured JSON from tool calling
+  const parsedResponse = rawResponse.json;
 
   if (!parsedResponse) {
     return {

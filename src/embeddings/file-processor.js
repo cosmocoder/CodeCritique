@@ -536,6 +536,21 @@ export class FileProcessor {
         if (recordsToAdd.length > 0) {
           await fileTable.add(recordsToAdd);
 
+          // Optimize table to sync indices with data and prevent TakeExec panics
+          try {
+            await fileTable.optimize();
+          } catch (optimizeError) {
+            if (optimizeError.message && optimizeError.message.includes('legacy format')) {
+              console.log(
+                chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`)
+              );
+            } else {
+              console.warn(
+                chalk.yellow(`Warning: Failed to optimize file embeddings table after adding records: ${optimizeError.message}`)
+              );
+            }
+          }
+
           recordsToAdd.forEach((record, index) => {
             const fileData = filesToActuallyProcess[index];
             if (embeddings[index]) {
@@ -721,6 +736,18 @@ export class FileProcessor {
     if (allDocChunkRecordsToAdd.length > 0) {
       try {
         await documentChunkTable.add(allDocChunkRecordsToAdd);
+
+        // Optimize table to sync indices with data and prevent TakeExec panics
+        try {
+          await documentChunkTable.optimize();
+        } catch (optimizeError) {
+          if (optimizeError.message && optimizeError.message.includes('legacy format')) {
+            console.log(chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
+          } else {
+            console.warn(chalk.yellow(`Warning: Failed to optimize document chunk table after adding records: ${optimizeError.message}`));
+          }
+        }
+
         console.log(
           chalk.green(`Successfully added ${allDocChunkRecordsToAdd.length} document chunk embeddings to ${this.documentChunkTable}.`)
         );

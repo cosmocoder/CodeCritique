@@ -12,7 +12,6 @@ import chalk from 'chalk';
 import { getDefaultEmbeddingsSystem } from './embeddings/factory.js';
 import * as llm from './llm.js';
 import { isDocumentationFile, isTestFile } from './utils/file-validation.js';
-import { parseJsonFromLLMResponse } from './utils/json-parser.js';
 
 // Consolidated file classification configuration
 const FILE_PATTERNS = {
@@ -113,7 +112,25 @@ const FILE_PATTERNS = {
 
 // Database query configurations
 const DB_SEARCH_CONFIGS = [
-  { category: 'package', terms: ['package.json', 'requirements.txt', 'gemfile', 'cargo.toml'], limit: 30, matcher: 'dependency' },
+  {
+    category: 'package',
+    terms: [
+      'package.json',
+      'package-lock.json',
+      'yarn.lock',
+      'pnpm-lock.yaml',
+      'requirements.txt',
+      'pipfile',
+      'pyproject.toml',
+      'gemfile',
+      'cargo.toml',
+      'pom.xml',
+      'build.gradle',
+      'composer.json',
+    ],
+    limit: 30,
+    matcher: 'dependency',
+  },
   { category: 'config', terms: ['config', 'dockerfile', 'makefile', 'eslint', 'prettier', 'jest'], limit: 30, matcher: 'config' },
   {
     category: 'setup',
@@ -339,6 +356,17 @@ export class ProjectAnalyzer {
     const db = await embeddingsSystem.databaseManager.getDB();
     const table = await db.openTable(embeddingsSystem.databaseManager.fileEmbeddingsTable);
 
+    // Optimize table to sync indices with data and prevent TakeExec panics
+    try {
+      await table.optimize();
+    } catch (optimizeError) {
+      if (optimizeError.message && optimizeError.message.includes('legacy format')) {
+        console.log(chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
+      } else {
+        console.warn(chalk.yellow(`Warning: Failed to optimize file embeddings table: ${optimizeError.message}`));
+      }
+    }
+
     const keyFiles = new Map();
 
     try {
@@ -352,20 +380,32 @@ export class ProjectAnalyzer {
           if (config.whereClause) {
             query = query.where(`project_path = '${projectPath}' AND (${config.whereClause})`);
           } else if (config.terms) {
+            // For term-based searches, query ALL files and sort by depth to prioritize shallow config files
             const allFiles = await table
               .query()
               .select(['path', 'name', 'content', 'type', 'language'])
               .where(`project_path = '${projectPath}'`)
-              .limit(100)
-              .toArray();
+              .toArray(); // NO LIMIT - get all files
 
-            return allFiles.filter((result) => {
+            // Sort by path depth (shorter paths first) to prioritize config files
+            allFiles.sort((a, b) => {
+              const depthA = (a.path || '').split('/').length;
+              const depthB = (b.path || '').split('/').length;
+              return depthA - depthB;
+            });
+
+            // Take only the first 500 after sorting to ensure we have shallow files
+            const sortedFiles = allFiles.slice(0, 500);
+
+            return sortedFiles.filter((result) => {
               const content = (result.content || '').toLowerCase();
               const pathName = (result.path || '').toLowerCase();
               const name = (result.name || '').toLowerCase();
-              return config.terms.some(
+              const matches = config.terms.some(
                 (term) => content.includes(term.toLowerCase()) || pathName.includes(term.toLowerCase()) || name.includes(term.toLowerCase())
               );
+
+              return matches;
             });
           } else {
             query = query.where(`project_path = '${projectPath}'`);
@@ -386,7 +426,7 @@ export class ProjectAnalyzer {
         console.log(chalk.gray(`   📦 Found ${results.length} ${config.category} file candidates`));
 
         results.forEach((result) => {
-          if (this.matchesFileType(result.path, result.name, config.matcher, result.content)) {
+          if (this.matchesFileType(result.path, result.name, config.matcher)) {
             keyFiles.set(result.path, { ...result, category: config.category, source: `${config.category}-search` });
           }
         });
@@ -468,14 +508,30 @@ IMPORTANT: Return ONLY a JSON array of file paths, nothing else:
 Select files that define HOW this project works, especially custom implementations.`;
 
     try {
+      const fileSelectionSchema = {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          selectedFiles: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+            description: 'Array of file paths selected as architecturally important',
+          },
+        },
+        required: ['selectedFiles'],
+      };
+
       const response = await this.llm.sendPromptToClaude(prompt, {
         temperature: 0.1,
         maxTokens: 1000,
+        jsonSchema: fileSelectionSchema,
       });
 
       console.log(chalk.gray('   📄 LLM Response preview:'), response.content.substring(0, 200));
 
-      const selectedPaths = parseJsonFromLLMResponse(response.content);
+      const selectedPaths = response.json.selectedFiles;
 
       if (selectedPaths && Array.isArray(selectedPaths) && selectedPaths.length > 0) {
         const keyFiles = selectedPaths
@@ -681,12 +737,82 @@ Focus on identifying patterns that would help in code review, especially:
 Be thorough but concise. This summary will be used to provide context during automated code reviews to prevent false positives about "non-standard" properties that are actually valid custom implementations in this project.`;
 
     try {
+      const projectSummarySchema = {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          projectName: { type: 'string' },
+          projectType: { type: 'string' },
+          mainFrameworks: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+          technologies: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+          architecture: {
+            type: 'object',
+            properties: {
+              pattern: { type: 'string' },
+              description: { type: 'string' },
+              layers: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+            },
+          },
+          keyComponents: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                type: { type: 'string' },
+                description: { type: 'string' },
+                dependencies: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+              },
+              required: ['name', 'type', 'description'],
+            },
+          },
+          customImplementations: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                description: { type: 'string' },
+                extendsStandard: { type: 'string' },
+                files: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+              },
+              required: ['name', 'description', 'extendsStandard'],
+            },
+          },
+        },
+        required: [
+          'projectName',
+          'projectType',
+          'mainFrameworks',
+          'technologies',
+          'architecture',
+          'keyComponents',
+          'customImplementations',
+        ],
+      };
+
       const response = await this.llm.sendPromptToClaude(prompt, {
         temperature: 0.1,
         maxTokens: 4000,
+        jsonSchema: projectSummarySchema,
       });
 
-      const summary = parseJsonFromLLMResponse(response.content);
+      const summary = response.json;
       if (summary) {
         // Validate and ensure required fields exist (Sonnet 4.5 compatibility)
         const validatedSummary = this.validateProjectSummary(summary);
