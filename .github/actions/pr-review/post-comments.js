@@ -337,6 +337,10 @@ export default async ({ github, context, core }) => {
       console.log(`📊 Collected feedback from ${Object.keys(currentFeedback).length} previous comments`);
     }
 
+    // Merge current session feedback with existing feedback for comprehensive filtering
+    const allFeedback = { ...existingFeedback, ...currentFeedback };
+    console.log(`📊 Total feedback items available for filtering: ${Object.keys(allFeedback).length}`);
+
     // Delete previous line comments (but preserve ones with user feedback)
     if (postComments) {
       console.log('🔄 Cleaning up previous line comments...');
@@ -453,7 +457,7 @@ ${uniqueCommentId}`;
 
           // Skip similar issues that received negative feedback
           if (
-            shouldSkipSimilarIssue(issue.description, existingFeedback, {
+            shouldSkipSimilarIssue(issue.description, allFeedback, {
               similarityThreshold: 0.7,
               verbose: true,
             })
