@@ -304,9 +304,10 @@ export default async ({ github, context, core }) => {
       }
     }
 
-    // Analyze feedback from previous comments before cleanup
+    // Fetch review comments once for both feedback analysis and cleanup
+    let botReviewComments = [];
     if (postComments && trackFeedback) {
-      console.log('📊 Analyzing feedback from previous AI comments...');
+      console.log('📊 Fetching previous AI comments for feedback analysis and cleanup...');
 
       const { data: reviewComments } = await github.rest.pulls.listReviewComments({
         pull_number: context.issue.number,
@@ -314,18 +315,20 @@ export default async ({ github, context, core }) => {
         repo: context.repo.repo,
       });
 
-      const botReviewComments = reviewComments.filter(
+      botReviewComments = reviewComments.filter(
         (comment) => comment.body.includes(uniqueCommentId) && comment.user.login === 'github-actions[bot]'
       );
+
+      console.log(`🔍 Found ${botReviewComments.length} previous AI comments`);
 
       // Analyze feedback for each existing comment
       for (const comment of botReviewComments) {
         const feedback = await analyzeFeedback(comment.id, comment.body);
         if (feedback) {
           // Store original issue description for similarity matching
-          // Extract the actual issue description (the text after "**CodeCritique Review**")
-          const reviewHeaderMatch = comment.body.match(/\*\*CodeCritique Review\*\*\s*\n\n(.*?)(?:\n\n|\*\*|$)/s);
-          feedback.originalIssue = reviewHeaderMatch ? reviewHeaderMatch[1].trim() : comment.body.substring(0, 100);
+          // Extract the actual issue description (after emoji, header, and severity line)
+          const reviewHeaderMatch = comment.body.match(/^.+?\*\*CodeCritique Review\*\*\s*\n\n\*Severity:.*?\*\s*\n\n(.*?)(?:\n\n\*\*|$)/s);
+          feedback.originalIssue = reviewHeaderMatch ? reviewHeaderMatch[1].trim() : '';
           currentFeedback[comment.id] = feedback;
           console.log(`📝 Collected feedback for comment ${comment.id}: ${feedback.overallSentiment}`);
         }
@@ -334,19 +337,13 @@ export default async ({ github, context, core }) => {
       console.log(`📊 Collected feedback from ${Object.keys(currentFeedback).length} previous comments`);
     }
 
+    // Merge current session feedback with existing feedback for comprehensive filtering
+    const allFeedback = { ...existingFeedback, ...currentFeedback };
+    console.log(`📊 Total feedback items available for filtering: ${Object.keys(allFeedback).length}`);
+
     // Delete previous line comments (but preserve ones with user feedback)
     if (postComments) {
       console.log('🔄 Cleaning up previous line comments...');
-
-      const { data: reviewComments } = await github.rest.pulls.listReviewComments({
-        pull_number: context.issue.number,
-        owner: context.repo.owner,
-        repo: context.repo.repo,
-      });
-
-      const botReviewComments = reviewComments.filter(
-        (comment) => comment.body.includes(uniqueCommentId) && comment.user.login === 'github-actions[bot]'
-      );
 
       let deletedCount = 0;
       let preservedCount = 0;
@@ -460,7 +457,7 @@ ${uniqueCommentId}`;
 
           // Skip similar issues that received negative feedback
           if (
-            shouldSkipSimilarIssue(issue.description, existingFeedback, {
+            shouldSkipSimilarIssue(issue.description, allFeedback, {
               similarityThreshold: 0.7,
               verbose: true,
             })
