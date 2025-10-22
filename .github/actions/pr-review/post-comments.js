@@ -326,9 +326,9 @@ export default async ({ github, context, core }) => {
         const feedback = await analyzeFeedback(comment.id, comment.body);
         if (feedback) {
           // Store original issue description for similarity matching
-          // Extract the actual issue description (the text after "**CodeCritique Review**")
-          const reviewHeaderMatch = comment.body.match(/\*\*CodeCritique Review\*\*\s*\n\n(.*?)(?:\n\n|\*\*|$)/s);
-          feedback.originalIssue = reviewHeaderMatch ? reviewHeaderMatch[1].trim() : comment.body.substring(0, 100);
+          // Extract the actual issue description (after emoji, header, and severity line)
+          const reviewHeaderMatch = comment.body.match(/^.+?\*\*CodeCritique Review\*\*\s*\n\n\*Severity:.*?\*\s*\n\n(.*?)(?:\n\n\*\*|$)/s);
+          feedback.originalIssue = reviewHeaderMatch ? reviewHeaderMatch[1].trim() : '';
           currentFeedback[comment.id] = feedback;
           console.log(`📝 Collected feedback for comment ${comment.id}: ${feedback.overallSentiment}`);
         }
