@@ -373,14 +373,15 @@ jobs:
 
 #### Input Parameters
 
-| Parameter           | Description                                          | Required | Default         |
-| ------------------- | ---------------------------------------------------- | -------- | --------------- |
-| `anthropic-api-key` | Anthropic API key for Claude models                  | **Yes**  | -               |
-| `verbose`           | Show verbose output                                  | No       | `false`         |
-| `model`             | LLM model to use (e.g., `claude-sonnet-4-20250514`)  | No       | Auto-selected   |
-| `max-tokens`        | Maximum tokens for LLM response                      | No       | Auto-calculated |
-| `concurrency`       | Concurrency for processing multiple files            | No       | `3`             |
-| `custom-docs`       | Custom documents (format: `"title:path,title:path"`) | No       | `''`            |
+| Parameter           | Description                                          | Required | Default              |
+| ------------------- | ---------------------------------------------------- | -------- | -------------------- |
+| `anthropic-api-key` | Anthropic API key for Claude models                  | **Yes**  | -                    |
+| `skip-label`        | Label name to skip AI review                         | No       | `ai-review-disabled` |
+| `verbose`           | Show verbose output                                  | No       | `false`              |
+| `model`             | LLM model to use (e.g., `claude-sonnet-4-20250514`)  | No       | Auto-selected        |
+| `max-tokens`        | Maximum tokens for LLM response                      | No       | Auto-calculated      |
+| `concurrency`       | Concurrency for processing multiple files            | No       | `3`                  |
+| `custom-docs`       | Custom documents (format: `"title:path,title:path"`) | No       | `''`                 |
 
 > **Note**: The action uses sensible defaults for all review parameters. It always:
 >
@@ -408,6 +409,36 @@ The action provides several outputs that can be used in subsequent workflow step
 | `review-report-path`     | Path to the detailed review report     |
 
 #### Advanced Configuration Examples
+
+##### Skipping Reviews with Labels
+
+You can skip AI reviews for specific PRs by adding a label. This is useful when:
+
+- You want to merge urgent hotfixes without waiting for AI review
+- The PR contains only documentation or configuration changes
+- You're making experimental changes that don't need review
+
+By default, the action checks for the `ai-review-disabled` label, but you can customize this:
+
+```yaml
+- name: AI Code Review (Customizable Skip)
+  uses: cosmocoder/CodeCritique/.github/actions/pr-review@main
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    skip-label: 'no-ai-review' # Custom label name
+```
+
+When a PR has the skip label, the workflow will exit early with a message:
+
+```
+⏭️  Skipping AI review - PR has 'ai-review-disabled' label
+```
+
+To use this feature:
+
+1. Add the label to your repository (e.g., create a label named `ai-review-disabled`)
+2. Add the label to any PR you want to skip
+3. The action will automatically detect it and skip the review
 
 ##### Custom Model and Performance Settings
 

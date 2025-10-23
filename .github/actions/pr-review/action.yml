@@ -11,6 +11,11 @@ inputs:
     description: 'Anthropic API key for Claude models'
     required: true
 
+  skip-label:
+    description: 'Label name to skip AI review (e.g., ai-review-disabled)'
+    required: false
+    default: 'ai-review-disabled'
+
   verbose:
     description: 'Show verbose output'
     required: false
@@ -87,6 +92,20 @@ runs:
       shell: bash
       run: |
         echo "FEEDBACK_ARTIFACT_NAME=ai-review-feedback-${{ github.repository_id }}" >> $GITHUB_ENV
+
+    # Check if PR has skip label and exit early if present
+    - name: Check for skip label
+      if: github.event.pull_request.labels
+      shell: bash
+      env:
+        PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        SKIP_LABEL: ${{ inputs.skip-label }}
+      run: |
+        if echo "$PR_LABELS" | jq -e --arg label "$SKIP_LABEL" 'index($label)' > /dev/null; then
+          echo "⏭️  Skipping AI review - PR has '$SKIP_LABEL' label"
+          exit 0
+        fi
+        echo "✅ No skip label found, proceeding with review"
 
     # Create a symlink to the action repository to access sibling composite actions.
     # This workaround is needed because GitHub Actions doesn't support relative paths
