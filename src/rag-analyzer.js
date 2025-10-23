@@ -662,6 +662,16 @@ async function sendPromptToLLM(prompt, llmOptions) {
                 items: { type: 'number' },
               },
               suggestion: { type: 'string' },
+              codeSuggestion: {
+                type: 'object',
+                properties: {
+                  startLine: { type: 'number' },
+                  endLine: { type: 'number' },
+                  oldCode: { type: 'string' },
+                  newCode: { type: 'string' },
+                },
+                required: ['startLine', 'oldCode', 'newCode'],
+              },
               category: { type: 'string' },
             },
             required: ['type', 'severity', 'description', 'lineNumbers'],
@@ -700,6 +710,16 @@ async function sendPromptToLLM(prompt, llmOptions) {
                   items: { type: 'number' },
                 },
                 suggestion: { type: 'string' },
+                codeSuggestion: {
+                  type: 'object',
+                  properties: {
+                    startLine: { type: 'number' },
+                    endLine: { type: 'number' },
+                    oldCode: { type: 'string' },
+                    newCode: { type: 'string' },
+                  },
+                  required: ['startLine', 'oldCode', 'newCode'],
+                },
                 category: { type: 'string' },
               },
               required: ['type', 'severity', 'description', 'lineNumbers'],
@@ -1050,6 +1070,18 @@ REQUIRED JSON OUTPUT FORMAT:
 
 **REMINDER: lineNumbers is REQUIRED - always provide at least one line number. Use ONLY 3-5 representative line numbers for repeated issues. NEVER provide exhaustive lists or empty arrays.**
 
+**🚨 CODE SUGGESTIONS FORMAT 🚨**
+When suggesting code changes, you can optionally include a codeSuggestion object with:
+- startLine: The starting line number of the code to replace
+- endLine: (optional) The ending line number if replacing multiple lines
+- oldCode: The exact current code that should be replaced (must match exactly)
+- newCode: The proposed replacement code
+
+Code suggestions enable reviewers to apply fixes directly as GitHub suggestions. Only provide code suggestions when:
+1. The fix is concrete and can be applied automatically
+2. You have the exact current code from the file content
+3. The suggestion is a direct code replacement (not architectural changes)
+
 You must respond with EXACTLY this JSON structure, with no additional text:
 
 {
@@ -1060,7 +1092,13 @@ You must respond with EXACTLY this JSON structure, with no additional text:
       "severity": "critical | high | medium | low",
       "description": "Description of the issue, clearly stating the deviation from the prioritized project pattern (guideline or example) OR the nature of the bug/improvement.",
       "lineNumbers": [42, 55, 61],
-      "suggestion": "Concrete suggestion for fixing the issue or aligning with the prioritized inferred pattern. Ensure the suggestion is additive if adding missing functionality (like a hook) and doesn't wrongly suggest replacing existing, unrelated code."
+      "suggestion": "Concrete suggestion for fixing the issue or aligning with the prioritized inferred pattern. Ensure the suggestion is additive if adding missing functionality (like a hook) and doesn't wrongly suggest replacing existing, unrelated code.",
+      "codeSuggestion": {
+        "startLine": 42,
+        "endLine": 44,
+        "oldCode": "    const result = data.map(item => item.value);",
+        "newCode": "    const result = data?.map(item => item?.value) ?? [];"
+      }
     }
   ]
 }
@@ -1316,6 +1354,18 @@ REQUIRED JSON OUTPUT FORMAT:
 
 **REMINDER: For lineNumbers array, use ONLY 3-5 representative line numbers for repeated issues. NEVER provide exhaustive lists.**
 
+**🚨 CODE SUGGESTIONS FORMAT 🚨**
+When suggesting code changes, you can optionally include a codeSuggestion object with:
+- startLine: The starting line number of the code to replace
+- endLine: (optional) The ending line number if replacing multiple lines
+- oldCode: The exact current code that should be replaced (must match exactly)
+- newCode: The proposed replacement code
+
+Code suggestions enable reviewers to apply fixes directly as GitHub suggestions. Only provide code suggestions when:
+1. The fix is concrete and can be applied automatically
+2. You have the exact current code from the file content
+3. The suggestion is a direct code replacement (not architectural changes)
+
 You must respond with EXACTLY this JSON structure, with no additional text:
 
 {
@@ -1326,7 +1376,13 @@ You must respond with EXACTLY this JSON structure, with no additional text:
       "severity": "critical | high | medium | low",
       "description": "Description of the issue, clearly stating the problem with the test implementation or coverage gap.",
       "lineNumbers": [25, 38],
-      "suggestion": "Concrete suggestion for improving the test, adding missing coverage, or following testing best practices."
+      "suggestion": "Concrete suggestion for improving the test, adding missing coverage, or following testing best practices.",
+      "codeSuggestion": {
+        "startLine": 25,
+        "endLine": 27,
+        "oldCode": "    expect(result).toBe(true);",
+        "newCode": "    expect(result).toBe(true);\n    expect(result).not.toBeNull();"
+      }
     }
   ]
 }
@@ -1638,6 +1694,18 @@ REQUIRED JSON OUTPUT FORMAT:
 
 **REMINDER: For lineNumbers array, use ONLY 3-5 representative line numbers for repeated issues. NEVER provide exhaustive lists.**
 
+**🚨 CODE SUGGESTIONS FORMAT 🚨**
+When suggesting code changes, you can optionally include a codeSuggestion object with:
+- startLine: The starting line number of the code to replace
+- endLine: (optional) The ending line number if replacing multiple lines
+- oldCode: The exact current code that should be replaced (must match exactly)
+- newCode: The proposed replacement code
+
+Code suggestions enable reviewers to apply fixes directly as GitHub suggestions. Only provide code suggestions when:
+1. The fix is concrete and can be applied automatically
+2. You have the exact current code from the file content
+3. The suggestion is a direct code replacement (not architectural changes)
+
 You must respond with EXACTLY this JSON structure, with no additional text:
 
 {
@@ -1658,7 +1726,13 @@ You must respond with EXACTLY this JSON structure, with no additional text:
         "severity": "critical | high | medium | low",
             "description": "Description of the issue specific to this file.",
             "lineNumbers": [10, 15],
-            "suggestion": "Concrete suggestion for fixing the issue in this file."
+            "suggestion": "Concrete suggestion for fixing the issue in this file.",
+            "codeSuggestion": {
+              "startLine": 10,
+              "endLine": 15,
+              "oldCode": "    const result = data.map(item => item.value);",
+              "newCode": "    const result = data?.map(item => item?.value) ?? [];"
+            }
       }
     ]
   },
