@@ -993,6 +993,10 @@ function outputJson(reviewResults, options) {
       totalFilesReviewed: reviewResults.length,
       filesWithIssues: reviewResults.filter((r) => r.success && !r.skipped && r.results?.issues?.length > 0).length,
       totalIssues: reviewResults.reduce((sum, r) => sum + (r.results?.issues?.length || 0), 0),
+      issuesWithCodeSuggestions: reviewResults.reduce((sum, r) => {
+        if (!r.success || r.skipped || !r.results?.issues) return sum;
+        return sum + r.results.issues.filter((issue) => issue.codeSuggestion).length;
+      }, 0),
       skippedFiles: reviewResults.filter((r) => r.skipped).length,
       errorFiles: reviewResults.filter((r) => !r.success).length,
     },
@@ -1003,12 +1007,12 @@ function outputJson(reviewResults, options) {
       if (r.skipped) {
         return { filePath: r.filePath, success: true, skipped: true };
       }
-      // Include key details from the successful analysis
+      // Include key details from the successful analysis (including code suggestions)
       return {
         filePath: r.filePath,
         success: true,
         language: r.language,
-        review: r.results, // Contains summary, issues, positives from LLM
+        review: r.results, // Contains summary, issues (with optional codeSuggestion), positives from LLM
         // Optionally include similar examples if needed
         // similarExamplesUsed: r.similarExamples
       };
@@ -1084,6 +1088,23 @@ function outputMarkdown(reviewResults) {
             issue.description
           }`
         );
+        if (issue.suggestion) {
+          console.log(`\n  *Suggestion:* ${issue.suggestion}\n`);
+        }
+        // Include code suggestion if available
+        if (issue.codeSuggestion) {
+          const { startLine, endLine, newCode } = issue.codeSuggestion;
+          const lineRange = endLine ? `${startLine}-${endLine}` : `${startLine}`;
+          console.log(`\n  **Suggested change (lines ${lineRange}):**\n`);
+          console.log('  ```suggestion');
+          console.log(
+            newCode
+              .split('\n')
+              .map((line) => `  ${line}`)
+              .join('\n')
+          );
+          console.log('  ```\n');
+        }
       });
     }
 
@@ -1155,6 +1176,16 @@ function outputText(reviewResults, cliOptions) {
         console.log(`    ${issue.description}`);
         if (issue.suggestion) {
           console.log(`    ${chalk.green(`Suggestion: ${issue.suggestion}`)}`);
+        }
+        // Display code suggestion if available
+        if (issue.codeSuggestion) {
+          const { startLine, endLine, oldCode, newCode } = issue.codeSuggestion;
+          const lineRange = endLine ? `${startLine}-${endLine}` : `${startLine}`;
+          console.log(`    ${chalk.cyan(`Code Suggestion (lines ${lineRange}):`)}`);
+          console.log(chalk.gray('    Old:'));
+          oldCode.split('\n').forEach((line) => console.log(chalk.gray(`      ${line}`)));
+          console.log(chalk.green('    New:'));
+          newCode.split('\n').forEach((line) => console.log(chalk.green(`      ${line}`)));
         }
         console.log(''); // Add spacing
       });
