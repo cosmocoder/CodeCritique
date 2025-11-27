@@ -2,34 +2,66 @@ import chalk from 'chalk';
 
 /**
  * Determines if a PR should be chunked based on estimated token usage
- * @param {Array} prFiles - Array of PR files with diffContent
+ * @param {Array} prFiles - Array of PR files with diffContent and content
  * @returns {Object} Decision object with shouldChunk flag and estimates
  */
 export function shouldChunkPR(prFiles) {
-  const totalEstimatedTokens = prFiles.reduce((sum, file) => sum + Math.ceil(file.diffContent.length / 3), 0);
+  // IMPORTANT: The holistic PR prompt includes BOTH full file content AND diff content
+  // for each file, plus context (code examples, guidelines, PR comments, custom docs)
 
-  const MAX_SINGLE_REVIEW_TOKENS = 120000; // Conservative limit
+  // Calculate tokens for diff content
+  const diffTokens = prFiles.reduce((sum, file) => {
+    return sum + Math.ceil((file.diffContent?.length || 0) / 3);
+  }, 0);
+
+  // Calculate tokens for full file content (included in prompt for context awareness)
+  const fullContentTokens = prFiles.reduce((sum, file) => {
+    return sum + Math.ceil((file.content?.length || 0) / 3);
+  }, 0);
+
+  // Total file-related tokens (both diff AND full content are sent)
+  const fileTokens = diffTokens + fullContentTokens;
+
+  // Estimate context overhead (code examples, guidelines, PR comments, custom docs, project summary)
+  // This is typically 10-30k tokens depending on project size
+  const CONTEXT_OVERHEAD_TOKENS = 25000;
+
+  // Total estimated prompt tokens
+  const totalEstimatedTokens = fileTokens + CONTEXT_OVERHEAD_TOKENS;
+
+  // Claude's limit is 200k tokens. Leave buffer for response and safety margin.
+  // Max safe prompt size ~150k tokens to be conservative
+  const MAX_SINGLE_REVIEW_TOKENS = 100000;
+
+  const shouldChunk = totalEstimatedTokens > MAX_SINGLE_REVIEW_TOKENS || prFiles.length > 30;
+
+  console.log(chalk.gray(`  Token breakdown: ${diffTokens} diff + ${fullContentTokens} full content + ${CONTEXT_OVERHEAD_TOKENS} context overhead = ${totalEstimatedTokens} total`));
 
   return {
-    shouldChunk: totalEstimatedTokens > MAX_SINGLE_REVIEW_TOKENS || prFiles.length > 30,
+    shouldChunk,
     estimatedTokens: totalEstimatedTokens,
-    recommendedChunks: Math.ceil(totalEstimatedTokens / 45000),
+    diffTokens,
+    fullContentTokens,
+    contextOverhead: CONTEXT_OVERHEAD_TOKENS,
+    recommendedChunks: Math.ceil(totalEstimatedTokens / 35000), // More aggressive chunking
   };
 }
 
 /**
  * Chunks PR files into manageable groups based on token limits and logical grouping
- * @param {Array} prFiles - Array of PR files with diffContent
+ * @param {Array} prFiles - Array of PR files with diffContent and content
  * @param {number} maxTokensPerChunk - Maximum tokens per chunk
  * @returns {Array} Array of chunks with files and metadata
  */
-export function chunkPRFiles(prFiles, maxTokensPerChunk = 50000) {
+export function chunkPRFiles(prFiles, maxTokensPerChunk = 35000) {
   // Calculate change complexity for each file (works for any language)
+  // IMPORTANT: Token estimate must include BOTH diff AND full content since both are sent
   const filesWithMetrics = prFiles.map((file) => ({
     ...file,
     changeSize: calculateChangeSize(file.diffContent),
     fileComplexity: calculateFileComplexity(file),
-    estimatedTokens: Math.ceil(file.diffContent.length / 3),
+    // Estimate tokens for BOTH diff content AND full file content (both are included in prompt)
+    estimatedTokens: Math.ceil((file.diffContent?.length || 0) / 3) + Math.ceil((file.content?.length || 0) / 3),
   }));
 
   // Sort by directory + change importance for logical grouping

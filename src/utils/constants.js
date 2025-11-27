@@ -188,16 +188,72 @@ export const BINARY_EXTENSIONS = [
 export const SKIP_DIRECTORIES = ['node_modules', 'dist', 'build', '.git', 'coverage', 'vendor'];
 
 /**
- * File names to skip during processing (usually lock files)
+ * File names to skip during processing (lock files, config files not useful as code examples)
  * @type {string[]}
  */
-export const SKIP_FILENAMES = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'composer.lock', 'Gemfile.lock'];
+export const SKIP_FILENAMES = [
+  // Lock files
+  'package-lock.json',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'composer.lock',
+  'Gemfile.lock',
+  // Package manifests (config, not source code)
+  'package.json',
+  'composer.json',
+  'Gemfile',
+  'Cargo.toml',
+  'go.mod',
+  'go.sum',
+  'requirements.txt',
+  'pyproject.toml',
+  'pom.xml',
+  'build.gradle',
+  // Common config files (not useful as code examples)
+  'tsconfig.json',
+  'jsconfig.json',
+  '.eslintrc',
+  '.eslintrc.json',
+  '.eslintrc.js',
+  '.prettierrc',
+  '.prettierrc.json',
+  'prettier.config.js',
+  '.babelrc',
+  'babel.config.js',
+  'jest.config.js',
+  'jest.config.ts',
+  'vitest.config.ts',
+  'vitest.config.js',
+  'webpack.config.js',
+  'vite.config.js',
+  'vite.config.ts',
+  'rollup.config.js',
+  'Makefile',
+  'Dockerfile',
+  '.dockerignore',
+  '.gitignore',
+  '.gitattributes',
+  '.editorconfig',
+  '.env.example',
+  '.nvmrc',
+  '.node-version',
+];
 
 /**
  * File patterns to skip during processing (likely generated files)
  * @type {RegExp[]}
  */
-export const SKIP_FILE_PATTERNS = [/\.min\.(js|css)$/, /\.bundle\.(js|css)$/, /\.generated\./, /\.d\.ts$/, /\.snap$/];
+export const SKIP_FILE_PATTERNS = [
+  /\.min\.(js|css)$/,
+  /\.bundle\.(js|css)$/,
+  /\.generated\./,
+  /\.d\.ts$/,
+  /\.snap$/,
+  // Config file patterns
+  /^\..*rc$/,           // .eslintrc, .prettierrc, etc.
+  /^\..*rc\.json$/,     // .eslintrc.json, etc.
+  /\.config\.(js|ts|mjs|cjs)$/, // *.config.js, *.config.ts files
+];
 
 /**
  * Regex pattern for detecting generic documentation files
