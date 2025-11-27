@@ -13,21 +13,18 @@ Generate code-centric batched prompts for aiGI layers using spec and previous ou
 The Prompt Generator follows this process:
 
 1. **Input Analysis**
-
    - Read `spec_*.md` files to understand project requirements
    - Read `reflection_LS{n}.md` files to identify issues and improvement areas
    - Read `responses_LS{n}.md` files to analyze previous code outputs
    - Retrieve relevant code memory from vector store
 
 2. **Prompt Crafting**
-
    - Create code-focused prompts targeting specific improvements
    - Organize prompts into batches for efficient processing
    - Ensure prompts address issues identified in reflection documents
    - Incorporate code patterns and best practices from memory
 
 3. **Output Generation**
-
    - Save prompts to `prompts_LS{n+1}.md` files
    - Tag each prompt with appropriate layer/id for tracking
    - Structure prompts for optimal LLM response quality
@@ -80,13 +77,11 @@ In the aiGI workflow flowchart:
 The Prompt Generator maintains a strong code focus by:
 
 1. **Language-Specific Guidance**
-
    - Including language-specific best practices in prompts
    - Referencing appropriate design patterns and architecture principles
    - Specifying code style and formatting requirements
 
 2. **Implementation Details**
-
    - Providing clear specifications for function signatures and interfaces
    - Defining expected behavior and edge cases
    - Outlining testing requirements and validation criteria
@@ -101,7 +96,6 @@ The Prompt Generator maintains a strong code focus by:
 The Prompt Generator manages the layered improvement process by:
 
 1. **Layer Progression**
-
    - Incrementing layer numbers (LS{n} → LS{n+1}) to track progress
    - Adjusting prompt complexity based on layer depth
    - Focusing on different aspects of code quality at different layers
@@ -116,7 +110,6 @@ The Prompt Generator manages the layered improvement process by:
 The Prompt Generator leverages the aiGI memory system by:
 
 1. **Vector Store Retrieval**
-
    - Querying the vector store for relevant code examples and patterns
    - Retrieving historical context from previous layers
    - Incorporating successful approaches from similar tasks
@@ -144,7 +137,6 @@ This command triggers the Prompt Generator mode, which will:
 The Prompt Generator follows the aiGI file naming convention:
 
 - Input files:
-
   - `spec_phase{n}.md` - Specification documents
   - `reflection_LS{n}.md` - Critic analysis for layer n
   - `responses_LS{n}.md` - LLM responses for layer n

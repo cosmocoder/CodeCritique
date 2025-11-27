@@ -250,8 +250,8 @@ export const SKIP_FILE_PATTERNS = [
   /\.d\.ts$/,
   /\.snap$/,
   // Config file patterns
-  /^\..*rc$/,           // .eslintrc, .prettierrc, etc.
-  /^\..*rc\.json$/,     // .eslintrc.json, etc.
+  /^\..*rc$/, // .eslintrc, .prettierrc, etc.
+  /^\..*rc\.json$/, // .eslintrc.json, etc.
   /\.config\.(js|ts|mjs|cjs)$/, // *.config.js, *.config.ts files
 ];
 

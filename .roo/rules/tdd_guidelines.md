@@ -124,31 +124,26 @@
 ## TDD Workflow in aiGI
 
 1. **Specification Review**
-
    - Analyze requirements to identify testable behaviors
    - Break down features into testable units
    - Define acceptance criteria as test scenarios
 
 2. **Test Creation**
-
    - Write failing tests that validate requirements
    - Include edge cases and error conditions
    - Structure tests for clarity and maintainability
 
 3. **Implementation**
-
    - Write minimal code to make tests pass
    - Focus on functionality, not optimization
    - Commit after each passing test
 
 4. **Refactoring**
-
    - Improve code structure and readability
    - Eliminate duplication and technical debt
    - Maintain test coverage during refactoring
 
 5. **Integration**
-
    - Combine tested components
    - Verify system behavior with integration tests
    - Address any integration issues
