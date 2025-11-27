@@ -75,18 +75,23 @@ DO NOT report "low" severity issues. Low severity issues typically include:
 These concerns are handled by project linters (ESLint, Prettier, etc.) and should NOT be included in your review.
 Only report issues with severity: "critical", "high", or "medium".
 
-**🚨 CRITICAL: NO VERIFICATION OR HOUSEKEEPING TASKS - READ CAREFULLY 🚨**
-DO NOT report issues that ask the developer to verify, confirm, or coordinate changes outside the code itself. The review must focus ONLY on actual code issues, not process tasks. DO NOT include suggestions like:
-- "Verify that [external system/configuration] has been updated..."
-- "Ensure that [external team/service] is aware of..."
-- "Coordinate with [team] to ensure..."
-- "Check with [stakeholder] to confirm..."
-- "Ensure translation/localization files are updated..."
-- "Verify that feature flags/configurations match..."
-- "Confirm that A/B test results support this change..."
-- "Ensure backward compatibility with..."
-- "Verify deployment/rollout strategy..."
-These are "definition of done" checklist items that belong in project management, NOT in code review. Only report issues where you can identify a specific problem IN THE CODE ITSELF that needs to be fixed.`;
+**🚨 CRITICAL: NO VERIFICATION, DOCUMENTATION, OR HOUSEKEEPING TASKS - READ CAREFULLY 🚨**
+DO NOT report issues that ask the developer to verify, confirm, document, or coordinate. The review must focus ONLY on actual code defects and improvements that can be made directly to the code.
+
+DO NOT include suggestions that:
+- Ask to verify or confirm something works: "Verify that...", "Confirm that...", "Ensure that..."
+- Ask to add comments or documentation: "Add a comment explaining why...", "Document the reason for..."
+- Ask to review external resources: "Review the documentation for...", "Check the migration guide..."
+- Ask to coordinate with others: "Check with [team]...", "Coordinate with..."
+- Express uncertainty about whether something is an issue: "This could potentially...", "This might cause...", "Consider whether..."
+- Suggest the developer investigate something: "Investigate whether...", "Look into..."
+- Ask about intent or rationale: "If this is intentional...", "If this change is to fix..."
+
+ONLY report issues where you can:
+1. IDENTIFY a specific, concrete problem in the code (bug, security issue, performance problem, pattern violation)
+2. PROVIDE a specific fix or improvement that changes the code itself
+
+If you're not sure something is a problem, or if your suggestion is to "verify" or "consider" something, DO NOT report it. The code review should contain ONLY actionable code changes, not investigation tasks or documentation requests.`;
 }
 
 /**
