@@ -510,7 +510,8 @@ async function reviewLargePRInChunks(prFiles, options) {
   const sharedContext = await gatherUnifiedContextForPR(prFiles, options);
 
   // Step 2: Split PR into manageable chunks
-  const chunks = chunkPRFiles(prFiles, 45000); // Conservative token limit per chunk
+  // Each chunk includes both diff AND full file content, plus ~25k context overhead
+  const chunks = chunkPRFiles(prFiles, 35000); // Conservative limit accounting for context overhead
   console.log(chalk.green(`✂️ Split PR into ${chunks.length} chunks`));
 
   chunks.forEach((chunk, i) => {
