@@ -364,11 +364,16 @@ async function runAnalysis(filePath, options = {}) {
     // Call LLM for analysis
     const analysisResults = await callLLMForAnalysis(context, { ...options, isTestFile, feedbackData });
 
+    // Filter out low severity issues (formatting/style concerns handled by linters)
+    // Note: The LLM prompt instructs not to generate low severity issues, but this filter
+    // serves as a safety net in case any slip through despite the prompt instructions
+    const lowSeverityFiltered = filterLowSeverityIssues(analysisResults, { verbose: options.verbose });
+
     // Post-process results to filter dismissed issues
-    let filteredResults = analysisResults;
+    let filteredResults = lowSeverityFiltered;
     if (options.trackFeedback && feedbackData && Object.keys(feedbackData).length > 0) {
       console.log(chalk.cyan('--- Filtering Results Based on Feedback ---'));
-      filteredResults = filterAnalysisResults(analysisResults, feedbackData, {
+      filteredResults = filterAnalysisResults(lowSeverityFiltered, feedbackData, {
         similarityThreshold: options.feedbackThreshold || 0.7,
         verbose: options.verbose,
       });
@@ -990,6 +995,16 @@ When reporting issues in the JSON output, NEVER provide exhaustive lists of line
 **🚨 CRITICAL: IMPORT STATEMENT RULE - READ CAREFULLY 🚨**
 DO NOT flag missing imports or files referenced in import statements as issues. Focus only on code quality, logic, and patterns within the provided files.
 
+**🚨 CRITICAL: NO LOW SEVERITY ISSUES - READ CAREFULLY 🚨**
+DO NOT report "low" severity issues. Low severity issues typically include:
+- Import statement ordering or grouping
+- Code formatting and whitespace
+- Minor stylistic preferences
+- Comment placement or formatting
+- Line length or wrapping suggestions
+These concerns are handled by project linters (ESLint, Prettier, etc.) and should NOT be included in your review.
+Only report issues with severity: "critical", "high", or "medium".
+
 **Perform the following analysis stages sequentially:**
 
 **STAGE 1: Custom Instructions & Guideline-Based Review**
@@ -1089,7 +1104,7 @@ You must respond with EXACTLY this JSON structure, with no additional text:
   "issues": [
     {
       "type": "bug | improvement | convention | performance | security",
-      "severity": "critical | high | medium | low",
+      "severity": "critical | high | medium",
       "description": "Description of the issue, clearly stating the deviation from the prioritized project pattern (guideline or example) OR the nature of the bug/improvement.",
       "lineNumbers": [42, 55, 61],
       "suggestion": "Concrete suggestion for fixing the issue or aligning with the prioritized inferred pattern. Ensure the suggestion is additive if adding missing functionality (like a hook) and doesn't wrongly suggest replacing existing, unrelated code.",
@@ -1296,6 +1311,16 @@ When reporting issues in the JSON output, NEVER provide exhaustive lists of line
 **🚨 CRITICAL: IMPORT STATEMENT RULE - READ CAREFULLY 🚨**
 DO NOT flag missing imports or files referenced in import statements as issues. Focus only on test quality, logic, and patterns within the provided test files.
 
+**🚨 CRITICAL: NO LOW SEVERITY ISSUES - READ CAREFULLY 🚨**
+DO NOT report "low" severity issues. Low severity issues typically include:
+- Import statement ordering or grouping
+- Code formatting and whitespace
+- Minor stylistic preferences
+- Comment placement or formatting
+- Line length or wrapping suggestions
+These concerns are handled by project linters (ESLint, Prettier, etc.) and should NOT be included in your review.
+Only report issues with severity: "critical", "high", or "medium".
+
 **Perform the following test-specific analysis:**
 
 **STAGE 1: Custom Instructions & Test Coverage Analysis**
@@ -1373,7 +1398,7 @@ You must respond with EXACTLY this JSON structure, with no additional text:
   "issues": [
     {
       "type": "bug | improvement | convention | performance | coverage",
-      "severity": "critical | high | medium | low",
+      "severity": "critical | high | medium",
       "description": "Description of the issue, clearly stating the problem with the test implementation or coverage gap.",
       "lineNumbers": [25, 38],
       "suggestion": "Concrete suggestion for improving the test, adding missing coverage, or following testing best practices.",
@@ -1592,6 +1617,16 @@ When reporting issues in the JSON output, NEVER provide exhaustive lists of line
 **🚨 CRITICAL: IMPORT STATEMENT RULE - READ CAREFULLY 🚨**
 DO NOT flag missing imports or files referenced in import statements as issues. In PR analysis, some files (especially assets like images, fonts, or excluded files) may not be included in the review scope. Focus only on code quality, logic, and patterns within the provided PR files.
 
+**🚨 CRITICAL: NO LOW SEVERITY ISSUES - READ CAREFULLY 🚨**
+DO NOT report "low" severity issues. Low severity issues typically include:
+- Import statement ordering or grouping
+- Code formatting and whitespace
+- Minor stylistic preferences
+- Comment placement or formatting
+- Line length or wrapping suggestions
+These concerns are handled by project linters (ESLint, Prettier, etc.) and should NOT be included in your review.
+Only report issues with severity: "critical", "high", or "medium".
+
 **Perform the following holistic analysis stages sequentially for all PR files:**
 
 ### **STAGE 1: Project Pattern Analysis (CRITICAL FOR CONSISTENCY)**
@@ -1713,7 +1748,7 @@ You must respond with EXACTLY this JSON structure, with no additional text:
   "crossFileIssues": [
     {
           "type": "bug | improvement | convention | architecture",
-      "severity": "critical | high | medium | low",
+          "severity": "critical | high | medium",
           "description": "Detailed description of an issue that spans multiple files...",
           "suggestion": "Actionable suggestion to resolve the cross-file issue.",
           "filesInvolved": ["path/to/file1.js", "path/to/file2.ts"]
@@ -1723,7 +1758,7 @@ You must respond with EXACTLY this JSON structure, with no additional text:
         "path/to/file1.js": [
       {
         "type": "bug | improvement | convention | performance | security",
-        "severity": "critical | high | medium | low",
+        "severity": "critical | high | medium",
             "description": "Description of the issue specific to this file.",
             "lineNumbers": [10, 15],
             "suggestion": "Concrete suggestion for fixing the issue in this file.",
@@ -2130,15 +2165,20 @@ async function performHolisticPRAnalysis(options) {
     console.log(chalk.gray(`File-specific issues keys: ${Object.keys(parsedResponse.fileSpecificIssues || {}).join(', ')}`));
     console.log(chalk.gray(`Recommendations: ${parsedResponse.recommendations?.length || 0}`));
 
+    // Filter out low severity issues (formatting/style concerns handled by linters)
+    // Note: The LLM prompt instructs not to generate low severity issues, but this filter
+    // serves as a safety net in case any slip through despite the prompt instructions
+    const filteredResponse = filterLowSeverityIssues(parsedResponse, { verbose: options.verbose });
+
     return {
       success: true,
       filePath: 'PR_HOLISTIC_REVIEW',
       language: 'diff',
       results: {
-        summary: parsedResponse.summary || 'Holistic PR review completed',
-        crossFileIssues: parsedResponse.crossFileIssues || [],
-        fileSpecificIssues: parsedResponse.fileSpecificIssues || {},
-        recommendations: parsedResponse.recommendations || [],
+        summary: filteredResponse.summary || 'Holistic PR review completed',
+        crossFileIssues: filteredResponse.crossFileIssues || [],
+        fileSpecificIssues: filteredResponse.fileSpecificIssues || {},
+        recommendations: filteredResponse.recommendations || [],
       },
       context: {
         codeExamples: unifiedContext.codeExamples.length,
@@ -2614,6 +2654,87 @@ async function gatherUnifiedContextForPR(prFiles, options = {}) {
     prComments: deduplicatedPRComments,
     customDocChunks: deduplicatedCustomDocChunks,
   };
+}
+
+/**
+ * Filter out low severity issues from analysis results
+ * Low severity issues are typically formatting/style concerns better handled by linters
+ *
+ * @param {Object} analysisResults - Analysis results from LLM
+ * @param {Object} options - Filtering options
+ * @returns {Object} Filtered analysis results without low severity issues
+ */
+function filterLowSeverityIssues(analysisResults, options = {}) {
+  const { verbose = false } = options;
+
+  if (!analysisResults) {
+    return analysisResults;
+  }
+
+  let filteredCount = 0;
+
+  // Filter single-file issues array
+  if (analysisResults.issues && Array.isArray(analysisResults.issues)) {
+    const originalCount = analysisResults.issues.length;
+    analysisResults.issues = analysisResults.issues.filter((issue) => {
+      const severity = (issue.severity || '').toLowerCase();
+      if (severity === 'low') {
+        if (verbose) {
+          console.log(chalk.yellow(`   Filtering low severity issue: "${(issue.description || '').substring(0, 50)}..."`));
+        }
+        return false;
+      }
+      return true;
+    });
+    filteredCount += originalCount - analysisResults.issues.length;
+  }
+
+  // Filter cross-file issues (for holistic PR review)
+  if (analysisResults.crossFileIssues && Array.isArray(analysisResults.crossFileIssues)) {
+    const originalCount = analysisResults.crossFileIssues.length;
+    analysisResults.crossFileIssues = analysisResults.crossFileIssues.filter((issue) => {
+      const severity = (issue.severity || '').toLowerCase();
+      if (severity === 'low') {
+        if (verbose) {
+          console.log(
+            chalk.yellow(`   Filtering low severity cross-file issue: "${(issue.message || issue.description || '').substring(0, 50)}..."`)
+          );
+        }
+        return false;
+      }
+      return true;
+    });
+    filteredCount += originalCount - analysisResults.crossFileIssues.length;
+  }
+
+  // Filter file-specific issues (for holistic PR review)
+  if (analysisResults.fileSpecificIssues && typeof analysisResults.fileSpecificIssues === 'object') {
+    for (const filePath of Object.keys(analysisResults.fileSpecificIssues)) {
+      const issues = analysisResults.fileSpecificIssues[filePath];
+      if (Array.isArray(issues)) {
+        const originalCount = issues.length;
+        analysisResults.fileSpecificIssues[filePath] = issues.filter((issue) => {
+          const severity = (issue.severity || '').toLowerCase();
+          if (severity === 'low') {
+            if (verbose) {
+              console.log(
+                chalk.yellow(`   Filtering low severity issue in ${filePath}: "${(issue.description || '').substring(0, 50)}..."`)
+              );
+            }
+            return false;
+          }
+          return true;
+        });
+        filteredCount += originalCount - analysisResults.fileSpecificIssues[filePath].length;
+      }
+    }
+  }
+
+  if (filteredCount > 0) {
+    console.log(chalk.cyan(`🔇 Filtered ${filteredCount} low severity issue(s) (formatting/style concerns handled by linters)`));
+  }
+
+  return analysisResults;
 }
 
 /**
