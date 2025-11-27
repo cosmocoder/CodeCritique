@@ -210,47 +210,60 @@ export async function batchCheckGitignore(filePaths, baseDir = process.cwd()) {
     return resultMap;
   }
 
+  // Convert to relative paths
+  const relativePaths = filePaths.map((fp) => path.relative(baseDir, fp));
+
   try {
-    // Convert to relative paths
-    const relativePaths = filePaths.map((fp) => path.relative(baseDir, fp));
+    // Use --stdin flag for batch checking
+    // git check-ignore exits with:
+    //   0 = at least one path is ignored (outputs ignored paths)
+    //   1 = no paths are ignored (outputs nothing) - this is NOT an error
+    //   128 = fatal error
+    // execSync throws on non-zero exit, so we need to catch exit code 1
+    const stdout = execGitSafe('git check-ignore', ['--stdin'], {
+      stdio: ['pipe', 'pipe', 'ignore'],
+      cwd: baseDir,
+      input: relativePaths.join('\n'),
+      encoding: 'utf8',
+    });
 
-    // Write paths to temp file to avoid command line length limits
-    const tmpFile = path.join(baseDir, `.gitignore-check-${Date.now()}.tmp`);
-    await fs.promises.writeFile(tmpFile, relativePaths.join('\n'), 'utf8');
+    // If we get here, exit code was 0 - some files are ignored
+    const stdoutStr = typeof stdout === 'string' ? stdout : stdout?.toString('utf8') || '';
+    const ignoredFiles = stdoutStr
+      .trim()
+      .split('\n')
+      .filter((line) => line.length > 0);
+    const ignoredSet = new Set(ignoredFiles);
 
-    try {
-      // Use --stdin flag for batch checking
-      const result = execGitSafe('git check-ignore', ['--stdin'], {
-        stdio: ['pipe', 'pipe', 'ignore'],
-        cwd: baseDir,
-        input: relativePaths.join('\n'),
-      });
+    // Build result map
+    for (const relPath of relativePaths) {
+      resultMap.set(relPath, ignoredSet.has(relPath));
+    }
 
-      // Parse output - git check-ignore outputs the ignored files
-      const ignoredFiles = result.stdout
-        .trim()
-        .split('\n')
-        .filter((line) => line.length > 0);
-      const ignoredSet = new Set(ignoredFiles);
-
-      // Build result map
-      for (const relPath of relativePaths) {
-        resultMap.set(relPath, ignoredSet.has(relPath));
-      }
-    } finally {
-      // Clean up temp file
-      try {
-        await fs.promises.unlink(tmpFile);
-      } catch {
-        // Ignore cleanup errors
+    // Log ignored files
+    if (ignoredFiles.length > 0) {
+      console.log(`  ℹ️  Found ${ignoredFiles.length} gitignored files to exclude`);
+      const ignoredSample = ignoredFiles.slice(0, 5);
+      ignoredSample.forEach((f) => console.log(`      - ${f}`));
+      if (ignoredFiles.length > 5) {
+        console.log(`      ... and ${ignoredFiles.length - 5} more`);
       }
     }
-  } catch {
-    // If batch check fails, assume no files are ignored
-    // Individual checks can still be performed as fallback
-    const relativePaths = filePaths.map((fp) => path.relative(baseDir, fp));
-    for (const relPath of relativePaths) {
-      resultMap.set(relPath, false);
+  } catch (error) {
+    // Check if this is just "no files ignored" (exit code 1) vs actual error
+    // Exit code 1 from git check-ignore means no paths matched - this is normal
+    if (error.status === 1) {
+      // No files in this batch are ignored - mark all as not ignored
+      for (const relPath of relativePaths) {
+        resultMap.set(relPath, false);
+      }
+    } else {
+      // Actual error (exit code 128 or other) - log and fall back
+      console.warn(`⚠️ Batch gitignore check failed: ${error.message}`);
+      console.warn('  Falling back to individual checks (may be slower)');
+      for (const relPath of relativePaths) {
+        resultMap.set(relPath, false);
+      }
     }
   }
 
