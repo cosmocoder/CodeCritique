@@ -75,23 +75,31 @@ DO NOT report "low" severity issues. Low severity issues typically include:
 These concerns are handled by project linters (ESLint, Prettier, etc.) and should NOT be included in your review.
 Only report issues with severity: "critical", "high", or "medium".
 
-**🚨 CRITICAL: NO VERIFICATION, DOCUMENTATION, OR HOUSEKEEPING TASKS - READ CAREFULLY 🚨**
-DO NOT report issues that ask the developer to verify, confirm, document, or coordinate. The review must focus ONLY on actual code defects and improvements that can be made directly to the code.
+**🚨 CRITICAL: ACTIONABLE CODE ISSUES ONLY - NO VERIFICATION REQUESTS 🚨**
+Your review must contain ONLY issues where you have identified a DEFINITE problem and can provide a SPECIFIC code fix.
 
-DO NOT include suggestions that:
-- Ask to verify or confirm something works: "Verify that...", "Confirm that...", "Ensure that..."
-- Ask to add comments or documentation: "Add a comment explaining why...", "Document the reason for..."
-- Ask to review external resources: "Review the documentation for...", "Check the migration guide..."
-- Ask to coordinate with others: "Check with [team]...", "Coordinate with..."
-- Express uncertainty about whether something is an issue: "This could potentially...", "This might cause...", "Consider whether..."
-- Suggest the developer investigate something: "Investigate whether...", "Look into..."
-- Ask about intent or rationale: "If this is intentional...", "If this change is to fix..."
+**AUTOMATIC REJECTION - If your suggestion contains ANY of these phrases, DO NOT include it:**
+- "Verify that..." / "Verify the..." / "Verify if..."
+- "Ensure that..." / "Ensure the..."
+- "Confirm that..." / "Confirm the..."
+- "Validate that..." / "Validate the..."
+- "Check that..." / "Check if..." / "Check whether..."
+- "Add a comment explaining..." / "Add documentation..."
+- "Review the documentation..." / "Reference the migration guide..."
+- "Consider whether..." / "Consider if..."
+- "This could potentially..." / "This might..." / "This may..."
+- "If this is intentional..." / "If this change is to fix..."
+- "...should be validated" / "...should be verified"
+- "...but there's no validation..." / "...but there's no verification..."
 
-ONLY report issues where you can:
-1. IDENTIFY a specific, concrete problem in the code (bug, security issue, performance problem, pattern violation)
-2. PROVIDE a specific fix or improvement that changes the code itself
+**THE RULE**: If you cannot point to a SPECIFIC BUG or SPECIFIC VIOLATION and provide EXACT CODE to fix it, do not report it.
 
-If you're not sure something is a problem, or if your suggestion is to "verify" or "consider" something, DO NOT report it. The code review should contain ONLY actionable code changes, not investigation tasks or documentation requests.`;
+**GOOD issue**: "The function returns null on line 42 but the return type doesn't allow null. Fix: Change return type to \`string | null\`"
+**BAD issue**: "Verify that the function handles null correctly" (This asks for verification, not a code fix)
+**BAD issue**: "The type cast may bypass type safety" (This expresses uncertainty - "may" - without identifying a definite problem)
+**BAD issue**: "Add a comment explaining why this type was changed" (This requests documentation, not a code fix)
+
+When in doubt, leave it out. Only report issues you are CERTAIN about.`;
 }
 
 /**
@@ -1050,8 +1058,8 @@ Similar code patterns and issues identified by human reviewers in past PRs
         prHistorySection += `- **Review**: ${comment.comment_text}\n\n`;
       });
 
-      prHistorySection += `Consider these historical patterns when analyzing the current code. `;
-      prHistorySection += `Look for similar issues and apply the insights from past human reviews.\n\n`;
+      prHistorySection += `Use these historical patterns to identify DEFINITE issues in the current code. `;
+      prHistorySection += `Only report issues that EXACTLY match historical patterns with SPECIFIC code fixes.\n\n`;
 
       console.log(chalk.blue(`PR History section preview: ${prHistorySection.substring(0, 200)}...`));
     } else {
@@ -1085,7 +1093,7 @@ You have access to TWO pieces of information:
 - USE the full file content to understand context and dependencies
 - DO NOT suggest adding code that already exists in the unchanged portions
 - DO NOT flag issues about missing code if it exists in the full file
-- Verify that referenced functions/variables exist in the full file before flagging as missing
+- Do NOT flag functions/variables as missing if they exist elsewhere in the full file
 - The unchanged code is part of the file - check it before making assumptions
 
 **FULL FILE CONTENT (for context - DO NOT review unchanged code):**
@@ -1177,16 +1185,14 @@ ${getCriticalRulesBlock({ importRuleContext: 'code' })}
 5.  Pay special attention to imports - if most similar files import certain utilities, the reviewed file should too.
 
 **STAGE 3: Historical Review Comments Analysis**
-1.  **CRITICAL**: If 'CONTEXT C: HISTORICAL REVIEW COMMENTS' is present, analyze each historical comment carefully:
+1.  **CRITICAL**: If 'CONTEXT C: HISTORICAL REVIEW COMMENTS' is present, analyze each historical comment:
     - Look for patterns in the types of issues human reviewers have identified in similar code
-    - Check if any of the historical issues apply to the current file being reviewed
+    - Identify if the SAME DEFINITE issue exists in the current file (not similar - the SAME)
     - Pay special attention to comments with high relevance scores (>70%)
 2.  **Apply Historical Insights**: For each historical comment:
-    - Check if the same type of issue exists in the current file
-    - Consider the reviewer's suggestions and see if they apply to the current context
-    - Look for recurring themes across multiple historical comments
-3.  **Prioritize Historical Issues**: Issues that have been flagged by human reviewers in similar contexts should be given high priority
-4.  **Learn from Past Reviews**: Use the historical comments to understand what human reviewers consider important in this codebase
+    - Only report if the EXACT same issue type exists with a SPECIFIC code fix
+    - Do NOT report speculative issues based on historical patterns
+3.  **Prioritize Historical Issues**: Issues DEFINITELY matching historical patterns get high priority
 
 **STAGE 4: Consolidate, Prioritize, and Generate Output**
 1.  **CRITICAL REMINDER**: If custom instructions were provided at the beginning of this prompt, they take ABSOLUTE PRECEDENCE over all other guidelines and must be followed strictly.
@@ -1200,9 +1206,9 @@ ${getCriticalRulesBlock({ importRuleContext: 'code' })}
        *   For issues identified from historical review comments, report them as standard code review findings without referencing the historical source.
        *   **IMPORTANT**: When citing implicit patterns from Context B, be specific about which files demonstrate the pattern and what the pattern is.
 4.  **Special attention to implicit patterns**: Issues related to not using project-specific utilities or helpers should be marked as high priority if the pattern appears consistently across multiple examples in Context B.
-5.  **Special attention to historical patterns**: Issues that have been previously identified by human reviewers in similar code (from Context C) should be given high priority, especially those with high relevance scores.
-6.  Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
-7.  Ensure all reported issue descriptions clearly state the deviation/problem and suggestions align with the prioritized context (guidelines first, then examples, then historical patterns). Avoid general advice conflicting with context.
+5.  **Special attention to historical patterns**: Issues DEFINITELY matching historical patterns get high priority.
+6.  Assess for DEFINITE logic errors or bugs only - do NOT report speculative issues.
+7.  **CRITICAL OUTPUT FILTER**: Before reporting ANY issue, ask yourself: "Do I have a SPECIFIC code fix?" If not, do NOT report it. Do NOT ask the developer to verify, ensure, or check anything.
 8.  **CRITICAL 'lineNumbers' RULE - MANDATORY COMPLIANCE**:
     - **ALWAYS provide line numbers** - this field is REQUIRED for every issue
     - If you can identify specific lines, provide them (max 3-5 for repeated issues)
@@ -1350,35 +1356,31 @@ ${getCriticalRulesBlock({ importRuleContext: 'test' })}
 
 **STAGE 1: Custom Instructions & Test Coverage Analysis**
 1. **FIRST AND MOST IMPORTANT**: If custom instructions were provided at the beginning of this prompt, analyze the test file against those custom instructions BEFORE all other analysis. Custom instructions always take precedence.
-2. Analyze if the test file provides adequate coverage for the functionality it's testing.
-3. Identify any missing test cases or edge cases that should be covered.
-4. Check if both positive and negative test scenarios are included.
+2. Analyze test coverage - identify SPECIFIC missing test cases only if you can name the exact scenario that should be tested.
+3. Only report coverage gaps where you can provide a concrete test case to add.
 
 **STAGE 2: Test Quality and Best Practices**
-1. Evaluate test naming conventions - are test names descriptive and follow project patterns?
-2. Check test organization - are tests properly grouped and structured?
-3. Assess assertion quality - are assertions specific and meaningful?
-4. Review test isolation - does each test run independently without side effects?
-5. Examine setup/teardown patterns - are they used appropriately?
+1. Evaluate test naming conventions - report only DEFINITE violations where you can show the correct naming.
+2. Analyze test organization - report only if tests are clearly misorganized with a specific fix.
+3. Assess assertion quality - report only weak assertions where you can provide a stronger alternative.
+4. Review test isolation - report only if you find a DEFINITE side effect issue with a specific fix.
 
 **STAGE 3: Testing Patterns and Conventions (CRITICAL)**
 1. **IMPORTANT**: Carefully analyze ALL code examples in Context B to identify:
    - Common helper functions or utilities that appear across multiple test files
    - Consistent patterns in how certain operations are performed (e.g., rendering, mocking, assertions)
    - Any project-specific abstractions or wrappers around standard testing libraries
-2. **CRITICAL**: Compare the reviewed test file against these discovered patterns. Flag any instances where:
-   - The test directly uses a library function when other tests use a project-specific wrapper
-   - Common helper utilities available in the project are not being used
-   - The test deviates from established patterns shown in Context B examples
-3. Check for proper use of mocking, stubbing, and test doubles following project patterns.
-4. Verify that test data and fixtures follow project conventions.
-5. Ensure async tests are handled correctly using project patterns.
-6. Look for any test anti-patterns or deviations from established project testing practices.
+2. **CRITICAL**: Compare the reviewed test file against these discovered patterns. Flag ONLY instances where:
+   - The test DEFINITELY uses a direct library call when a project wrapper exists (cite the wrapper)
+   - A common utility is DEFINITELY available but not used (cite where it's defined)
+   - The test CLEARLY deviates from a pattern shown in 3+ examples (cite the examples)
+3. Report mocking/stubbing issues only with a specific code fix.
+4. Report fixture issues only with a specific code fix showing the correct pattern.
+5. Report async handling issues only with specific code showing the correct approach.
 
 **STAGE 4: Performance and Maintainability**
-1. Identify any tests that might be slow or resource-intensive.
-2. Check for code duplication that could be refactored using helper functions.
-3. Ensure tests are maintainable and will not break easily with minor code changes.
+1. Report slow tests only if you can identify the specific cause and fix.
+2. Report code duplication only with a specific refactoring suggestion.
 
 **STAGE 5: Consolidate and Generate Output**
 1. **CRITICAL**: Prioritize issues where the test deviates from implicit project patterns shown in Context B (similar test examples), especially regarding test utilities and helper functions.
@@ -1525,7 +1527,7 @@ For each file in this PR, you have access to:
 - DO NOT suggest adding code that already exists in the unchanged portions of any file
 - DO NOT flag issues about missing code if it exists elsewhere in the full file
 - Before flagging cross-file issues, verify the code doesn't already exist in unchanged portions
-- Verify that referenced functions/variables exist in the full file before flagging as missing
+- Do NOT flag functions/variables as missing if they exist elsewhere in the full file
 - The unchanged code is part of each file - always check it before making assumptions`;
 
   let roleDefinition = buildRoleDefinition(baseRole, customDocs, 'pr');
@@ -1607,27 +1609,26 @@ ${getCriticalRulesBlock({ importRuleContext: 'pr' })}
    - High-relevance issues (>70% relevance score) that apply to current PR
 
 2. **Apply Historical Insights to Each File**:
-   - Check if similar issues exist in any PR file
+   - Identify DEFINITE issues that match historical patterns across PR files
    - Apply reviewer suggestions that are relevant to current changes
    - Look for patterns that span multiple files in the PR
 
 ### **STAGE 4: Cross-File Integration Analysis**
 
 1. **Naming and Import Consistency**:
-   - Verify consistent naming conventions across all files
-   - Check import/export consistency and completeness
-   - Identify duplicated logic that could be shared
+   - Report naming inconsistencies only with specific examples and fixes
+   - Report import/export issues only with specific missing/incorrect imports identified
+   - Report duplicated logic only with specific refactoring suggestions
 
 2. **Test Coverage and Quality**:
-   - For each source file change, verify corresponding test updates
-   - Ensure test files follow established patterns from code examples
-   - Check if test coverage is adequate for new functionality
+   - Report missing tests only if you can specify EXACTLY which test case should be added
+   - Report test pattern deviations only with specific code fixes
+   - Do NOT suggest "adding tests" without specifying the exact test
 
 3. **Architectural Integration**:
-   - Look for potential breaking changes across files
-   - Check API consistency between related files
-   - Verify proper separation of concerns across the PR
-   - Identify missing error handling or edge cases
+   - Report breaking changes only if you can identify the SPECIFIC break
+   - Report API inconsistencies only with SPECIFIC mismatches identified
+   - Report separation of concerns issues only with SPECIFIC refactoring suggestions
 
 ### **STAGE 5: Consolidate and Prioritize Issues**
 
@@ -1642,13 +1643,13 @@ ${getCriticalRulesBlock({ importRuleContext: 'pr' })}
    - For historical issues: report as standard findings without referencing historical source
    - For cross-file issues: specify all affected files
 
-3. **Special Attention Areas**:
-   - **Project-specific patterns**: Issues where files don't use established project utilities/helpers
-   - **Historical patterns**: Issues previously flagged by human reviewers in similar contexts
-   - **Cross-file consistency**: Ensure similar changes follow the same patterns across all files
-   - **Test patterns**: Verify test files follow established testing conventions from examples
+3. **CRITICAL OUTPUT FILTER - Apply before reporting ANY issue**:
+   - **Only report issues where you have a DEFINITE problem AND a SPECIFIC code fix**
+   - **Do NOT report issues that require the developer to "verify", "ensure", or "check" something**
+   - **Do NOT report issues where you are uncertain** - if you find yourself writing "may", "might", "could", or "consider", do not report it
+   - **Do NOT suggest adding comments or documentation**
 
-4. Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
+4. Assess for DEFINITE logic errors or bugs only - do not report speculative issues.
 5. DO NOT check if any file referenced in a import statement, is missing.
 6. **CRITICAL 'lineNumbers' RULE - MANDATORY COMPLIANCE**:
    - For ANY issue that occurs multiple times in a file, list ONLY the first 3-5 occurrences maximum
