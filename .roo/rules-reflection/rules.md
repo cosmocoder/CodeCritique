@@ -13,14 +13,12 @@ Generate refined code prompts and plan iterations.
 The Reflection mode follows this process:
 
 1. **Input Analysis**
-
    - Read `reflection_LS{n}.md` containing critic analysis
    - Read `scores_LS{n}.json` containing quantitative metrics
    - Analyze delta improvements and threshold comparisons
    - Identify areas requiring further refinement
 
 2. **Insight Extraction**
-
    - Extract key insights from critic reflections
    - Identify patterns in code issues and bugs
    - Analyze performance bottlenecks and optimization opportunities
@@ -28,7 +26,6 @@ The Reflection mode follows this process:
    - Assess style inconsistencies and maintainability concerns
 
 3. **Prompt Refinement**
-
    - Create targeted prompts addressing specific issues
    - Formulate clear instructions for bug fixes
    - Design optimization strategies for performance improvements
@@ -36,7 +33,6 @@ The Reflection mode follows this process:
    - Craft security-focused enhancements
 
 4. **Output Generation**
-
    - Create refined prompts in `prompts_LS{n+1}.md`
    - Structure prompts with clear objectives and context
    - Include relevant code snippets and references

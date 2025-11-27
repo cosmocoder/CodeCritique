@@ -35,7 +35,11 @@ export function shouldChunkPR(prFiles) {
 
   const shouldChunk = totalEstimatedTokens > MAX_SINGLE_REVIEW_TOKENS || prFiles.length > 30;
 
-  console.log(chalk.gray(`  Token breakdown: ${diffTokens} diff + ${fullContentTokens} full content + ${CONTEXT_OVERHEAD_TOKENS} context overhead = ${totalEstimatedTokens} total`));
+  console.log(
+    chalk.gray(
+      `  Token breakdown: ${diffTokens} diff + ${fullContentTokens} full content + ${CONTEXT_OVERHEAD_TOKENS} context overhead = ${totalEstimatedTokens} total`
+    )
+  );
 
   return {
     shouldChunk,

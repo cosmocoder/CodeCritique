@@ -202,14 +202,12 @@ The aiGI system incorporates sophisticated vector memory capabilities through th
 The system uses a markdown-based vector memory approach:
 
 1. **Embedding Generation**
-
    - All artifacts (prompts, responses, reflections) are converted to vector embeddings
    - Embeddings capture semantic meaning and code structure
    - Consistent embedding dimensions maintained across all artifacts
    - Incremental embedding updates when files change
 
 2. **Metadata Tagging**
-
    - Each memory artifact is tagged with rich metadata:
      - `layer`: Identifies which reflection layer (LS1, LS2, LS3, etc.)
      - `prompt_id`: Unique identifier linking related artifacts
@@ -228,21 +226,18 @@ The system uses a markdown-based vector memory approach:
 The system uses embedding divergence to optimize the reflection process:
 
 1. **Jensen-Shannon Divergence**
-
    - Measures information gain between iterations
    - Quantifies semantic distance between related artifacts
    - Provides mathematical foundation for novelty detection
    - Enables data-driven decisions about reflection continuation
 
 2. **Novelty Detection**
-
    - `noveltyScore`: Numerical measure of information novelty (0-1)
    - `redundancyDetection`: Identification of duplicate information
    - `innovationRate`: Change in novelty across iterations
    - `saturationPoint`: Detection of diminishing returns
 
 3. **Reflection Pruning**
-
    - Terminates reflection loops when novelty falls below threshold
    - Prevents redundant processing of similar content
    - Optimizes computational resources

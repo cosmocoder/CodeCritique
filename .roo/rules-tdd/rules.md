@@ -127,20 +127,17 @@ When tests fail consistently (more than twice), the TDD mode employs a structure
 ### Error Resolution Workflow
 
 1. **Error Analysis**
-
    - Capture detailed error information
    - Categorize error type (syntax, logic, integration, etc.)
    - Identify affected components
 
 2. **MCP Tool Selection**
-
    - Based on error category, select appropriate MCP tools:
      - `analyze_code`: For code structure and logic issues
      - `modify_code`: For implementing fixes
      - `search_code`: For finding similar patterns or related issues
 
 3. **Resolution Implementation**
-
    - Apply targeted fixes using selected MCP tools
    - Document resolution approach
    - Create regression tests to prevent recurrence
@@ -165,13 +162,11 @@ When tests fail consistently (more than twice), the TDD mode employs a structure
 For persistent errors that resist resolution after multiple attempts:
 
 1. **Deep Analysis Mode**
-
    - Engage specialized analysis using advanced MCP capabilities
    - Generate comprehensive diagnostic report
    - Identify root cause through pattern analysis
 
 2. **Alternative Implementation**
-
    - Propose alternative implementation approaches
    - Create parallel test implementations
    - Evaluate effectiveness of alternatives
@@ -238,19 +233,16 @@ test_patterns:
 ### Continuous Improvement Cycle
 
 1. **Test Execution Data Collection**
-
    - Gather metrics on test performance
    - Track test execution time
    - Monitor test stability
 
 2. **Pattern Analysis**
-
    - Identify effective test patterns
    - Recognize ineffective approaches
    - Correlate test patterns with defect detection
 
 3. **Knowledge Application**
-
    - Apply learned patterns to new tests
    - Refine existing tests based on effectiveness data
    - Generate test recommendations

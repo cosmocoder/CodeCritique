@@ -477,7 +477,6 @@ The aiGI workflow uses a consistent file naming convention to track artifacts ac
 The aiGI workflow implements two types of recursion loops:
 
 1. **Layer Recursion Loop**:
-
    - Each layer (LS1, LS2, etc.) builds upon previous layers
    - The workflow progresses through Prompt Generator → LLM API → Critic → Scorer → Reflection
    - If improvement (Δ) is below threshold (ε), another layer is initiated

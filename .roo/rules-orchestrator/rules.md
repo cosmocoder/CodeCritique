@@ -13,13 +13,11 @@ Coordinate the code-focused aiGI workflow with adaptive recursion, embedding-bas
 The orchestrator manages the following workflow sequence:
 
 1. **Prompt Generator** → Generate code-centric batched prompts
-
    - Creates `prompts_LS{n}.md` files
    - Tags with layer/id
    - Uses `new_task: prompt-generator`
 
 2. **TDD** → Define test cases before implementation
-
    - Creates `test_specs_LS{n}.md` with test cases
    - Defines expected behaviors and edge cases
    - Establishes acceptance criteria
@@ -27,14 +25,12 @@ The orchestrator manages the following workflow sequence:
    - Uses `new_task: tdd`
 
 3. **Critic** → Review and annotate code
-
    - Analyzes `responses_LS{n}.md`
    - Runs lint and static analysis
    - Lists top 5 code issues and fixes in `reflection_LS{n}.md`
    - Uses `new_task: critic`
 
 4. **Scorer** → Compute code metrics
-
    - Evaluates code by performance, correctness, and maintainability
    - Computes JSON scores (complexity, coverage, performance)
    - Saves metrics as `scores_LS{n}.json`
@@ -42,7 +38,6 @@ The orchestrator manages the following workflow sequence:
    - Uses `new_task: scorer`
 
 5. **Reflection** → Refine prompts
-
    - Reads `reflection_LS{n}.md` and `scores_LS{n}.json`
    - Extracts insights
    - Creates refined prompts in `prompts_LS{n+1}.md`
@@ -50,7 +45,6 @@ The orchestrator manages the following workflow sequence:
    - Uses `new_task: reflection`
 
 6. **Code** → Implement and test
-
    - Reads `phase_*_spec.md`, `prompts_LS*.md`, and `test_specs_LS{n}.md`
    - Implements code to satisfy test requirements
    - Generates code modules < 500 lines
@@ -60,7 +54,6 @@ The orchestrator manages the following workflow sequence:
    - Uses `new_task: code`
 
 7. **MCP (optional)** → Integrate services
-
    - Uses MCP SDK to connect services
    - Configures auth and handles tokens securely
    - Performs data transformations in code modules
@@ -78,7 +71,6 @@ The orchestrator manages the following workflow sequence:
 The orchestrator implements a sophisticated three-layer recursive reflection architecture:
 
 1. **LS1 (Generator Layer)**
-
    - **Purpose**: Initial response generation based on prompts
    - **Components**: Prompt Generator → LLM API Call → Response Storage
    - **Artifacts**: `prompts_LS1.md` → `responses_LS1.md`
@@ -86,7 +78,6 @@ The orchestrator implements a sophisticated three-layer recursive reflection arc
    - **Integration**: Leverages vector memory for context retrieval
 
 2. **LS2 (Critic/Reflector Layer)**
-
    - **Purpose**: Critical analysis of LS1 outputs
    - **Components**: Critic → Reflection → Annotation
    - **Artifacts**: `reflection_LS2.md` with detailed critique
@@ -105,14 +96,12 @@ The orchestrator implements a sophisticated three-layer recursive reflection arc
 The orchestrator implements adaptive recursion through:
 
 1. **Delta Improvement Calculation**
-
    - After each layer, compute Δ improvement between `scores_LS{n}.json` and `scores_LS{n-1}.json`
    - If Δ < ε (threshold), trigger mini-reflection to adjust approach
    - If Δ ≥ ε, proceed to next phase
    - Incorporate both score-based and embedding-based delta metrics
 
 2. **Reflection Pruning with Embedding Similarity**
-
    - Calculate embedding similarity between successive iterations
    - Compute Jensen-Shannon divergence to measure information gain
    - Terminate reflection loops when embedding similarity exceeds threshold (indicating minimal change)
@@ -129,14 +118,12 @@ The orchestrator implements adaptive recursion through:
 The orchestrator implements a sophisticated controller flow inspired by LangGraph/SPARC-style directed graphs:
 
 1. **State Machine Architecture**
-
    - Defines explicit states for each workflow phase
    - Implements conditional transitions between states
    - Maintains state history for debugging and analysis
    - Supports parallel execution paths where appropriate
 
 2. **Core States**
-
    - `Initialize`: Setup workflow and load context
    - `GeneratePrompt`: Create prompts for current layer
    - `GenerateResponse`: Produce initial answers (LS1)
@@ -149,7 +136,6 @@ The orchestrator implements a sophisticated controller flow inspired by LangGrap
    - `Finalize`: Assemble deliverable
 
 3. **Conditional Transitions**
-
    - `GenerateResponse → Critique`: Always proceed to critique
    - `Critique → Score`: Always evaluate after critique
    - `Score → DecideNextStep`: Always make explicit decision
@@ -176,14 +162,12 @@ The orchestrator implements a sophisticated controller flow inspired by LangGrap
 The orchestrator integrates with the Memory Manager for sophisticated memory operations:
 
 1. **Artifact Storage**
-
    - Markdown files (`*.md`) serve as memory bank per layer
    - JSON files (`*.json`) store scoring & test metrics
    - Vector store maintains embeddings & metadata for retrieval
    - Memory Manager handles embedding generation and similarity search
 
 2. **File Naming Convention**
-
    - `spec_phase{n}.md` - Specification documents
    - `prompts_LS{n}.md` - Generated prompts for layer n
    - `test_specs_LS{n}.md` - TDD test specifications for layer n
@@ -204,12 +188,10 @@ The orchestrator integrates with the Memory Manager for sophisticated memory ope
 The orchestrator enforces strict code quality standards:
 
 1. **File Size Limits**
-
    - No file > 500 lines
    - Modular architecture with clear separation of concerns
 
 2. **Security Standards**
-
    - No hard-coded secrets or credentials
    - Proper authentication and authorization
    - Secure token handling
@@ -226,7 +208,6 @@ The orchestrator enforces strict code quality standards:
 The orchestrator creates and manages tasks through:
 
 1. **New Task Creation**
-
    - Uses `new_task` for each step in the workflow
    - Passes context and artifacts to the appropriate mode
    - Tracks task completion and dependencies
@@ -241,21 +222,18 @@ The orchestrator creates and manages tasks through:
 The orchestrator coordinates Test-Driven Development through:
 
 1. **Test-First Approach**
-
    - TDD mode runs before code implementation
    - Creates comprehensive test specifications
    - Establishes clear acceptance criteria
    - Generates test scaffolding code
 
 2. **Cross-Mode Coordination**
-
    - TDD mode outputs feed directly to Code mode
    - Code mode implements against test specifications
    - Critic validates implementation against tests
    - Scorer includes test coverage in metrics
 
 3. **Validation Checkpoints**
-
    - Pre-implementation: Test specs reviewed for completeness
    - Mid-implementation: Test execution validates progress
    - Post-implementation: Full test suite verifies functionality
@@ -341,19 +319,16 @@ function orchestrateRecursiveImprovement(task) {
 The orchestrator loop contains several critical decision points:
 
 1. **Iteration Control**
-
    - Hard limit on maximum iterations to prevent infinite loops
    - Early termination when quality threshold is reached
    - Embedding-based pruning when semantic change is minimal
 
 2. **Quality Assessment**
-
    - Multi-dimensional scoring from LS3
    - Comparison against absolute quality threshold
    - Relative improvement tracking across iterations
 
 3. **Novelty Detection**
-
    - Jensen-Shannon divergence calculation between iterations
    - Threshold-based termination for minimal semantic change
    - Prevention of redundant processing
@@ -373,19 +348,16 @@ The workflow follows the structure defined in the mermaid flowchart:
    - Vector store integration for context retention
    - Embedding similarity checks for reflection pruning
 2. **TDD Phase**
-
    - Test specification and scaffolding
    - Validation of test coverage and quality
    - Feedback to code phase for implementation
 
 3. **Code Phase**
-
    - Auto-coder implementation following TDD specs
    - Feedback loop to critic on test failures
    - Progression to MCP or final assembly on success
 
 4. **Optional MCP Integration**
-
    - Service connection and configuration
    - Integration with code modules
    - Preparation for final assembly
