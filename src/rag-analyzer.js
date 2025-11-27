@@ -30,6 +30,247 @@ const MAX_PR_COMMENTS_FOR_CONTEXT = 15;
 // Create embeddings system instance
 const embeddingsSystem = getDefaultEmbeddingsSystem();
 
+// ============================================================================
+// COMMON PROMPT INSTRUCTIONS
+// ============================================================================
+
+/**
+ * Generate the common critical rules block for all prompts
+ * @param {Object} options - Options for customization
+ * @param {string} options.importRuleContext - Context-specific text for import rule ('code', 'test', or 'pr')
+ * @returns {string} Critical rules block
+ */
+function getCriticalRulesBlock(options = {}) {
+  const { importRuleContext = 'code' } = options;
+
+  // Customize import rule based on context
+  let importRuleText;
+  switch (importRuleContext) {
+    case 'test':
+      importRuleText =
+        'DO NOT flag missing imports or files referenced in import statements as issues. Focus only on test quality, logic, and patterns within the provided test files.';
+      break;
+    case 'pr':
+      importRuleText =
+        'DO NOT flag missing imports or files referenced in import statements as issues. In PR analysis, some files (especially assets like images, fonts, or excluded files) may not be included in the review scope. Focus only on code quality, logic, and patterns within the provided PR files.';
+      break;
+    default:
+      importRuleText =
+        'DO NOT flag missing imports or files referenced in import statements as issues. Focus only on code quality, logic, and patterns within the provided files.';
+  }
+
+  return `**🚨 CRITICAL: LINE NUMBER REPORTING RULE - READ CAREFULLY 🚨**
+When reporting issues in the JSON output, NEVER provide exhaustive lists of line numbers. For repeated issues, list only 3-5 representative line numbers maximum. Exhaustive line number lists are considered errors and must be avoided.
+
+**🚨 CRITICAL: IMPORT STATEMENT RULE - READ CAREFULLY 🚨**
+${importRuleText}
+
+**🚨 CRITICAL: NO LOW SEVERITY ISSUES - READ CAREFULLY 🚨**
+DO NOT report "low" severity issues. Low severity issues typically include:
+- Import statement ordering or grouping
+- Code formatting and whitespace
+- Minor stylistic preferences
+- Comment placement or formatting
+- Line length or wrapping suggestions
+These concerns are handled by project linters (ESLint, Prettier, etc.) and should NOT be included in your review.
+Only report issues with severity: "critical", "high", or "medium".
+
+**🚨 CRITICAL: NO VERIFICATION OR HOUSEKEEPING TASKS - READ CAREFULLY 🚨**
+DO NOT report issues that ask the developer to verify, confirm, or coordinate changes outside the code itself. The review must focus ONLY on actual code issues, not process tasks. DO NOT include suggestions like:
+- "Verify that [external system/configuration] has been updated..."
+- "Ensure that [external team/service] is aware of..."
+- "Coordinate with [team] to ensure..."
+- "Check with [stakeholder] to confirm..."
+- "Ensure translation/localization files are updated..."
+- "Verify that feature flags/configurations match..."
+- "Confirm that A/B test results support this change..."
+- "Ensure backward compatibility with..."
+- "Verify deployment/rollout strategy..."
+These are "definition of done" checklist items that belong in project management, NOT in code review. Only report issues where you can identify a specific problem IN THE CODE ITSELF that needs to be fixed.`;
+}
+
+/**
+ * Generate the common citation requirement block
+ * @returns {string} Citation requirement block
+ */
+function getCitationRequirementBlock() {
+  return `**🚨 CRITICAL CITATION REQUIREMENT 🚨**
+When you identify issues that violate custom instructions provided at the beginning of this prompt, you MUST:
+- Include the source document name in your issue description (e.g., "violates the coding standards specified in '[Document Name]'")
+- Reference the source document in your suggestion (e.g., "as required by '[Document Name]'" or "according to '[Document Name]'")
+- Do NOT provide generic suggestions - always tie violations back to the specific custom instruction source`;
+}
+
+/**
+ * Generate the common code suggestions format block
+ * @returns {string} Code suggestions format block
+ */
+function getCodeSuggestionsFormatBlock() {
+  return `**🚨 CODE SUGGESTIONS FORMAT 🚨**
+When suggesting code changes, you can optionally include a codeSuggestion object with:
+- startLine: The starting line number of the code to replace
+- endLine: (optional) The ending line number if replacing multiple lines
+- oldCode: The exact current code that should be replaced (must match exactly)
+- newCode: The proposed replacement code
+
+Code suggestions enable reviewers to apply fixes directly as GitHub suggestions. Only provide code suggestions when:
+1. The fix is concrete and can be applied automatically
+2. You have the exact current code from the file content
+3. The suggestion is a direct code replacement (not architectural changes)`;
+}
+
+/**
+ * Generate the final reminder block for custom instructions
+ * @returns {string} Final reminder block
+ */
+function getFinalReminderBlock() {
+  return `**FINAL REMINDER: If custom instructions were provided at the start of this prompt, they MUST be followed and take precedence over all other guidelines.**`;
+}
+
+/**
+ * Format custom docs section for prompts
+ * @param {Array} customDocs - Array of custom document chunks
+ * @returns {string} Formatted custom docs section
+ */
+function formatCustomDocsSection(customDocs) {
+  if (!customDocs || customDocs.length === 0) {
+    return '';
+  }
+
+  let section = `
+
+CRITICAL: CUSTOM INSTRUCTIONS - FOLLOW THESE BEFORE ALL OTHER INSTRUCTIONS
+=====================================================================
+
+`;
+
+  // Group chunks by document title to provide better context
+  const chunksByDocument = new Map();
+  customDocs.forEach((doc) => {
+    const title = doc.document_title || doc.title;
+    if (!chunksByDocument.has(title)) {
+      chunksByDocument.set(title, []);
+    }
+    chunksByDocument.get(title).push(doc);
+  });
+
+  chunksByDocument.forEach((chunks, docTitle) => {
+    section += `
+### AUTHORITATIVE CUSTOM INSTRUCTION: "${docTitle}"
+
+IMPORTANT: This is an authoritative document that defines mandatory review standards for this project.
+When you find violations of these standards, you MUST cite "${docTitle}" as the source in your response.
+
+`;
+    chunks.forEach((chunk, index) => {
+      section += `
+**Section ${index + 1}${chunk.chunk_index !== undefined ? ` (Chunk ${chunk.chunk_index + 1})` : ''}:**
+
+${chunk.content}
+
+`;
+    });
+    section += `
+---
+
+`;
+  });
+
+  section += `
+=====================================================================
+END OF CUSTOM INSTRUCTIONS - These are authoritative project guidelines that take precedence over all other standards
+`;
+
+  return section;
+}
+
+/**
+ * Build role definition with custom instructions references
+ * @param {string} baseRole - Base role description
+ * @param {Array} customDocs - Array of custom document chunks
+ * @param {string} reviewType - Type of review ('code', 'test', or 'pr')
+ * @returns {string} Complete role definition
+ */
+function buildRoleDefinition(baseRole, customDocs, reviewType = 'code') {
+  let roleDefinition = baseRole;
+
+  if (customDocs && customDocs.length > 0) {
+    const docTitles = [...new Set(customDocs.map((doc) => doc.document_title || doc.title))];
+    const reviewTypeText = reviewType === 'test' ? 'test reviews' : reviewType === 'pr' ? 'PR reviews' : 'review';
+
+    roleDefinition += `\n\nIMPORTANT: You have been given specific custom instructions that define how you should conduct your ${reviewTypeText}:`;
+    docTitles.forEach((title, index) => {
+      roleDefinition += `\n\n**CUSTOM INSTRUCTION SOURCE ${index + 1}: "${title}"**`;
+      roleDefinition += `\nThis contains specific instructions for your ${reviewType === 'test' ? 'test review' : 'review'} approach and criteria.`;
+    });
+    roleDefinition +=
+      '\n\nThese custom instructions define your review methodology and must be followed throughout your analysis. When you apply these instructions, reference the source document that informed your decision.';
+  }
+
+  return roleDefinition;
+}
+
+/**
+ * Format code examples for prompts
+ * @param {Array} codeExamples - Array of code examples
+ * @param {string} labelPrefix - Label prefix (e.g., 'CODE EXAMPLE', 'TEST EXAMPLE')
+ * @returns {string} Formatted code examples
+ */
+function formatCodeExamplesBlock(codeExamples, labelPrefix = 'CODE EXAMPLE') {
+  if (!codeExamples || codeExamples.length === 0) {
+    return labelPrefix.includes('TEST') ? 'No relevant test examples found.' : 'No relevant code examples found.';
+  }
+
+  return codeExamples
+    .map((ex) => {
+      const langIdentifier = ex.language || '';
+      return `
+${labelPrefix} ${ex.index} (Similarity: ${ex.similarity})
+Path: ${ex.path}
+Language: ${ex.language}
+
+\`\`\`${langIdentifier}
+${ex.content}
+\`\`\`
+`;
+    })
+    .join('\n');
+}
+
+/**
+ * Format guideline snippets for prompts
+ * @param {Array} guidelineSnippets - Array of guideline snippets
+ * @param {string} labelPrefix - Label prefix (e.g., 'GUIDELINE', 'TESTING GUIDELINE')
+ * @returns {string} Formatted guideline snippets
+ */
+function formatGuidelinesBlock(guidelineSnippets, labelPrefix = 'GUIDELINE') {
+  if (!guidelineSnippets || guidelineSnippets.length === 0) {
+    return labelPrefix.includes('TESTING') ? 'No specific testing guideline snippets found.' : 'No specific guideline snippets found.';
+  }
+
+  return guidelineSnippets
+    .map((ex) => {
+      const langIdentifier = ex.language || 'text';
+      let title = `${labelPrefix} ${ex.index} (Source: ${ex.path}, Similarity: ${ex.similarity})`;
+      if (ex.headingText) {
+        title += `, Heading: "${ex.headingText}"`;
+      }
+
+      return `
+${title}
+
+\`\`\`${langIdentifier}
+${ex.content}
+\`\`\`
+`;
+    })
+    .join('\n');
+}
+
+// ============================================================================
+// END COMMON PROMPT INSTRUCTIONS
+// ============================================================================
+
 /**
  * Get project summary for the given project path
  * @param {string} projectPath - Project path
@@ -770,42 +1011,9 @@ async function sendPromptToLLM(prompt, llmOptions) {
 function generateAnalysisPrompt(context) {
   const { file, codeExamples, guidelineSnippets, customDocs, feedbackContext } = context;
 
-  // Format code examples
-  const formattedCodeExamples =
-    codeExamples
-      .map((ex) => {
-        const langIdentifier = ex.language || '';
-        return `
-CODE EXAMPLE ${ex.index} (Similarity: ${ex.similarity})
-Path: ${ex.path}
-Language: ${ex.language}
-
-\`\`\`${langIdentifier}
-${ex.content}
-\`\`\`
-`;
-      })
-      .join('\n') || 'No relevant code examples found.';
-
-  // Format guideline snippets
-  const formattedGuidelines =
-    guidelineSnippets
-      .map((ex) => {
-        const langIdentifier = ex.language || 'text';
-        let title = `GUIDELINE ${ex.index} (Source: ${ex.path}, Similarity: ${ex.similarity})`;
-        if (ex.headingText) {
-          title += `, Heading: "${ex.headingText}"`;
-        }
-
-        return `
-${title}
-
-\`\`\`${langIdentifier}
-${ex.content}
-\`\`\`
-`;
-      })
-      .join('\n') || 'No specific guideline snippets found.';
+  // Format code examples and guidelines using shared helpers
+  const formattedCodeExamples = formatCodeExamplesBlock(codeExamples, 'CODE EXAMPLE');
+  const formattedGuidelines = formatGuidelinesBlock(guidelineSnippets, 'GUIDELINE');
 
   // Check for PR comment context in the context object
   const { context: contextSections } = context;
@@ -900,69 +1108,13 @@ ${file.content}
     projectArchitectureSection = formatProjectSummaryForLLM(context.projectSummary);
   }
 
-  let customDocsSection = '';
-  if (customDocs && customDocs.length > 0) {
-    customDocsSection = `
-
-CRITICAL: CUSTOM INSTRUCTIONS - FOLLOW THESE BEFORE ALL OTHER INSTRUCTIONS
-=====================================================================
-
-`;
-
-    // Group chunks by document title to provide better context
-    const chunksByDocument = new Map();
-    customDocs.forEach((doc) => {
-      const title = doc.document_title || doc.title;
-      if (!chunksByDocument.has(title)) {
-        chunksByDocument.set(title, []);
-      }
-      chunksByDocument.get(title).push(doc);
-    });
-
-    chunksByDocument.forEach((chunks, docTitle) => {
-      customDocsSection += `
-### AUTHORITATIVE CUSTOM INSTRUCTION: "${docTitle}"
-
-IMPORTANT: This is an authoritative document that defines mandatory review standards for this project.
-When you find violations of these standards, you MUST cite "${docTitle}" as the source in your response.
-
-`;
-      chunks.forEach((chunk, index) => {
-        customDocsSection += `
-**Section ${index + 1}${chunk.chunk_index !== undefined ? ` (Chunk ${chunk.chunk_index + 1})` : ''}:**
-
-${chunk.content}
-
-`;
-      });
-      customDocsSection += `
----
-
-`;
-    });
-
-    customDocsSection += `
-=====================================================================
-END OF CUSTOM INSTRUCTIONS - These are authoritative project guidelines that take precedence over all other standards
-`;
-  }
-
-  // Build the role definition that incorporates custom instructions
-  let roleDefinition = 'You are an expert code reviewer acting as a senior developer on this specific project.';
-
-  // If custom instructions exist, incorporate them directly into the role
-  if (customDocs && customDocs.length > 0) {
-    // Group chunks by document title for better context
-    const docTitles = [...new Set(customDocs.map((doc) => doc.document_title || doc.title))];
-
-    roleDefinition += '\n\nIMPORTANT: You have been given specific custom instructions that define how you should conduct your review:';
-    docTitles.forEach((title, index) => {
-      roleDefinition += `\n\n**CUSTOM INSTRUCTION SOURCE ${index + 1}: "${title}"**`;
-      roleDefinition += '\nThis contains specific instructions for your review approach and criteria.';
-    });
-    roleDefinition +=
-      '\n\nThese custom instructions define your review methodology and must be followed throughout your analysis. When you apply these instructions, reference the source document that informed your decision.';
-  }
+  // Use shared helpers for custom docs and role definition
+  const customDocsSection = formatCustomDocsSection(customDocs);
+  const roleDefinition = buildRoleDefinition(
+    'You are an expert code reviewer acting as a senior developer on this specific project.',
+    customDocs,
+    'code'
+  );
 
   // Corrected prompt with full two-stage analysis + combined output stage
   return finalizePrompt(`
@@ -989,34 +1141,7 @@ ${feedbackContext || ''}
 
 INSTRUCTIONS:
 
-**🚨 CRITICAL: LINE NUMBER REPORTING RULE - READ CAREFULLY 🚨**
-When reporting issues in the JSON output, NEVER provide exhaustive lists of line numbers. For repeated issues, list only 3-5 representative line numbers maximum. Exhaustive line number lists are considered errors and must be avoided.
-
-**🚨 CRITICAL: IMPORT STATEMENT RULE - READ CAREFULLY 🚨**
-DO NOT flag missing imports or files referenced in import statements as issues. Focus only on code quality, logic, and patterns within the provided files.
-
-**🚨 CRITICAL: NO LOW SEVERITY ISSUES - READ CAREFULLY 🚨**
-DO NOT report "low" severity issues. Low severity issues typically include:
-- Import statement ordering or grouping
-- Code formatting and whitespace
-- Minor stylistic preferences
-- Comment placement or formatting
-- Line length or wrapping suggestions
-These concerns are handled by project linters (ESLint, Prettier, etc.) and should NOT be included in your review.
-Only report issues with severity: "critical", "high", or "medium".
-
-**🚨 CRITICAL: NO VERIFICATION OR HOUSEKEEPING TASKS - READ CAREFULLY 🚨**
-DO NOT report issues that ask the developer to verify, confirm, or coordinate changes outside the code itself. The review must focus ONLY on actual code issues, not process tasks. DO NOT include suggestions like:
-- "Verify that [external system/configuration] has been updated..."
-- "Ensure that [external team/service] is aware of..."
-- "Coordinate with [team] to ensure..."
-- "Check with [stakeholder] to confirm..."
-- "Ensure translation/localization files are updated..."
-- "Verify that feature flags/configurations match..."
-- "Confirm that A/B test results support this change..."
-- "Ensure backward compatibility with..."
-- "Verify deployment/rollout strategy..."
-These are "definition of done" checklist items that belong in project management, NOT in code review. Only report issues where you can identify a specific problem IN THE CODE ITSELF that needs to be fixed.
+${getCriticalRulesBlock({ importRuleContext: 'code' })}
 
 **Perform the following analysis stages sequentially:**
 
@@ -1086,29 +1211,15 @@ These are "definition of done" checklist items that belong in project management
 9.  Format the final, consolidated, and prioritized list of issues, along with a brief overall summary, **strictly** according to the JSON structure below.
 10. CRITICAL: Respond ONLY with valid JSON - start with { and end with }, no additional text.
 
-**FINAL REMINDER: If custom instructions were provided at the start of this prompt, they MUST be followed and take precedence over all other guidelines.**
+${getFinalReminderBlock()}
 
-**🚨 CRITICAL CITATION REQUIREMENT 🚨**
-When you identify issues that violate custom instructions provided at the beginning of this prompt, you MUST:
-- Include the source document name in your issue description (e.g., "violates the logging guidelines specified in '[Document Name]'")
-- Reference the source document in your suggestion (e.g., "as required by '[Document Name]'" or "according to '[Document Name]'")
-- Do NOT provide generic suggestions - always tie violations back to the specific custom instruction source
+${getCitationRequirementBlock()}
 
 REQUIRED JSON OUTPUT FORMAT:
 
 **REMINDER: lineNumbers is REQUIRED - always provide at least one line number. Use ONLY 3-5 representative line numbers for repeated issues. NEVER provide exhaustive lists or empty arrays.**
 
-**🚨 CODE SUGGESTIONS FORMAT 🚨**
-When suggesting code changes, you can optionally include a codeSuggestion object with:
-- startLine: The starting line number of the code to replace
-- endLine: (optional) The ending line number if replacing multiple lines
-- oldCode: The exact current code that should be replaced (must match exactly)
-- newCode: The proposed replacement code
-
-Code suggestions enable reviewers to apply fixes directly as GitHub suggestions. Only provide code suggestions when:
-1. The fix is concrete and can be applied automatically
-2. You have the exact current code from the file content
-3. The suggestion is a direct code replacement (not architectural changes)
+${getCodeSuggestionsFormatBlock()}
 
 You must respond with EXACTLY this JSON structure, with no additional text:
 
@@ -1142,42 +1253,9 @@ You must respond with EXACTLY this JSON structure, with no additional text:
 function generateTestFileAnalysisPrompt(context) {
   const { file, codeExamples, guidelineSnippets, customDocs } = context;
 
-  // Format code examples
-  const formattedCodeExamples =
-    codeExamples
-      .map((ex) => {
-        const langIdentifier = ex.language || '';
-        return `
-TEST EXAMPLE ${ex.index} (Similarity: ${ex.similarity})
-Path: ${ex.path}
-Language: ${ex.language}
-
-\`\`\`${langIdentifier}
-${ex.content}
-\`\`\`
-`;
-      })
-      .join('\n') || 'No relevant test examples found.';
-
-  // Format guideline snippets
-  const formattedGuidelines =
-    guidelineSnippets
-      .map((ex) => {
-        const langIdentifier = ex.language || 'text';
-        let title = `TESTING GUIDELINE ${ex.index} (Source: ${ex.path}, Similarity: ${ex.similarity})`;
-        if (ex.headingText) {
-          title += `, Heading: "${ex.headingText}"`;
-        }
-
-        return `
-${title}
-
-\`\`\`${langIdentifier}
-${ex.content}
-\`\`\`
-`;
-      })
-      .join('\n') || 'No specific testing guideline snippets found.';
+  // Format code examples and guidelines using shared helpers
+  const formattedCodeExamples = formatCodeExamplesBlock(codeExamples, 'TEST EXAMPLE');
+  const formattedGuidelines = formatGuidelinesBlock(guidelineSnippets, 'TESTING GUIDELINE');
 
   // Detect if this is a diff review
   const isDiffReview = file.reviewType === 'DIFF REVIEW';
@@ -1225,70 +1303,13 @@ Language: ${file.language}
 ${file.content}
 \`\`\``;
 
-  let customDocsSection = '';
-  if (customDocs && customDocs.length > 0) {
-    customDocsSection = `
-
-CRITICAL: CUSTOM INSTRUCTIONS - FOLLOW THESE BEFORE ALL OTHER INSTRUCTIONS
-=====================================================================
-
-`;
-
-    // Group chunks by document title to provide better context
-    const chunksByDocument = new Map();
-    customDocs.forEach((doc) => {
-      const title = doc.document_title || doc.title;
-      if (!chunksByDocument.has(title)) {
-        chunksByDocument.set(title, []);
-      }
-      chunksByDocument.get(title).push(doc);
-    });
-
-    chunksByDocument.forEach((chunks, docTitle) => {
-      customDocsSection += `
-### AUTHORITATIVE CUSTOM INSTRUCTION: "${docTitle}"
-
-IMPORTANT: This is an authoritative document that defines mandatory review standards for this project.
-When you find violations of these standards, you MUST cite "${docTitle}" as the source in your response.
-
-`;
-      chunks.forEach((chunk, index) => {
-        customDocsSection += `
-**Section ${index + 1}${chunk.chunk_index !== undefined ? ` (Chunk ${chunk.chunk_index + 1})` : ''}:**
-
-${chunk.content}
-
-`;
-      });
-      customDocsSection += `
----
-
-`;
-    });
-
-    customDocsSection += `
-=====================================================================
-END OF CUSTOM INSTRUCTIONS - These are review methodology instructions that take precedence over all other guidelines
-`;
-  }
-
-  // Build the role definition that incorporates custom instructions
-  let roleDefinition = 'You are an expert test code reviewer acting as a senior developer on this specific project.';
-
-  // If custom instructions exist, incorporate them directly into the role
-  if (customDocs && customDocs.length > 0) {
-    // Group chunks by document title for better context
-    const docTitles = [...new Set(customDocs.map((doc) => doc.document_title || doc.title))];
-
-    roleDefinition +=
-      '\n\nIMPORTANT: You have been given specific custom instructions that define how you should conduct your test reviews:';
-    docTitles.forEach((title, index) => {
-      roleDefinition += `\n\n**CUSTOM INSTRUCTION SOURCE ${index + 1}: "${title}"**`;
-      roleDefinition += '\nThis contains specific instructions for your test review approach and criteria.';
-    });
-    roleDefinition +=
-      '\n\nThese custom instructions define your review methodology and must be followed throughout your analysis. When you apply these instructions, reference the source document that informed your decision.';
-  }
+  // Use shared helpers for custom docs and role definition
+  const customDocsSection = formatCustomDocsSection(customDocs);
+  const roleDefinition = buildRoleDefinition(
+    'You are an expert test code reviewer acting as a senior developer on this specific project.',
+    customDocs,
+    'test'
+  );
 
   // Add project architecture context if available
   let projectArchitectureSection = '';
@@ -1318,34 +1339,7 @@ ${formattedCodeExamples}
 
 INSTRUCTIONS:
 
-**🚨 CRITICAL: LINE NUMBER REPORTING RULE - READ CAREFULLY 🚨**
-When reporting issues in the JSON output, NEVER provide exhaustive lists of line numbers. For repeated issues, list only 3-5 representative line numbers maximum. Exhaustive line number lists are considered errors and must be avoided.
-
-**🚨 CRITICAL: IMPORT STATEMENT RULE - READ CAREFULLY 🚨**
-DO NOT flag missing imports or files referenced in import statements as issues. Focus only on test quality, logic, and patterns within the provided test files.
-
-**🚨 CRITICAL: NO LOW SEVERITY ISSUES - READ CAREFULLY 🚨**
-DO NOT report "low" severity issues. Low severity issues typically include:
-- Import statement ordering or grouping
-- Code formatting and whitespace
-- Minor stylistic preferences
-- Comment placement or formatting
-- Line length or wrapping suggestions
-These concerns are handled by project linters (ESLint, Prettier, etc.) and should NOT be included in your review.
-Only report issues with severity: "critical", "high", or "medium".
-
-**🚨 CRITICAL: NO VERIFICATION OR HOUSEKEEPING TASKS - READ CAREFULLY 🚨**
-DO NOT report issues that ask the developer to verify, confirm, or coordinate changes outside the code itself. The review must focus ONLY on actual code issues, not process tasks. DO NOT include suggestions like:
-- "Verify that [external system/configuration] has been updated..."
-- "Ensure that [external team/service] is aware of..."
-- "Coordinate with [team] to ensure..."
-- "Check with [stakeholder] to confirm..."
-- "Ensure translation/localization files are updated..."
-- "Verify that feature flags/configurations match..."
-- "Confirm that A/B test results support this change..."
-- "Ensure backward compatibility with..."
-- "Verify deployment/rollout strategy..."
-These are "definition of done" checklist items that belong in project management, NOT in code review. Only report issues where you can identify a specific problem IN THE CODE ITSELF that needs to be fixed.
+${getCriticalRulesBlock({ importRuleContext: 'test' })}
 
 **Perform the following test-specific analysis:**
 
@@ -1393,29 +1387,15 @@ These are "definition of done" checklist items that belong in project management
    - Example: Instead of listing 20+ line numbers, use [15, 23, 47, "...and 12 other occurrences"]
 5. Format the output according to the JSON structure below.
 
-**FINAL REMINDER: If custom instructions were provided at the start of this prompt, they MUST be followed and take precedence over all other guidelines.**
+${getFinalReminderBlock()}
 
-**🚨 CRITICAL CITATION REQUIREMENT 🚨**
-When you identify issues that violate custom instructions provided at the beginning of this prompt, you MUST:
-- Include the source document name in your issue description (e.g., "violates the testing guidelines specified in '[Document Name]'")
-- Reference the source document in your suggestion (e.g., "as required by '[Document Name]'" or "according to '[Document Name]'")
-- Do NOT provide generic suggestions - always tie violations back to the specific custom instruction source
+${getCitationRequirementBlock()}
 
 REQUIRED JSON OUTPUT FORMAT:
 
 **REMINDER: For lineNumbers array, use ONLY 3-5 representative line numbers for repeated issues. NEVER provide exhaustive lists.**
 
-**🚨 CODE SUGGESTIONS FORMAT 🚨**
-When suggesting code changes, you can optionally include a codeSuggestion object with:
-- startLine: The starting line number of the code to replace
-- endLine: (optional) The ending line number if replacing multiple lines
-- oldCode: The exact current code that should be replaced (must match exactly)
-- newCode: The proposed replacement code
-
-Code suggestions enable reviewers to apply fixes directly as GitHub suggestions. Only provide code suggestions when:
-1. The fix is concrete and can be applied automatically
-2. You have the exact current code from the file content
-3. The suggestion is a direct code replacement (not architectural changes)
+${getCodeSuggestionsFormatBlock()}
 
 You must respond with EXACTLY this JSON structure, with no additional text:
 
@@ -1522,55 +1502,11 @@ ${prFile.fullContent}
     })
     .join('\n');
 
-  let customDocsSection = '';
-  if (customDocs && customDocs.length > 0) {
-    customDocsSection = `
+  // Use shared helper for custom docs section
+  const customDocsSection = formatCustomDocsSection(customDocs);
 
-CRITICAL: CUSTOM INSTRUCTIONS - FOLLOW THESE BEFORE ALL OTHER INSTRUCTIONS
-=====================================================================
-
-`;
-
-    // Group chunks by document title to provide better context
-    const chunksByDocument = new Map();
-    customDocs.forEach((doc) => {
-      const title = doc.document_title || doc.title;
-      if (!chunksByDocument.has(title)) {
-        chunksByDocument.set(title, []);
-      }
-      chunksByDocument.get(title).push(doc);
-    });
-
-    chunksByDocument.forEach((chunks, docTitle) => {
-      customDocsSection += `
-### AUTHORITATIVE CUSTOM INSTRUCTION: "${docTitle}"
-
-IMPORTANT: This is an authoritative document that defines mandatory review standards for this project.
-When you find violations of these standards, you MUST cite "${docTitle}" as the source in your response.
-
-`;
-      chunks.forEach((chunk, index) => {
-        customDocsSection += `
-**Section ${index + 1}${chunk.chunk_index !== undefined ? ` (Chunk ${chunk.chunk_index + 1})` : ''}:**
-
-${chunk.content}
-
-`;
-      });
-      customDocsSection += `
----
-
-`;
-    });
-
-    customDocsSection += `
-=====================================================================
-END OF CUSTOM INSTRUCTIONS - These are review methodology instructions that take precedence over all other guidelines
-`;
-  }
-
-  // Build the role definition that incorporates custom instructions for PR analysis
-  let roleDefinition = `You are an expert code reviewer performing a holistic review of a Pull Request with ${prFiles.length} files.
+  // Build the role definition - PR analysis has additional context awareness instructions
+  const baseRole = `You are an expert code reviewer performing a holistic review of a Pull Request with ${prFiles.length} files.
 
 **CRITICAL CONTEXT AWARENESS INSTRUCTIONS:**
 
@@ -1587,20 +1523,7 @@ For each file in this PR, you have access to:
 - Verify that referenced functions/variables exist in the full file before flagging as missing
 - The unchanged code is part of each file - always check it before making assumptions`;
 
-  // If custom instructions exist, incorporate them directly into the role
-  if (customDocs && customDocs.length > 0) {
-    // Group chunks by document title for better context
-    const docTitles = [...new Set(customDocs.map((doc) => doc.document_title || doc.title))];
-
-    roleDefinition += '\n\nIMPORTANT: You have been given specific custom instructions that define how you should conduct your PR reviews:';
-    docTitles.forEach((title, index) => {
-      roleDefinition += `\n\n**CUSTOM INSTRUCTION SOURCE ${index + 1}: "${title}"**`;
-      roleDefinition += '\nThis contains specific instructions for your PR review approach and criteria.';
-    });
-    roleDefinition +=
-      '\n\nThese custom instructions define your review methodology and must be followed throughout your analysis. When you apply these instructions, reference the source document that informed your decision.';
-  }
-
+  let roleDefinition = buildRoleDefinition(baseRole, customDocs, 'pr');
   roleDefinition += '\nAnalyze ALL files together to identify cross-file issues, consistency problems, and overall code quality.';
 
   // Add project architecture context if available
@@ -1637,34 +1560,7 @@ ${customDocsSection}
 
 ## ANALYSIS INSTRUCTIONS
 
-**🚨 CRITICAL: LINE NUMBER REPORTING RULE - READ CAREFULLY 🚨**
-When reporting issues in the JSON output, NEVER provide exhaustive lists of line numbers. For repeated issues, list only 3-5 representative line numbers maximum. Exhaustive line number lists are considered errors and must be avoided.
-
-**🚨 CRITICAL: IMPORT STATEMENT RULE - READ CAREFULLY 🚨**
-DO NOT flag missing imports or files referenced in import statements as issues. In PR analysis, some files (especially assets like images, fonts, or excluded files) may not be included in the review scope. Focus only on code quality, logic, and patterns within the provided PR files.
-
-**🚨 CRITICAL: NO LOW SEVERITY ISSUES - READ CAREFULLY 🚨**
-DO NOT report "low" severity issues. Low severity issues typically include:
-- Import statement ordering or grouping
-- Code formatting and whitespace
-- Minor stylistic preferences
-- Comment placement or formatting
-- Line length or wrapping suggestions
-These concerns are handled by project linters (ESLint, Prettier, etc.) and should NOT be included in your review.
-Only report issues with severity: "critical", "high", or "medium".
-
-**🚨 CRITICAL: NO VERIFICATION OR HOUSEKEEPING TASKS - READ CAREFULLY 🚨**
-DO NOT report issues that ask the developer to verify, confirm, or coordinate changes outside the code itself. The review must focus ONLY on actual code issues, not process tasks. DO NOT include suggestions like:
-- "Verify that [external system/configuration] has been updated..."
-- "Ensure that [external team/service] is aware of..."
-- "Coordinate with [team] to ensure..."
-- "Check with [stakeholder] to confirm..."
-- "Ensure translation/localization files are updated..."
-- "Verify that feature flags/configurations match..."
-- "Confirm that A/B test results support this change..."
-- "Ensure backward compatibility with..."
-- "Verify deployment/rollout strategy..."
-These are "definition of done" checklist items that belong in project management, NOT in code review. Only report issues where you can identify a specific problem IN THE CODE ITSELF that needs to be fixed.
+${getCriticalRulesBlock({ importRuleContext: 'pr' })}
 
 **Perform the following holistic analysis stages sequentially for all PR files:**
 
@@ -1756,29 +1652,15 @@ These are "definition of done" checklist items that belong in project management
    - Exhaustive line number lists are considered hallucination and must be avoided
    - Example: Instead of listing 20+ line numbers, use [15, 23, 47, "...and 12 other occurrences"]
 
-**FINAL REMINDER: If custom instructions were provided at the start of this prompt, they MUST be followed and take precedence over all other guidelines.**
+${getFinalReminderBlock()}
 
-**🚨 CRITICAL CITATION REQUIREMENT 🚨**
-When you identify issues that violate custom instructions provided at the beginning of this prompt, you MUST:
-- Include the source document name in your issue description (e.g., "violates the coding standards specified in '[Document Name]'")
-- Reference the source document in your suggestion (e.g., "as required by '[Document Name]'" or "according to '[Document Name]'")
-- Do NOT provide generic suggestions - always tie violations back to the specific custom instruction source
+${getCitationRequirementBlock()}
 
 REQUIRED JSON OUTPUT FORMAT:
 
 **REMINDER: For lineNumbers array, use ONLY 3-5 representative line numbers for repeated issues. NEVER provide exhaustive lists.**
 
-**🚨 CODE SUGGESTIONS FORMAT 🚨**
-When suggesting code changes, you can optionally include a codeSuggestion object with:
-- startLine: The starting line number of the code to replace
-- endLine: (optional) The ending line number if replacing multiple lines
-- oldCode: The exact current code that should be replaced (must match exactly)
-- newCode: The proposed replacement code
-
-Code suggestions enable reviewers to apply fixes directly as GitHub suggestions. Only provide code suggestions when:
-1. The fix is concrete and can be applied automatically
-2. You have the exact current code from the file content
-3. The suggestion is a direct code replacement (not architectural changes)
+${getCodeSuggestionsFormatBlock()}
 
 You must respond with EXACTLY this JSON structure, with no additional text:
 
