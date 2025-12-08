@@ -11,7 +11,14 @@ import path from 'node:path';
 import chalk from 'chalk';
 import { getDefaultEmbeddingsSystem } from './embeddings/factory.js';
 import { calculateCosineSimilarity } from './embeddings/similarity-calculator.js';
-import { loadFeedbackData, shouldSkipSimilarIssue, extractDismissedPatterns, generateFeedbackContext } from './feedback-loader.js';
+import {
+  loadFeedbackData,
+  shouldSkipSimilarIssue,
+  extractDismissedPatterns,
+  generateFeedbackContext,
+  initializeSemanticSimilarity,
+  isSemanticSimilarityAvailable,
+} from './feedback-loader.js';
 import * as llm from './llm.js';
 import { findRelevantPRComments } from './pr-history/database.js';
 import { inferContextFromCodeContent, inferContextFromDocumentContent } from './utils/context-inference.js';
@@ -29,6 +36,28 @@ const MAX_PR_COMMENTS_FOR_CONTEXT = 15;
 
 // Create embeddings system instance
 const embeddingsSystem = getDefaultEmbeddingsSystem();
+
+// Track if semantic similarity has been initialized
+let semanticSimilarityInitialized = false;
+
+/**
+ * Initialize semantic similarity for feedback filtering
+ * Uses the shared embeddings system from feedback-loader.js
+ */
+async function ensureSemanticSimilarityInitialized() {
+  if (semanticSimilarityInitialized) {
+    return;
+  }
+
+  try {
+    // Initialize semantic similarity using the shared embeddings system
+    await initializeSemanticSimilarity();
+    semanticSimilarityInitialized = true;
+  } catch (error) {
+    console.log(chalk.yellow(`⚠️ Could not initialize semantic similarity: ${error.message}`));
+    // Continue without semantic similarity - word-based fallback will be used
+  }
+}
 
 // ============================================================================
 // COMMON PROMPT INSTRUCTIONS
@@ -627,7 +656,7 @@ async function runAnalysis(filePath, options = {}) {
     let filteredResults = lowSeverityFiltered;
     if (options.trackFeedback && feedbackData && Object.keys(feedbackData).length > 0) {
       console.log(chalk.cyan('--- Filtering Results Based on Feedback ---'));
-      filteredResults = filterAnalysisResults(lowSeverityFiltered, feedbackData, {
+      filteredResults = await filterAnalysisResults(lowSeverityFiltered, feedbackData, {
         similarityThreshold: options.feedbackThreshold || 0.7,
         verbose: options.verbose,
       });
@@ -2665,14 +2694,14 @@ function filterLowSeverityIssues(analysisResults, options = {}) {
 }
 
 /**
- * Filter analysis results based on feedback data
+ * Filter analysis results based on feedback data using semantic similarity
  *
  * @param {Object} analysisResults - Raw analysis results from LLM
  * @param {Object} feedbackData - Loaded feedback data
  * @param {Object} options - Filtering options
- * @returns {Object} Filtered analysis results
+ * @returns {Promise<Object>} Filtered analysis results
  */
-function filterAnalysisResults(analysisResults, feedbackData, options = {}) {
+async function filterAnalysisResults(analysisResults, feedbackData, options = {}) {
   const { similarityThreshold = 0.7, verbose = false } = options;
 
   if (!analysisResults || !analysisResults.issues || !Array.isArray(analysisResults.issues)) {
@@ -2681,20 +2710,35 @@ function filterAnalysisResults(analysisResults, feedbackData, options = {}) {
 
   const originalCount = analysisResults.issues.length;
 
-  // Filter issues based on feedback
-  const filteredIssues = analysisResults.issues.filter((issue, index) => {
-    const issueDescription = issue.description || issue.summary || '';
-    const shouldSkip = shouldSkipSimilarIssue(issueDescription, feedbackData, {
-      similarityThreshold,
-      verbose,
-    });
+  // Ensure semantic similarity is initialized for better matching
+  await ensureSemanticSimilarityInitialized();
 
-    if (shouldSkip && verbose) {
-      console.log(chalk.yellow(`   Filtered issue ${index + 1}: "${issueDescription.substring(0, 50)}..."`));
-    }
+  // Log whether semantic similarity is available
+  if (verbose) {
+    const usingSemanticSimilarity = isSemanticSimilarityAvailable();
+    console.log(
+      chalk.cyan(`🔍 Filtering issues using ${usingSemanticSimilarity ? 'semantic + word-based similarity' : 'word-based similarity only'}`)
+    );
+  }
 
-    return !shouldSkip;
-  });
+  // Filter issues based on feedback (now async due to semantic similarity)
+  const filterResults = await Promise.all(
+    analysisResults.issues.map(async (issue, index) => {
+      const issueDescription = issue.description || issue.summary || '';
+      const shouldSkip = await shouldSkipSimilarIssue(issueDescription, feedbackData, {
+        similarityThreshold,
+        verbose,
+      });
+
+      if (shouldSkip && verbose) {
+        console.log(chalk.yellow(`   Filtered issue ${index + 1}: "${issueDescription.substring(0, 50)}..."`));
+      }
+
+      return { issue, shouldSkip };
+    })
+  );
+
+  const filteredIssues = filterResults.filter((result) => !result.shouldSkip).map((result) => result.issue);
 
   const filteredCount = originalCount - filteredIssues.length;
 
@@ -2711,6 +2755,7 @@ function filterAnalysisResults(analysisResults, feedbackData, options = {}) {
         originalIssueCount: originalCount,
         filteredIssueCount: filteredCount,
         finalIssueCount: filteredIssues.length,
+        usedSemanticSimilarity: isSemanticSimilarityAvailable(),
       },
     },
   };
