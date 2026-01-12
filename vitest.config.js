@@ -20,6 +20,12 @@ export default defineConfig({
         'src/review-keywords.json',
         'src/technology-keywords.json',
       ],
+      thresholds: {
+        lines: 90,
+        functions: 90,
+        branches: 82,
+        statements: 90,
+      },
     },
     testTimeout: 30000,
     hookTimeout: 30000,
