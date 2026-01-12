@@ -64,9 +64,9 @@ export default [
     },
   },
 
-  // Override for test files
+  // Override for test files and test utilities
   {
-    files: ['**/*.test.js', '**/*.test.ts', '**/setupTests.js'],
+    files: ['**/*.test.js', '**/*.test.ts', '**/setupTests.js', '**/test-utils/**/*.js'],
     plugins: {
       vitest,
     },

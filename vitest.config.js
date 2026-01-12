@@ -14,6 +14,7 @@ export default defineConfig({
         'src/**/*.test.js',
         'src/index.js',
         'src/setupTests.js',
+        'src/test-utils/**/*.js',
         'src/**/constants.js',
         'src/embeddings/types.js', // JSDoc type definitions only
         'src/review-keywords.json',
