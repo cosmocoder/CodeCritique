@@ -1105,6 +1105,9 @@ npm run lint
 # Run formatting
 npm run prettier
 
+# Run tests
+npm run test
+
 # Check for unused dependencies
 npm run knip
 ```

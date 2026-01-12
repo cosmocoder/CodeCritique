@@ -66,9 +66,19 @@ export default [
 
   // Override for test files
   {
-    files: ['**/*.test.tsx', '**/*.test.ts'],
+    files: ['**/*.test.js', '**/*.test.ts', '**/setupTests.js'],
     plugins: {
       vitest,
+    },
+    languageOptions: {
+      globals: {
+        ...vitest.environments.env.globals,
+        // Custom test helpers defined in setupTests.js
+        createMockEmbedding: 'readonly',
+        createMockStats: 'readonly',
+        mockConsole: 'readonly',
+        mockConsoleSelective: 'readonly',
+      },
     },
     rules: {
       ...vitest.configs.recommended.rules,
