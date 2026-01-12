@@ -1,0 +1,157 @@
+name: Test and Release CodeCritique
+
+on:
+  push:
+    branches:
+      - '**'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CACHE_VERSION: ${{ vars.CACHE_VERSION }}
+  BUILD_VERSION: codecritique-${{ github.run_id }}-${{ github.run_number }}
+  NODE_MODULES_CACHE_PREFIX: node-${{ vars.CACHE_VERSION }}
+
+jobs:
+  deps:
+    name: Install Dependencies
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Restore node modules cache
+        uses: actions/cache/restore@v5
+        id: cache-node-modules
+        with:
+          path: node_modules
+          key: ${{ env.NODE_MODULES_CACHE_PREFIX }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: 'package.json'
+
+      - name: Install Dependencies
+        if: ${{ steps.cache-node-modules.outputs.cache-hit != 'true' }}
+        run: npm ci --ignore-scripts
+
+      - name: Save node modules cache
+        uses: actions/cache/save@v5
+        if: ${{ steps.cache-node-modules.outputs.cache-hit != 'true' }}
+        with:
+          path: node_modules
+          key: ${{ steps.cache-node-modules.outputs.cache-primary-key }}
+
+  lint:
+    name: Code linting
+    runs-on: ubuntu-latest
+    needs: [deps]
+    strategy:
+      matrix:
+        command:
+          - npm run lint:ci
+          - npm run prettier:ci
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Restore node modules cache
+        uses: actions/cache/restore@v5
+        with:
+          path: node_modules
+          key: ${{ env.NODE_MODULES_CACHE_PREFIX }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: 'package.json'
+
+      - run: ${{ matrix.command }}
+
+  lint-report:
+    name: Code linting Report
+    runs-on: ubuntu-latest
+    needs: [lint]
+    if: ${{ always() }}
+    steps:
+      - name: Linting fail
+        run: exit 1
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: [deps]
+    strategy:
+      matrix:
+        shardIndex: [1, 2, 3]
+        shardTotal: [3]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Restore node modules cache
+        uses: actions/cache/restore@v5
+        with:
+          path: node_modules
+          key: ${{ env.NODE_MODULES_CACHE_PREFIX }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: 'package.json'
+
+      - name: Tests for shard ${{ matrix.shardIndex }} of ${{ matrix.shardTotal }}
+        run: npm run test:coverage -- --shard=${{ matrix.shardIndex }}/${{ matrix.shardTotal }} --reporter=blob --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 --coverage.thresholds.branches=0 --coverage.thresholds.statements=0
+
+      - name: Upload blob report
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-report-${{ matrix.shardIndex }}
+          path: .vitest-reports
+          include-hidden-files: true
+
+  coverage:
+    name: Merge Coverage Reports
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Restore node modules cache
+        uses: actions/cache/restore@v5
+        with:
+          path: node_modules
+          key: ${{ env.NODE_MODULES_CACHE_PREFIX }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: 'package.json'
+
+      - name: Download all blob reports
+        uses: actions/download-artifact@v4
+        with:
+          path: .vitest-reports
+          pattern: blob-report-*
+          merge-multiple: true
+
+      - name: Merge coverage reports
+        run: npx vitest --merge-reports --coverage
+
+  test-report:
+    name: Unit Tests Report
+    runs-on: ubuntu-latest
+    needs: [test, coverage]
+    if: ${{ always() }}
+    steps:
+      - name: Unit tests fail
+        run: exit 1
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
