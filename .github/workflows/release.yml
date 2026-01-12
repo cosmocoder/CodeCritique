@@ -111,7 +111,7 @@ jobs:
         run: npm run test:coverage -- --shard=${{ matrix.shardIndex }}/${{ matrix.shardTotal }} --reporter=blob --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 --coverage.thresholds.branches=0 --coverage.thresholds.statements=0
 
       - name: Upload blob report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: blob-report-${{ matrix.shardIndex }}
           path: .vitest-reports
