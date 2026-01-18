@@ -10,6 +10,7 @@ import {
   createCleanupReport,
   bytesToMb,
   setOutput,
+  setOutputs,
   fetchArtifacts,
   deleteArtifact,
   runCleanup,
@@ -235,7 +236,33 @@ describe('cleanup-artifacts.js', () => {
       });
 
       expect(result.toDelete).toHaveLength(2);
+      expect(result.processedCount).toBe(2);
       expect(result.limitReached).toBe(true);
+    });
+
+    it('should limit based on processed count, not delete count (matching bash behavior)', () => {
+      const artifacts = [
+        createArtifact('ai-code-review-embeddings-recent-1', 10), // Too recent
+        createArtifact('ai-code-review-embeddings-recent-2', 10), // Too recent
+        createArtifact('ai-code-review-embeddings-old-1', 40), // Old enough - would be deleted
+        createArtifact('ai-code-review-embeddings-old-2', 40), // Old enough - but not reached due to limit
+      ];
+
+      const result = filterArtifacts(artifacts, {
+        patterns,
+        excludePatterns: '',
+        olderThanDays: 30,
+        maxArtifacts: 2, // Limit to 2 processed
+        currentTime: now,
+      });
+
+      // Only 2 artifacts processed (the first 2 recent ones that match patterns)
+      expect(result.processedCount).toBe(2);
+      // But 0 actually deleted because both were too recent
+      expect(result.toDelete).toHaveLength(0);
+      // Limit reached after processing 2 artifacts
+      expect(result.limitReached).toBe(true);
+      // The old artifacts were never even checked
     });
 
     it('should track skipped artifacts with reasons', () => {
@@ -257,6 +284,29 @@ describe('cleanup-artifacts.js', () => {
       expect(result.skipped.find((s) => s.reason === 'too_recent')).toBeDefined();
       expect(result.skipped.find((s) => s.reason === 'no_pattern_match')).toBeDefined();
       expect(result.skipped.find((s) => s.reason === 'expired')).toBeDefined();
+    });
+
+    it('should count artifacts matching patterns even if too recent', () => {
+      const artifacts = [
+        createArtifact('ai-code-review-embeddings-recent', 10), // Too recent
+        createArtifact('ai-code-review-embeddings-old', 40), // Old enough
+      ];
+
+      const result = filterArtifacts(artifacts, {
+        patterns,
+        excludePatterns: '',
+        olderThanDays: 30,
+        maxArtifacts: 50,
+        currentTime: now,
+      });
+
+      // Both artifacts match patterns, so processedCount should be 2
+      expect(result.processedCount).toBe(2);
+      // Only the old one should be in toDelete
+      expect(result.toDelete).toHaveLength(1);
+      expect(result.toDelete[0].name).toBe('ai-code-review-embeddings-old');
+      // The recent one should be in skipped
+      expect(result.skipped.find((s) => s.artifact.name === 'ai-code-review-embeddings-recent' && s.reason === 'too_recent')).toBeDefined();
     });
   });
 
@@ -384,6 +434,35 @@ describe('cleanup-artifacts.js', () => {
       const outputFile = '/tmp/test-output';
       setOutput('empty-key', '', outputFile);
       expect(fs.appendFileSync).toHaveBeenCalledWith(outputFile, 'empty-key=\n');
+    });
+  });
+
+  describe('setOutputs', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it('should set multiple outputs at once', () => {
+      const outputFile = '/tmp/test-output';
+      setOutputs(
+        {
+          'key-1': 'value-1',
+          'key-2': 'value-2',
+          'key-3': 'value-3',
+        },
+        outputFile
+      );
+
+      expect(fs.appendFileSync).toHaveBeenCalledWith(outputFile, 'key-1=value-1\n');
+      expect(fs.appendFileSync).toHaveBeenCalledWith(outputFile, 'key-2=value-2\n');
+      expect(fs.appendFileSync).toHaveBeenCalledWith(outputFile, 'key-3=value-3\n');
+      expect(fs.appendFileSync).toHaveBeenCalledTimes(3);
+    });
+
+    it('should handle empty object', () => {
+      const outputFile = '/tmp/test-output';
+      setOutputs({}, outputFile);
+      expect(fs.appendFileSync).not.toHaveBeenCalled();
     });
   });
 

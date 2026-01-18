@@ -95,17 +95,19 @@ export function isArtifactOlderThan(createdAt, olderThanDays, currentTime = Date
  * @param {number} options.olderThanDays - Age filter
  * @param {number} options.maxArtifacts - Maximum artifacts to process
  * @param {number} [options.currentTime] - Current timestamp for testing
- * @returns {{ toDelete: Object[], skipped: Object[], limitReached: boolean }}
+ * @returns {{ toDelete: Object[], skipped: Object[], processedCount: number, limitReached: boolean }}
  */
 export function filterArtifacts(artifacts, options) {
   const { patterns, excludePatterns, olderThanDays, maxArtifacts, currentTime } = options;
 
   const toDelete = [];
   const skipped = [];
+  let processedCount = 0; // Count of artifacts matching patterns/excludes (before age check)
   let limitReached = false;
 
   for (const artifact of artifacts) {
-    if (toDelete.length >= maxArtifacts) {
+    // Check if we've processed the maximum number of artifacts that match patterns
+    if (processedCount >= maxArtifacts) {
       limitReached = true;
       break;
     }
@@ -129,7 +131,10 @@ export function filterArtifacts(artifacts, options) {
       continue;
     }
 
-    // Check age
+    // At this point, artifact matches patterns and is not excluded
+    processedCount++;
+
+    // Check age - artifacts that are too recent are still counted as "processed"
     if (!isArtifactOlderThan(artifact.created_at, olderThanDays, currentTime)) {
       skipped.push({ artifact, reason: 'too_recent' });
       continue;
@@ -138,7 +143,7 @@ export function filterArtifacts(artifacts, options) {
     toDelete.push(artifact);
   }
 
-  return { toDelete, skipped, limitReached };
+  return { toDelete, skipped, processedCount, limitReached };
 }
 
 /**
@@ -231,6 +236,17 @@ export function setOutput(name, value, outputFilePath = defaultOutputFile) {
 }
 
 /**
+ * Set multiple outputs at once
+ * @param {Object} outputs - Key-value pairs of outputs to set
+ * @param {string} [outputFilePath] - Path to output file
+ */
+export function setOutputs(outputs, outputFilePath = defaultOutputFile) {
+  for (const [name, value] of Object.entries(outputs)) {
+    setOutput(name, value, outputFilePath);
+  }
+}
+
+/**
  * Fetch artifacts from GitHub API
  */
 export async function fetchArtifacts(repo = defaultRepository, token = defaultGithubToken) {
@@ -307,36 +323,49 @@ export async function runCleanup(options = {}) {
     artifacts = await fetchArtifacts(repository, githubToken);
   } catch (error) {
     console.error(`❌ Failed to fetch artifacts: ${error.message}`);
-    setOutput('artifacts-deleted', '0');
-    setOutput('space-reclaimed', '0');
-    setOutput('summary', `Error: ${error.message}`);
-    setOutput('errors-count', '1');
-    setOutput('failed-deletions', '');
-    setOutput('artifacts-processed', '0');
-    setOutput('report-path', reportPath);
+    setOutputs(
+      {
+        'artifacts-deleted': '0',
+        'space-reclaimed': '0',
+        summary: `Error: ${error.message}`,
+        'errors-count': '1',
+        'failed-deletions': '',
+        'artifacts-processed': '0',
+        'report-path': reportPath,
+      },
+      outputFile
+    );
     process.exit(1);
   }
 
   if (!artifacts || artifacts.length === 0) {
     console.log('📝 No artifacts found in repository');
-    setOutput('artifacts-deleted', '0');
-    setOutput('space-reclaimed', '0');
-    setOutput('summary', 'No artifacts found to cleanup');
-    setOutput('errors-count', '0');
-    setOutput('failed-deletions', '');
-    setOutput('artifacts-processed', '0');
-    setOutput('report-path', reportPath);
+    setOutputs(
+      {
+        'artifacts-deleted': '0',
+        'space-reclaimed': '0',
+        summary: 'No artifacts found to cleanup',
+        'errors-count': '0',
+        'failed-deletions': '',
+        'artifacts-processed': '0',
+        'report-path': reportPath,
+      },
+      outputFile
+    );
     process.exit(0);
   }
 
   // Filter artifacts using the utility function
-  const { toDelete, skipped, limitReached } = filterArtifacts(artifacts, {
+  const { toDelete, skipped, processedCount, limitReached } = filterArtifacts(artifacts, {
     patterns,
     excludePatterns,
     olderThanDays,
     maxArtifacts: maxArtifactsPerRun,
     currentTime: Date.now(),
   });
+
+  // Count artifacts that matched patterns/excludes (before age check)
+  artifactsProcessed = processedCount;
 
   if (limitReached) {
     console.log(`⚠️ Reached maximum artifacts per run limit (${maxArtifactsPerRun})`);
@@ -357,7 +386,6 @@ export async function runCleanup(options = {}) {
 
   // Process artifacts to delete
   for (const artifact of toDelete) {
-    artifactsProcessed++;
     const sizeMb = bytesToMb(artifact.size_in_bytes || 0);
 
     console.log(`🎯 Found matching artifact: ${artifact.name} (ID: ${artifact.id}, Size: ${sizeMb}MB)`);
@@ -430,13 +458,18 @@ export async function runCleanup(options = {}) {
   }
 
   // Set outputs
-  setOutput('artifacts-deleted', artifactsDeleted.toString(), outputFile);
-  setOutput('space-reclaimed', spaceReclaimed.toString(), outputFile);
-  setOutput('summary', summary, outputFile);
-  setOutput('errors-count', errorsCount.toString(), outputFile);
-  setOutput('failed-deletions', failedDeletions.join(','), outputFile);
-  setOutput('artifacts-processed', artifactsProcessed.toString(), outputFile);
-  setOutput('report-path', reportPath, outputFile);
+  setOutputs(
+    {
+      'artifacts-deleted': artifactsDeleted.toString(),
+      'space-reclaimed': spaceReclaimed.toString(),
+      summary,
+      'errors-count': errorsCount.toString(),
+      'failed-deletions': failedDeletions.join(','),
+      'artifacts-processed': artifactsProcessed.toString(),
+      'report-path': reportPath,
+    },
+    outputFile
+  );
 }
 
 // Run the cleanup only if not in test mode
