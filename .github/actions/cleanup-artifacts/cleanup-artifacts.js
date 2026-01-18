@@ -207,27 +207,25 @@ export function bytesToMb(sizeInBytes) {
 }
 
 // Read inputs from environment variables
-const cleanupType = process.env.INPUT_CLEANUP_TYPE || 'all';
-const olderThanDays = parseInt(process.env.INPUT_OLDER_THAN_DAYS || '30', 10);
-const repository = process.env.INPUT_REPOSITORY || process.env.GITHUB_REPOSITORY;
-const dryRun = process.env.INPUT_DRY_RUN === 'true';
-const requireConfirmation = process.env.INPUT_REQUIRE_CONFIRMATION === 'true';
-const customPattern = process.env.INPUT_ARTIFACT_NAME_PATTERN || '';
-const excludePatterns = process.env.INPUT_EXCLUDE_PATTERNS || '';
-const maxArtifactsPerRun = parseInt(process.env.INPUT_MAX_ARTIFACTS_PER_RUN || '50', 10);
-const verbose = process.env.INPUT_VERBOSE === 'true';
-const generateReport = process.env.INPUT_GENERATE_REPORT !== 'false';
-const githubToken = process.env.GITHUB_TOKEN;
-
-// GitHub Actions output file
-const outputFile = process.env.GITHUB_OUTPUT;
+const defaultCleanupType = process.env.INPUT_CLEANUP_TYPE || 'all';
+const defaultOlderThanDays = parseInt(process.env.INPUT_OLDER_THAN_DAYS || '30', 10);
+const defaultRepository = process.env.INPUT_REPOSITORY || process.env.GITHUB_REPOSITORY;
+const defaultDryRun = process.env.INPUT_DRY_RUN === 'true';
+const defaultRequireConfirmation = process.env.INPUT_REQUIRE_CONFIRMATION === 'true';
+const defaultCustomPattern = process.env.INPUT_ARTIFACT_NAME_PATTERN || '';
+const defaultExcludePatterns = process.env.INPUT_EXCLUDE_PATTERNS || '';
+const defaultMaxArtifactsPerRun = parseInt(process.env.INPUT_MAX_ARTIFACTS_PER_RUN || '50', 10);
+const defaultVerbose = process.env.INPUT_VERBOSE === 'true';
+const defaultGenerateReport = process.env.INPUT_GENERATE_REPORT !== 'false';
+const defaultGithubToken = process.env.GITHUB_TOKEN;
+const defaultOutputFile = process.env.GITHUB_OUTPUT;
 
 /**
  * Append output to GitHub Actions output file
  */
-function setOutput(name, value) {
-  if (outputFile) {
-    fs.appendFileSync(outputFile, `${name}=${value}\n`);
+export function setOutput(name, value, outputFilePath = defaultOutputFile) {
+  if (outputFilePath) {
+    fs.appendFileSync(outputFilePath, `${name}=${value}\n`);
   }
   console.log(`::set-output name=${name}::${value}`);
 }
@@ -235,10 +233,10 @@ function setOutput(name, value) {
 /**
  * Fetch artifacts from GitHub API
  */
-async function fetchArtifacts() {
-  const response = await fetch(`https://api.github.com/repos/${repository}/actions/artifacts?per_page=100`, {
+export async function fetchArtifacts(repo = defaultRepository, token = defaultGithubToken) {
+  const response = await fetch(`https://api.github.com/repos/${repo}/actions/artifacts?per_page=100`, {
     headers: {
-      Authorization: `Bearer ${githubToken}`,
+      Authorization: `Bearer ${token}`,
       Accept: 'application/vnd.github.v3+json',
     },
   });
@@ -254,11 +252,11 @@ async function fetchArtifacts() {
 /**
  * Delete an artifact via GitHub API
  */
-async function deleteArtifact(artifactId) {
-  const response = await fetch(`https://api.github.com/repos/${repository}/actions/artifacts/${artifactId}`, {
+export async function deleteArtifact(artifactId, repo = defaultRepository, token = defaultGithubToken) {
+  const response = await fetch(`https://api.github.com/repos/${repo}/actions/artifacts/${artifactId}`, {
     method: 'DELETE',
     headers: {
-      Authorization: `Bearer ${githubToken}`,
+      Authorization: `Bearer ${token}`,
       Accept: 'application/vnd.github.v3+json',
     },
   });
@@ -269,7 +267,21 @@ async function deleteArtifact(artifactId) {
 /**
  * Main cleanup function
  */
-async function runCleanup() {
+export async function runCleanup(options = {}) {
+  // Read inputs from environment variables or options
+  const cleanupType = options.cleanupType ?? defaultCleanupType;
+  const olderThanDays = options.olderThanDays ?? defaultOlderThanDays;
+  const repository = options.repository || defaultRepository;
+  const dryRun = options.dryRun ?? defaultDryRun;
+  const requireConfirmation = options.requireConfirmation ?? defaultRequireConfirmation;
+  const customPattern = options.customPattern || defaultCustomPattern;
+  const excludePatterns = options.excludePatterns || defaultExcludePatterns;
+  const maxArtifactsPerRun = options.maxArtifactsPerRun ?? defaultMaxArtifactsPerRun;
+  const verbose = options.verbose ?? defaultVerbose;
+  const generateReport = options.generateReport ?? defaultGenerateReport;
+  const githubToken = options.githubToken || defaultGithubToken;
+  const outputFile = options.outputFile || defaultOutputFile;
+
   console.log('🗑️ Starting artifact cleanup process...');
 
   // Initialize counters
@@ -292,7 +304,7 @@ async function runCleanup() {
   console.log(`📦 Fetching artifacts from repository: ${repository}`);
   let artifacts;
   try {
-    artifacts = await fetchArtifacts();
+    artifacts = await fetchArtifacts(repository, githubToken);
   } catch (error) {
     console.error(`❌ Failed to fetch artifacts: ${error.message}`);
     setOutput('artifacts-deleted', '0');
@@ -364,7 +376,7 @@ async function runCleanup() {
 
       console.log(`🗑️ Deleting artifact: ${artifact.name}`);
 
-      const success = await deleteArtifact(artifact.id);
+      const success = await deleteArtifact(artifact.id, repository, githubToken);
       if (success) {
         console.log(`✅ Successfully deleted: ${artifact.name}`);
         artifactsDeleted++;
@@ -418,17 +430,19 @@ async function runCleanup() {
   }
 
   // Set outputs
-  setOutput('artifacts-deleted', artifactsDeleted.toString());
-  setOutput('space-reclaimed', spaceReclaimed.toString());
-  setOutput('summary', summary);
-  setOutput('errors-count', errorsCount.toString());
-  setOutput('failed-deletions', failedDeletions.join(','));
-  setOutput('artifacts-processed', artifactsProcessed.toString());
-  setOutput('report-path', reportPath);
+  setOutput('artifacts-deleted', artifactsDeleted.toString(), outputFile);
+  setOutput('space-reclaimed', spaceReclaimed.toString(), outputFile);
+  setOutput('summary', summary, outputFile);
+  setOutput('errors-count', errorsCount.toString(), outputFile);
+  setOutput('failed-deletions', failedDeletions.join(','), outputFile);
+  setOutput('artifacts-processed', artifactsProcessed.toString(), outputFile);
+  setOutput('report-path', reportPath, outputFile);
 }
 
-// Run the cleanup
-runCleanup().catch((error) => {
-  console.error(`❌ Cleanup failed: ${error.message}`);
-  process.exit(1);
-});
+// Run the cleanup only if not in test mode
+if (!process.env.VITEST && !process.env.NODE_ENV?.includes('test')) {
+  runCleanup().catch((error) => {
+    console.error(`❌ Cleanup failed: ${error.message}`);
+    process.exit(1);
+  });
+}
