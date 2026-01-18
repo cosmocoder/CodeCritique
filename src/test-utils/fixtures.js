@@ -89,72 +89,6 @@ export function createMockDatabaseManager(mockTable = null) {
 }
 
 // ============================================================================
-// Mock Embeddings System Factory
-// ============================================================================
-
-/**
- * Creates a mock embeddings system with all common methods
- * Based on src/embeddings/factory.js EmbeddingsSystem class
- * @param {Partial<EmbeddingsSystem>} overrides - Properties to override
- * @returns {EmbeddingsSystem} Mock embeddings system
- */
-export function createMockEmbeddingsSystem(overrides = {}) {
-  return /** @type {EmbeddingsSystem} */ ({
-    // Lifecycle
-    initialize: vi.fn().mockResolvedValue(undefined),
-    isInitialized: vi.fn().mockReturnValue(true),
-    cleanup: vi.fn().mockResolvedValue(undefined),
-    // Embedding calculations
-    calculateEmbedding: vi.fn().mockResolvedValue(new Array(384).fill(0.1)),
-    calculateQueryEmbedding: vi.fn().mockResolvedValue(new Array(384).fill(0.1)),
-    // Content retrieval
-    findRelevantDocs: vi.fn().mockResolvedValue([]),
-    findSimilarCode: vi.fn().mockResolvedValue([]),
-    // Custom documents
-    processCustomDocumentsInMemory: vi.fn().mockResolvedValue([]),
-    findRelevantCustomDocChunks: vi.fn().mockResolvedValue([]),
-    getExistingCustomDocumentChunks: vi.fn().mockResolvedValue([]),
-    // Batch processing
-    processBatchEmbeddings: vi.fn().mockResolvedValue({ processed: 0, failed: 0, skipped: 0 }),
-    getProjectEmbeddings: vi.fn().mockReturnValue({}),
-    // Embeddings management
-    clearEmbeddings: vi.fn().mockResolvedValue(true),
-    clearAllEmbeddings: vi.fn().mockResolvedValue(true),
-    // Project summary
-    storeProjectSummary: vi.fn().mockResolvedValue(undefined),
-    getProjectSummary: vi.fn().mockResolvedValue(null),
-    // PR comments
-    getPRCommentsTable: vi.fn().mockResolvedValue(createMockTable()),
-    updatePRCommentsIndex: vi.fn().mockResolvedValue(undefined),
-    // Metrics
-    getSystemMetrics: vi.fn().mockReturnValue({}),
-    getSystemStatus: vi.fn().mockReturnValue({ initialized: true }),
-    // Sub-components
-    contentRetriever: {
-      findSimilarCode: vi.fn().mockResolvedValue({ relevantFiles: [], relevantChunks: [] }),
-      findSimilarDocumentChunks: vi.fn().mockResolvedValue([]),
-      findRelevantDocs: vi.fn().mockResolvedValue([]),
-      cleanup: vi.fn().mockResolvedValue(undefined),
-    },
-    projectAnalyzer: {
-      analyzeProject: vi.fn().mockResolvedValue({ keyFiles: [], technologies: [] }),
-    },
-    customDocuments: {
-      queryCustomDocuments: vi.fn().mockResolvedValue([]),
-    },
-    databaseManager: createMockDatabaseManager(),
-    modelManager: null,
-    fileProcessor: null,
-    cacheManager: null,
-    // State
-    initialized: false,
-    initializing: false,
-    cleaningUp: false,
-    ...overrides,
-  });
-}
-
-// ============================================================================
 // Mock Model Manager Factory
 // ============================================================================
 
@@ -200,7 +134,7 @@ export function createMockModelManager(overrides = {}) {
  * @param {string|null} text - Optional text response
  * @returns {LLMResponse} Mock LLM response
  */
-export function createMockLLMResponse(json, text = null) {
+function createMockLLMResponse(json, text = null) {
   return {
     json,
     text: text || JSON.stringify(json),
@@ -257,25 +191,6 @@ export function createMockHolisticReviewResponse(options = {}) {
  */
 
 /**
- * Creates mock PR data
- * @param {Partial<PRData>} overrides - Properties to override
- * @returns {PRData} Mock PR object
- */
-export function createMockPR(overrides = {}) {
-  return {
-    number: 1,
-    title: 'Test PR',
-    state: 'closed',
-    merged_at: '2024-01-15T00:00:00Z',
-    created_at: '2024-01-10T00:00:00Z',
-    updated_at: '2024-01-15T00:00:00Z',
-    user: { login: 'developer' },
-    draft: false,
-    ...overrides,
-  };
-}
-
-/**
  * @typedef {Object} PRComment
  * @property {string} id - Comment ID
  * @property {string} body - Comment body
@@ -329,23 +244,6 @@ export function createMockPRSearchResult(overrides = {}) {
 // ============================================================================
 // Mock File System Helpers
 // ============================================================================
-
-/**
- * Creates mock file content for testing
- * @param {'javascript'|'typescript'|'markdown'|'json'|'empty'|'whitespace'} language - Programming language
- * @returns {string} Mock file content
- */
-export function createMockFileContent(language = 'javascript') {
-  const templates = {
-    javascript: 'const x = 1;\nconsole.log(x);',
-    typescript: 'const x: number = 1;\nconsole.log(x);',
-    markdown: '# Title\n\nContent here',
-    json: '{"name": "test", "version": "1.0.0"}',
-    empty: '',
-    whitespace: '   \n\n   ',
-  };
-  return templates[language] || templates.javascript;
-}
 
 /**
  * Creates mock code with specified line count
@@ -408,18 +306,6 @@ export function createMockUnifiedContext(overrides = {}) {
 // ============================================================================
 
 /**
- * Generates test cases for error handling scenarios
- * @returns {{name: string, error: Error, expectedMessage: string}[]} Array of test case objects
- */
-export function generateErrorTestCases() {
-  return [
-    { name: 'connection error', error: new Error('Connection failed'), expectedMessage: 'Connection failed' },
-    { name: 'timeout error', error: new Error('Timeout'), expectedMessage: 'Timeout' },
-    { name: 'permission error', error: new Error('Permission denied'), expectedMessage: 'Permission denied' },
-  ];
-}
-
-/**
  * Generates test cases for shouldSkipPR function
  * @returns {{pr: PRData|null, oldest: string|null, newest: string|null, expected: boolean, description: string}[]} Array of test case objects
  */
@@ -433,98 +319,4 @@ export function generateShouldSkipPRTestCases() {
     { pr: { created_at: '2024-01-15' }, oldest: '2024-01-01', newest: '2024-01-31', expected: true, description: 'using created_at' },
     { pr: { updated_at: '2024-01-15' }, oldest: '2024-01-01', newest: '2024-01-31', expected: true, description: 'using updated_at' },
   ];
-}
-
-/**
- * Generates test cases for similarity threshold filtering
- * @returns {{distance: number, threshold: number, expected: boolean, description: string}[]} Array of test case objects
- */
-export function generateSimilarityFilterTestCases() {
-  return [
-    { distance: 0.1, threshold: 0.5, expected: true, description: 'high similarity (low distance)' },
-    { distance: 0.9, threshold: 0.5, expected: false, description: 'low similarity (high distance)' },
-    { distance: 0.5, threshold: 0.5, expected: true, description: 'at threshold boundary' },
-    { distance: 0, threshold: 0.5, expected: true, description: 'perfect match' },
-    { distance: 1, threshold: 0.5, expected: false, description: 'no similarity' },
-  ];
-}
-
-/**
- * Generates test cases for file path filtering
- * @returns {{path: string, isTest: boolean, expected: boolean, description: string}[]} Array of test case objects
- */
-export function generateFilePathTestCases() {
-  return [
-    { path: 'src/file.js', isTest: false, expected: true, description: 'regular source file' },
-    { path: 'src/file.test.js', isTest: true, expected: true, description: 'test file for test context' },
-    { path: 'src/file.test.js', isTest: false, expected: false, description: 'test file for non-test context' },
-    { path: 'src/file.spec.ts', isTest: true, expected: true, description: 'spec file for test context' },
-    { path: '__tests__/file.js', isTest: true, expected: true, description: 'file in test directory' },
-  ];
-}
-
-/**
- * Generates test cases for LLM response parsing
- * @returns {{response: LLMResponse, expected: boolean, description: string}[]} Array of test case objects
- */
-export function generateLLMResponseTestCases() {
-  return [
-    { response: { json: { summary: 'ok', issues: [] } }, expected: true, description: 'valid JSON response' },
-    { response: { json: null }, expected: true, description: 'null JSON response' },
-    { response: { text: 'raw text' }, expected: true, description: 'text-only response' },
-    { response: { json: { summary: 'issues', issues: [{ severity: 'high' }] } }, expected: true, description: 'response with issues' },
-  ];
-}
-
-// ============================================================================
-// Reset Helpers
-// ============================================================================
-
-/**
- * Resets a mock embeddings system to default state
- * @param {EmbeddingsSystem} mock - Mock embeddings system to reset
- */
-export function resetMockEmbeddingsSystem(mock) {
-  mock.initialize.mockReset().mockResolvedValue(undefined);
-  mock.calculateEmbedding.mockReset().mockResolvedValue(new Array(384).fill(0.1));
-  mock.calculateQueryEmbedding.mockReset().mockResolvedValue(new Array(384).fill(0.1));
-  mock.getProjectSummary.mockReset().mockResolvedValue(null);
-  mock.findRelevantDocs.mockReset().mockResolvedValue([]);
-  mock.findSimilarCode.mockReset().mockResolvedValue([]);
-  mock.findRelevantCustomDocChunks.mockReset().mockResolvedValue([]);
-  mock.processCustomDocumentsInMemory.mockReset().mockResolvedValue([]);
-  mock.getExistingCustomDocumentChunks.mockReset().mockResolvedValue([]);
-
-  if (mock.contentRetriever) {
-    mock.contentRetriever.findSimilarCode.mockReset().mockResolvedValue({
-      relevantFiles: [],
-      relevantChunks: [],
-    });
-    mock.contentRetriever.findSimilarDocumentChunks.mockReset().mockResolvedValue([]);
-  }
-}
-
-/**
- * Resets a mock table to default state
- * @param {LanceDBTable} table - Mock table to reset
- */
-export function resetMockTable(table) {
-  table.add.mockReset().mockResolvedValue(undefined);
-  table.delete.mockReset().mockResolvedValue(undefined);
-  table.optimize.mockReset().mockResolvedValue(undefined);
-  table.countRows.mockReset().mockResolvedValue(0);
-  table.query.mockReset().mockReturnValue({
-    where: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
-    select: vi.fn().mockReturnThis(),
-    toArray: vi.fn().mockResolvedValue([]),
-  });
-  table.search.mockReset().mockReturnValue({
-    column: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
-    select: vi.fn().mockReturnThis(),
-    orderBy: vi.fn().mockReturnThis(),
-    toArray: vi.fn().mockResolvedValue([]),
-  });
 }
