@@ -3,8 +3,8 @@
  * Posts CodeCritique Review comments to PR using GitHub API
  */
 
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 import { shouldSkipSimilarIssue, loadFeedbackData } from '../../../src/feedback-loader.js';
 
 /**
