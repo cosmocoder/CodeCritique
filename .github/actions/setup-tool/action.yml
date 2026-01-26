@@ -71,17 +71,45 @@ runs:
         # Check if artifacts were downloaded to a subdirectory (common with artifact actions)
         ARTIFACT_SUBDIR="ai-code-review-embeddings-${{ github.repository_id }}"
 
+        echo "📦 Setting up embeddings from artifacts..."
+
+        # New format: tar archives for faster extraction
         if [ -d "$ARTIFACT_SUBDIR" ]; then
-          # Move .ai-review-lancedb if it exists in subdirectory
-          if [ -d "$ARTIFACT_SUBDIR/.ai-review-lancedb" ]; then
+          # Extract LanceDB tar archive if it exists (new format)
+          if [ -f "$ARTIFACT_SUBDIR/lancedb.tar.gz" ]; then
+            echo "  Extracting lancedb.tar.gz..."
+            tar -xzf "$ARTIFACT_SUBDIR/lancedb.tar.gz" -C "${{ github.workspace }}"
+            echo "  ✅ LanceDB extracted"
+          # Fallback: Move directory if it exists (old format)
+          elif [ -d "$ARTIFACT_SUBDIR/.ai-review-lancedb" ]; then
+            echo "  Moving .ai-review-lancedb directory (legacy format)..."
             mv "$ARTIFACT_SUBDIR/.ai-review-lancedb" "${{ github.workspace }}/.ai-review-lancedb"
           fi
 
-          # Move .ai-review-fastembed-cache if it exists in subdirectory
-          if [ -d "$ARTIFACT_SUBDIR/.ai-review-fastembed-cache" ]; then
+          # Extract FastEmbed cache tar archive if it exists (new format)
+          if [ -f "$ARTIFACT_SUBDIR/fastembed-cache.tar.gz" ]; then
+            echo "  Extracting fastembed-cache.tar.gz..."
+            tar -xzf "$ARTIFACT_SUBDIR/fastembed-cache.tar.gz" -C "${{ github.workspace }}"
+            echo "  ✅ FastEmbed cache extracted"
+          # Fallback: Move directory if it exists (old format)
+          elif [ -d "$ARTIFACT_SUBDIR/.ai-review-fastembed-cache" ]; then
+            echo "  Moving .ai-review-fastembed-cache directory (legacy format)..."
             mv "$ARTIFACT_SUBDIR/.ai-review-fastembed-cache" "${{ github.workspace }}/.ai-review-fastembed-cache"
           fi
 
           # Clean up artifact subdirectory
-          rmdir "$ARTIFACT_SUBDIR" 2>/dev/null || true
+          rm -rf "$ARTIFACT_SUBDIR" 2>/dev/null || true
+        fi
+
+        # Report what was set up
+        if [ -d "${{ github.workspace }}/.ai-review-lancedb" ]; then
+          echo "✅ LanceDB embeddings available"
+        else
+          echo "⚠️  No LanceDB embeddings found"
+        fi
+
+        if [ -d "${{ github.workspace }}/.ai-review-fastembed-cache" ]; then
+          echo "✅ FastEmbed cache available"
+        else
+          echo "⚠️  No FastEmbed cache found"
         fi
