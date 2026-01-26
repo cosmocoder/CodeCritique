@@ -132,8 +132,8 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: ${{ github.workspace }}/.ai-feedback
-        # Key includes run_id so we don't get an exact match (we want to use restore-keys)
-        key: ${{ env.FEEDBACK_CACHE_KEY }}-${{ github.run_id }}
+        # Key includes run_id and run_attempt to ensure uniqueness even on re-runs
+        key: ${{ env.FEEDBACK_CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
         # restore-keys matches the most recent cache with this prefix
         restore-keys: |
           ${{ env.FEEDBACK_CACHE_KEY }}-
@@ -281,7 +281,7 @@ runs:
       uses: actions/cache/save@v4
       with:
         path: ${{ github.workspace }}/.ai-feedback
-        key: ${{ env.FEEDBACK_CACHE_KEY }}-${{ github.run_id }}
+        key: ${{ env.FEEDBACK_CACHE_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
       continue-on-error: true
 
     - name: Upload review report
