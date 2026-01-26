@@ -133,7 +133,11 @@ runs:
         path: ${{ github.workspace }}/.ai-feedback
         github_token: ${{ github.token }}
         workflow_conclusion: success
-        search_artifacts: true
+        # Use check_artifacts instead of search_artifacts for better performance
+        # check_artifacts: iterates through runs sequentially until finding one with the artifact
+        # search_artifacts: scans ALL runs which is slow for busy repositories
+        check_artifacts: true
+        search_artifacts: false
         if_no_artifact_found: warn
       continue-on-error: true
 
