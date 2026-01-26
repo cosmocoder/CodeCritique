@@ -361,6 +361,22 @@ describe('post-comments.js', () => {
       expect(mockGithub.rest.pulls.createReviewComment).not.toHaveBeenCalled();
     });
 
+    it('should post inline comments when shouldSkipSimilarIssue returns false (await regression test)', async () => {
+      // This test ensures the await keyword is used when calling shouldSkipSimilarIssue.
+      // If await is missing, the Promise object (which is truthy) will cause all issues
+      // to be incorrectly skipped, and this test will fail.
+      mockShouldSkipSimilarIssue.mockImplementation(() => Promise.resolve(false));
+
+      await postComments({ github: mockGithub, context: mockContext, core: mockCore });
+
+      // When shouldSkipSimilarIssue returns false, inline comments MUST be posted
+      // This will fail if the await is missing because Promise is truthy
+      expect(mockGithub.rest.pulls.createReviewComment).toHaveBeenCalled();
+
+      // Verify the function was called for each issue in the sample data (2 issues)
+      expect(mockShouldSkipSimilarIssue).toHaveBeenCalledTimes(2);
+    });
+
     it('should analyze feedback on existing bot comments', async () => {
       mockGithub.rest.pulls.listReviewComments.mockResolvedValue({
         data: [

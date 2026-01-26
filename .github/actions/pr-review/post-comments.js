@@ -457,7 +457,7 @@ ${uniqueCommentId}`;
 
           // Skip similar issues that received negative feedback
           if (
-            shouldSkipSimilarIssue(issue.description, allFeedback, {
+            await shouldSkipSimilarIssue(issue.description, allFeedback, {
               similarityThreshold: 0.7,
               verbose: true,
             })
