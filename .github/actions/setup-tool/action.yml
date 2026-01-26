@@ -67,38 +67,54 @@ runs:
 
     - name: Setup Embeddings Directories
       shell: bash
+      working-directory: ${{ github.workspace }}
       run: |
-        # Check if artifacts were downloaded to a subdirectory (common with artifact actions)
+        # Artifact download may extract to current directory or a subdirectory
         ARTIFACT_SUBDIR="ai-code-review-embeddings-${{ github.repository_id }}"
 
         echo "📦 Setting up embeddings from artifacts..."
 
-        # New format: tar archives for faster extraction
-        if [ -d "$ARTIFACT_SUBDIR" ]; then
+        # Determine where artifacts were extracted
+        if [ -f "lancedb.tar.gz" ] || [ -f "fastembed-cache.tar.gz" ]; then
+          # New format: tar archives extracted to current directory
+          ARTIFACT_PATH="."
+        elif [ -d "$ARTIFACT_SUBDIR" ]; then
+          # Artifacts in subdirectory
+          ARTIFACT_PATH="$ARTIFACT_SUBDIR"
+        else
+          echo "⚠️  No artifact directory or files found"
+          ARTIFACT_PATH=""
+        fi
+
+        if [ -n "$ARTIFACT_PATH" ]; then
           # Extract LanceDB tar archive if it exists (new format)
-          if [ -f "$ARTIFACT_SUBDIR/lancedb.tar.gz" ]; then
+          if [ -f "$ARTIFACT_PATH/lancedb.tar.gz" ]; then
             echo "  Extracting lancedb.tar.gz..."
-            tar -xzf "$ARTIFACT_SUBDIR/lancedb.tar.gz" -C "${{ github.workspace }}"
+            tar -xzf "$ARTIFACT_PATH/lancedb.tar.gz" -C "${{ github.workspace }}"
+            rm -f "$ARTIFACT_PATH/lancedb.tar.gz"
             echo "  ✅ LanceDB extracted"
           # Fallback: Move directory if it exists (old format)
-          elif [ -d "$ARTIFACT_SUBDIR/.ai-review-lancedb" ]; then
+          elif [ -d "$ARTIFACT_PATH/.ai-review-lancedb" ]; then
             echo "  Moving .ai-review-lancedb directory (legacy format)..."
-            mv "$ARTIFACT_SUBDIR/.ai-review-lancedb" "${{ github.workspace }}/.ai-review-lancedb"
+            mv "$ARTIFACT_PATH/.ai-review-lancedb" "${{ github.workspace }}/.ai-review-lancedb"
           fi
 
           # Extract FastEmbed cache tar archive if it exists (new format)
-          if [ -f "$ARTIFACT_SUBDIR/fastembed-cache.tar.gz" ]; then
+          if [ -f "$ARTIFACT_PATH/fastembed-cache.tar.gz" ]; then
             echo "  Extracting fastembed-cache.tar.gz..."
-            tar -xzf "$ARTIFACT_SUBDIR/fastembed-cache.tar.gz" -C "${{ github.workspace }}"
+            tar -xzf "$ARTIFACT_PATH/fastembed-cache.tar.gz" -C "${{ github.workspace }}"
+            rm -f "$ARTIFACT_PATH/fastembed-cache.tar.gz"
             echo "  ✅ FastEmbed cache extracted"
           # Fallback: Move directory if it exists (old format)
-          elif [ -d "$ARTIFACT_SUBDIR/.ai-review-fastembed-cache" ]; then
+          elif [ -d "$ARTIFACT_PATH/.ai-review-fastembed-cache" ]; then
             echo "  Moving .ai-review-fastembed-cache directory (legacy format)..."
-            mv "$ARTIFACT_SUBDIR/.ai-review-fastembed-cache" "${{ github.workspace }}/.ai-review-fastembed-cache"
+            mv "$ARTIFACT_PATH/.ai-review-fastembed-cache" "${{ github.workspace }}/.ai-review-fastembed-cache"
           fi
 
-          # Clean up artifact subdirectory
-          rm -rf "$ARTIFACT_SUBDIR" 2>/dev/null || true
+          # Clean up artifact subdirectory if it was used
+          if [ "$ARTIFACT_PATH" = "$ARTIFACT_SUBDIR" ]; then
+            rm -rf "$ARTIFACT_SUBDIR" 2>/dev/null || true
+          fi
         fi
 
         # Report what was set up
