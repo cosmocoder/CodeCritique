@@ -138,6 +138,33 @@ runs:
           exit 1
         fi
 
+    - name: Package Embeddings for Upload
+      id: package-embeddings
+      if: steps.generate.outputs.success == 'true'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        echo "📦 Packaging embeddings into tar archives for faster artifact transfer..."
+
+        # Create a staging directory for the tar archives
+        mkdir -p .ai-review-artifacts
+
+        # Package LanceDB directory if it exists
+        if [ -d ".ai-review-lancedb" ]; then
+          echo "  Creating lancedb.tar.gz..."
+          tar -czf .ai-review-artifacts/lancedb.tar.gz .ai-review-lancedb
+          echo "  LanceDB archive size: $(du -h .ai-review-artifacts/lancedb.tar.gz | cut -f1)"
+        fi
+
+        # Package FastEmbed cache if it exists
+        if [ -d ".ai-review-fastembed-cache" ]; then
+          echo "  Creating fastembed-cache.tar.gz..."
+          tar -czf .ai-review-artifacts/fastembed-cache.tar.gz .ai-review-fastembed-cache
+          echo "  FastEmbed cache archive size: $(du -h .ai-review-artifacts/fastembed-cache.tar.gz | cut -f1)"
+        fi
+
+        echo "✅ Packaging complete"
+
     - name: Upload Embeddings Artifact
       id: upload-artifacts
       if: steps.generate.outputs.success == 'true'
@@ -145,9 +172,7 @@ runs:
       with:
         name: ai-code-review-embeddings-${{ github.repository_id }}
         include-hidden-files: true
-        path: |
-          ${{ github.workspace }}/.ai-review-lancedb/
-          ${{ github.workspace }}/.ai-review-fastembed-cache/
+        path: ${{ github.workspace }}/.ai-review-artifacts/
         retention-days: ${{ inputs.embeddings-retention-days }}
         if-no-files-found: warn
       continue-on-error: true
