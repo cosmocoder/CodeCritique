@@ -513,11 +513,71 @@ ${uniqueCommentId}`;
           } catch (error) {
             // If the line is not in the diff, try posting a file-level comment instead
             if (error.status === 422) {
-              console.log(`⚠️ Line ${lineNum} is not within the PR diff, trying file-level comment...`);
+              console.log(`⚠️ Line ${lineNum} is not within the PR diff, trying file-level comment with code snippet...`);
 
               try {
-                // Create an enhanced comment body that includes the line number reference
-                const fileCommentBody = `📍 **Line ${lineNum}**\n\n${commentBody}`;
+                // Fetch the file content from GitHub to include a code snippet
+                let codeSnippet = '';
+                try {
+                  const { data: fileContent } = await github.rest.repos.getContent({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    path: relativePath,
+                    ref: commitId,
+                  });
+
+                  if (fileContent.content) {
+                    // Decode base64 content
+                    const content = Buffer.from(fileContent.content, 'base64').toString('utf8');
+                    const lines = content.split('\n');
+
+                    // Get context lines (3 lines before and after the target line)
+                    const startLine = Math.max(0, lineNum - 4);
+                    const endLine = Math.min(lines.length, lineNum + 3);
+                    const snippetLines = lines.slice(startLine, endLine);
+
+                    // Format with line numbers
+                    const formattedSnippet = snippetLines
+                      .map((line, idx) => {
+                        const actualLineNum = startLine + idx + 1;
+                        const marker = actualLineNum === lineNum ? '→' : ' ';
+                        return `${marker} ${actualLineNum.toString().padStart(4)} | ${line}`;
+                      })
+                      .join('\n');
+
+                    // Detect language for syntax highlighting
+                    const ext = relativePath.split('.').pop();
+                    const langMap = {
+                      js: 'javascript',
+                      jsx: 'jsx',
+                      ts: 'typescript',
+                      tsx: 'tsx',
+                      py: 'python',
+                      rb: 'ruby',
+                      go: 'go',
+                      rs: 'rust',
+                      java: 'java',
+                      kt: 'kotlin',
+                      swift: 'swift',
+                      cs: 'csharp',
+                      cpp: 'cpp',
+                      c: 'c',
+                      h: 'c',
+                      hpp: 'cpp',
+                      php: 'php',
+                      vue: 'vue',
+                      svelte: 'svelte',
+                    };
+                    const lang = langMap[ext] || ext || '';
+
+                    codeSnippet = `\n\n**Code at line ${lineNum}:**\n\`\`\`${lang}\n${formattedSnippet}\n\`\`\``;
+                  }
+                } catch (fetchError) {
+                  console.log(`⚠️ Could not fetch file content for code snippet: ${fetchError.message}`);
+                }
+
+                // Create an enhanced comment body that includes the line number reference and code snippet
+                const fileCommentBody = `📍 **Line ${lineNum}**${codeSnippet}\n\n${commentBody}`;
 
                 // Post as file-level comment (doesn't require line to be in diff)
                 await github.rest.pulls.createReviewComment({

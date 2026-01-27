@@ -105,6 +105,13 @@ describe('post-comments.js', () => {
           listForPullRequestReviewComment: vi.fn().mockResolvedValue({ data: [] }),
           listForIssueComment: vi.fn().mockResolvedValue({ data: [] }),
         },
+        repos: {
+          getContent: vi.fn().mockResolvedValue({
+            data: {
+              content: Buffer.from('line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10').toString('base64'),
+            },
+          }),
+        },
       },
       graphql: vi.fn().mockResolvedValue({
         repository: {
@@ -269,7 +276,7 @@ describe('post-comments.js', () => {
       expect(secondCall.body).toContain('Line 96');
     });
 
-    it('should include line number reference in file-level comment body', async () => {
+    it('should include line number reference and code snippet in file-level comment body', async () => {
       // First call fails with 422, second succeeds
       let callCount = 0;
       mockGithub.rest.pulls.createReviewComment.mockImplementation((params) => {
@@ -280,13 +287,22 @@ describe('post-comments.js', () => {
         return Promise.resolve({ data: { id: 1001 } });
       });
 
+      // Mock file content for code snippet
+      mockGithub.rest.repos.getContent.mockResolvedValue({
+        data: {
+          content: Buffer.from(
+            'const x = 1;\nconst y = 2;\nconst z = 3;\nfunction test() {\n  return x + y;\n}\nexport default test;'
+          ).toString('base64'),
+        },
+      });
+
       const singleIssue = {
         summary: { totalFilesReviewed: 1, totalIssues: 1 },
         details: [
           {
             filePath: 'src/test.js',
             review: {
-              issues: [{ description: 'Test needs updating', severity: 'warning', lineNumbers: [42] }],
+              issues: [{ description: 'Test needs updating', severity: 'warning', lineNumbers: [4] }],
             },
           },
         ],
@@ -296,9 +312,19 @@ describe('post-comments.js', () => {
 
       await postComments({ github: mockGithub, context: mockContext, core: mockCore });
 
-      // Verify the file-level comment includes the line reference
+      // Verify getContent was called to fetch file for code snippet
+      expect(mockGithub.rest.repos.getContent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: 'src/test.js',
+          ref: 'abc123def456',
+        })
+      );
+
+      // Verify the file-level comment includes the line reference and code snippet
       const fileLevelCall = mockGithub.rest.pulls.createReviewComment.mock.calls[1][0];
-      expect(fileLevelCall.body).toContain('📍 **Line 42**');
+      expect(fileLevelCall.body).toContain('📍 **Line 4**');
+      expect(fileLevelCall.body).toContain('Code at line 4');
+      expect(fileLevelCall.body).toContain('function test()');
       expect(fileLevelCall.body).toContain('Test needs updating');
     });
 
