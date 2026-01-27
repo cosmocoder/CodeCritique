@@ -231,6 +231,102 @@ describe('post-comments.js', () => {
       await expect(postComments({ github: mockGithub, context: mockContext, core: mockCore })).resolves.not.toThrow();
     });
 
+    it('should fall back to file-level comment when line is not in diff (422 error)', async () => {
+      // First call fails with 422 (line not in diff), second call (file-level) succeeds
+      let callCount = 0;
+      mockGithub.rest.pulls.createReviewComment.mockImplementation((params) => {
+        callCount++;
+        if (callCount === 1 && !params.subject_type) {
+          // First call is inline comment attempt - fail with 422
+          return Promise.reject({ status: 422, message: 'Validation Failed' });
+        }
+        // Second call is file-level comment - succeed
+        return Promise.resolve({ data: { id: 1001 } });
+      });
+
+      const singleIssue = {
+        summary: { totalFilesReviewed: 1, totalIssues: 1 },
+        details: [
+          {
+            filePath: 'src/test.js',
+            review: {
+              issues: [{ description: 'Issue on non-diff line', severity: 'warning', lineNumbers: [96] }],
+            },
+          },
+        ],
+      };
+
+      fs.readFileSync.mockReturnValue(JSON.stringify(singleIssue));
+
+      await postComments({ github: mockGithub, context: mockContext, core: mockCore });
+
+      // Should have called createReviewComment twice - once for inline (failed), once for file-level
+      expect(mockGithub.rest.pulls.createReviewComment).toHaveBeenCalledTimes(2);
+
+      // Second call should be file-level with subject_type: 'file'
+      const secondCall = mockGithub.rest.pulls.createReviewComment.mock.calls[1][0];
+      expect(secondCall.subject_type).toBe('file');
+      expect(secondCall.body).toContain('Line 96');
+    });
+
+    it('should include line number reference in file-level comment body', async () => {
+      // First call fails with 422, second succeeds
+      let callCount = 0;
+      mockGithub.rest.pulls.createReviewComment.mockImplementation((params) => {
+        callCount++;
+        if (callCount === 1 && !params.subject_type) {
+          return Promise.reject({ status: 422, message: 'Validation Failed' });
+        }
+        return Promise.resolve({ data: { id: 1001 } });
+      });
+
+      const singleIssue = {
+        summary: { totalFilesReviewed: 1, totalIssues: 1 },
+        details: [
+          {
+            filePath: 'src/test.js',
+            review: {
+              issues: [{ description: 'Test needs updating', severity: 'warning', lineNumbers: [42] }],
+            },
+          },
+        ],
+      };
+
+      fs.readFileSync.mockReturnValue(JSON.stringify(singleIssue));
+
+      await postComments({ github: mockGithub, context: mockContext, core: mockCore });
+
+      // Verify the file-level comment includes the line reference
+      const fileLevelCall = mockGithub.rest.pulls.createReviewComment.mock.calls[1][0];
+      expect(fileLevelCall.body).toContain('📍 **Line 42**');
+      expect(fileLevelCall.body).toContain('Test needs updating');
+    });
+
+    it('should handle file-level comment fallback failure gracefully', async () => {
+      // Both inline and file-level comments fail
+      mockGithub.rest.pulls.createReviewComment.mockRejectedValue({
+        status: 422,
+        message: 'Validation Failed',
+      });
+
+      const singleIssue = {
+        summary: { totalFilesReviewed: 1, totalIssues: 1 },
+        details: [
+          {
+            filePath: 'src/test.js',
+            review: {
+              issues: [{ description: 'Issue', severity: 'warning', lineNumbers: [10] }],
+            },
+          },
+        ],
+      };
+
+      fs.readFileSync.mockReturnValue(JSON.stringify(singleIssue));
+
+      // Should not throw even if both attempts fail
+      await expect(postComments({ github: mockGithub, context: mockContext, core: mockCore })).resolves.not.toThrow();
+    });
+
     it('should respect maxComments limit', async () => {
       // Create review output with many issues
       const manyIssues = {
