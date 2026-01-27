@@ -511,19 +511,35 @@ ${uniqueCommentId}`;
             commentsPosted++;
             console.log(`✅ Posted inline comment for ${relativePath}:${lineNum}`);
           } catch (error) {
-            // Enhanced error logging to understand why inline comments fail
-            console.log(`❌ Skipped comment for ${relativePath}:${lineNum} - cannot post inline comment`);
-
+            // If the line is not in the diff, try posting a file-level comment instead
             if (error.status === 422) {
-              console.log(`   Reason: Line ${lineNum} is not within the PR diff (GitHub only allows comments on changed lines)`);
-            } else if (error.status === 404) {
-              console.log(`   Reason: File ${relativePath} or commit ${commitId.substring(0, 7)} not found in PR`);
-            } else {
-              console.log(`   Reason: ${error.message}`);
-            }
+              console.log(`⚠️ Line ${lineNum} is not within the PR diff, trying file-level comment...`);
 
-            // No fallback - if we can't post an inline comment, we skip it entirely
-            // This ensures only actual inline comments are posted, never standalone comments
+              try {
+                // Create an enhanced comment body that includes the line number reference
+                const fileCommentBody = `📍 **Line ${lineNum}**\n\n${commentBody}`;
+
+                // Post as file-level comment (doesn't require line to be in diff)
+                await github.rest.pulls.createReviewComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.issue.number,
+                  commit_id: commitId,
+                  path: relativePath,
+                  body: fileCommentBody,
+                  subject_type: 'file',
+                });
+
+                commentsPosted++;
+                console.log(`✅ Posted file-level comment for ${relativePath} (referencing line ${lineNum})`);
+              } catch (fileError) {
+                console.log(`❌ Failed to post file-level comment for ${relativePath}: ${fileError.message}`);
+              }
+            } else if (error.status === 404) {
+              console.log(`❌ Skipped comment for ${relativePath}:${lineNum} - File or commit not found in PR`);
+            } else {
+              console.log(`❌ Skipped comment for ${relativePath}:${lineNum} - ${error.message}`);
+            }
           }
         }
       }
