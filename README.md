@@ -83,9 +83,28 @@ ANTHROPIC_API_KEY=your_key npx codecritique analyze --file app.py
 
 ### Installation Options
 
-> **Note**: This tool is currently in development and not yet published to npm. You'll need to run it locally for now.
+#### Option 1: Using npx (Recommended)
 
-#### Option 1: Run Locally (Current Method)
+The easiest way to use CodeCritique - no installation required:
+
+```bash
+npx codecritique analyze --file path/to/file.py
+```
+
+View the package on npm: [https://www.npmjs.com/package/codecritique](https://www.npmjs.com/package/codecritique)
+
+#### Option 2: Global Installation
+
+For frequent use, install globally:
+
+```bash
+npm install -g codecritique
+codecritique analyze --file path/to/file.py
+```
+
+#### Option 3: Run from Source
+
+For development or contributing:
 
 1. **Clone the repository**:
 
@@ -139,21 +158,6 @@ For easier integration with non-JavaScript projects, you can use the provided sh
    - Creates/uses `.env` file in your project directory
    - Validates Node.js v22.0.0+ requirement
    - Provides helpful error messages for missing dependencies
-
-#### Option 2: Using npx (Future - Once Published)
-
-```bash
-# This will be available once the tool is published to npm
-npx codecritique analyze --file path/to/file.py
-```
-
-#### Option 3: Global Installation (Future - Once Published)
-
-```bash
-# This will be available once the tool is published to npm
-npm install -g codecritique
-codecritique analyze --file path/to/file.py
-```
 
 ## Quick Start
 
