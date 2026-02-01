@@ -1,6 +1,52 @@
 # CodeCritique
 
-A self-hosted, AI-powered code review tool using **RAG (Retrieval-Augmented Generation)** with local embeddings and Anthropic Claude for intelligent, context-aware code analysis. Supports any programming language with specialized features for JavaScript/TypeScript projects.
+[![npm version](https://img.shields.io/npm/v/codecritique.svg)](https://www.npmjs.com/package/codecritique)
+[![npm downloads](https://img.shields.io/npm/dm/codecritique.svg)](https://www.npmjs.com/package/codecritique)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg)](https://nodejs.org/)
+[![CI](https://github.com/cosmocoder/CodeCritique/actions/workflows/release.yml/badge.svg)](https://github.com/cosmocoder/CodeCritique/actions/workflows/release.yml)
+
+**AI-Powered Code Review. Context-Aware. Privacy-First.**
+
+A self-hosted code review tool using **RAG (Retrieval-Augmented Generation)** with local embeddings and Anthropic Claude for intelligent, context-aware code analysis. Works with any programming language.
+
+[Features](#key-features) • [Installation](#installation) • [Quick Start](#quick-start) • [GitHub Actions](#github-actions-integration) • [Commands](#commands-reference) • [Contributing](#contributing)
+
+---
+
+## ❌ The Problem
+
+Traditional code review tools fall short:
+
+- ❌ **Generic static analysis** doesn't understand your codebase's unique patterns
+- ❌ **No historical context** - ignores lessons from past code reviews
+- ❌ **One-size-fits-all** rules that don't adapt to your team's standards
+- ❌ **Limited language support** - often focused on specific tech stacks
+
+## ✅ The Solution
+
+**CodeCritique** uses RAG to deliver intelligent, context-aware code reviews:
+
+- ✅ **Learns your codebase** - embeddings capture your patterns and conventions
+- ✅ **Remembers PR history** - learns from past review comments and decisions
+- ✅ **Custom guidelines** - integrates your team's coding standards
+- ✅ **Any language** - works with JavaScript, Python, Go, Rust, and more
+
+---
+
+## 🚀 Quick Install
+
+```bash
+npx codecritique analyze --file src/app.ts
+```
+
+Or install globally:
+
+```bash
+npm install -g codecritique
+```
+
+---
 
 ## Table of Contents
 
@@ -83,9 +129,28 @@ ANTHROPIC_API_KEY=your_key npx codecritique analyze --file app.py
 
 ### Installation Options
 
-> **Note**: This tool is currently in development and not yet published to npm. You'll need to run it locally for now.
+#### Option 1: Using npx (Recommended)
 
-#### Option 1: Run Locally (Current Method)
+The easiest way to use CodeCritique - no installation required:
+
+```bash
+npx codecritique analyze --file path/to/file.py
+```
+
+View the package on npm: [https://www.npmjs.com/package/codecritique](https://www.npmjs.com/package/codecritique)
+
+#### Option 2: Global Installation
+
+For frequent use, install globally:
+
+```bash
+npm install -g codecritique
+codecritique analyze --file path/to/file.py
+```
+
+#### Option 3: Run from Source
+
+For development or contributing:
 
 1. **Clone the repository**:
 
@@ -139,21 +204,6 @@ For easier integration with non-JavaScript projects, you can use the provided sh
    - Creates/uses `.env` file in your project directory
    - Validates Node.js v22.0.0+ requirement
    - Provides helpful error messages for missing dependencies
-
-#### Option 2: Using npx (Future - Once Published)
-
-```bash
-# This will be available once the tool is published to npm
-npx codecritique analyze --file path/to/file.py
-```
-
-#### Option 3: Global Installation (Future - Once Published)
-
-```bash
-# This will be available once the tool is published to npm
-npm install -g codecritique
-codecritique analyze --file path/to/file.py
-```
 
 ## Quick Start
 
@@ -1037,108 +1087,26 @@ DEBUG=true codecritique analyze --file app.py
    codecritique embeddings:generate --concurrency 3
    ```
 
-## Dependencies
-
-### Core Dependencies
-
-- **[@anthropic-ai/sdk](https://www.npmjs.com/package/@anthropic-ai/sdk)** `0.55.0` - Anthropic Claude API integration
-- **[@lancedb/lancedb](https://www.npmjs.com/package/@lancedb/lancedb)** `0.19.0` - Vector database for embeddings
-- **[fastembed](https://www.npmjs.com/package/fastembed)** `^1.14.4` - Local embedding generation
-- **[commander](https://www.npmjs.com/package/commander)** `^11.0.0` - CLI framework
-- **[chalk](https://www.npmjs.com/package/chalk)** `^5.3.0` - Terminal colors
-- **[glob](https://www.npmjs.com/package/glob)** `^10.3.0` - File pattern matching
-
-### Optional Dependencies
-
-- **[@octokit/rest](https://www.npmjs.com/package/@octokit/rest)** `21.1.1` - GitHub API (for PR history analysis)
-- **[dotenv](https://www.npmjs.com/package/dotenv)** `16.5.0` - Environment variable loading
-
-### Development Dependencies
-
-- **[eslint](https://www.npmjs.com/package/eslint)** `9.29.0` - Code linting
-- **[prettier](https://www.npmjs.com/package/prettier)** `3.5.3` - Code formatting
-- **[typescript](https://www.npmjs.com/package/typescript)** `5.8.3` - TypeScript support
-
 ## Contributing
 
-We welcome contributions! Please follow these guidelines:
+We welcome contributions! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) guide for:
 
-### Development Setup
+- Development setup instructions
+- Code style guidelines
+- Commit conventions (for semantic versioning)
+- Testing guidelines
+- Pull request process
 
-1. **Clone the repository**:
+## Acknowledgements
 
-   ```bash
-   git clone https://github.com/cosmocoder/CodeCritique.git
-   cd CodeCritique
-   ```
+This project is built with these amazing technologies:
 
-2. **Install dependencies**:
-
-   ```bash
-   npm install
-   ```
-
-3. **Set up environment**:
-
-   ```bash
-   cp .env.example .env
-   # Add your API keys to .env
-   ```
-
-4. **Run locally**:
-   ```bash
-   node src/index.js analyze --file test-file.js
-   ```
-
-### Code Standards
-
-- **ESLint**: Follow the configured ESLint rules
-- **Prettier**: Code is automatically formatted
-- **TypeScript**: Type definitions for better code quality
-
-### Testing
-
-```bash
-# Run linting
-npm run lint
-
-# Run formatting
-npm run prettier
-
-# Run tests
-npm run test
-
-# Check for unused dependencies
-npm run knip
-```
-
-### Submitting Changes
-
-1. **Fork the repository**
-2. **Create a feature branch**: `git checkout -b feature/amazing-feature`
-3. **Make your changes**
-4. **Run tests**: `npm run lint && npm run prettier:ci`
-5. **Commit your changes**: `git commit -m 'Add amazing feature'`
-6. **Push to the branch**: `git push origin feature/amazing-feature`
-7. **Open a Pull Request**
-
-### Areas for Contribution
-
-- **Language Support**: Add specialized rules for new programming languages
-- **LLM Providers**: Integrate additional LLM providers (OpenAI, etc.)
-- **Output Formats**: Add new output formats (XML, SARIF, etc.)
-- **Performance**: Optimize embedding generation and search
-- **Documentation**: Improve documentation and examples
-- **Testing**: Add comprehensive test coverage
-
-### Reporting Issues
-
-Please use GitHub Issues to report bugs or request features. Include:
-
-- **System information** (OS, Node.js version)
-- **Command used** and **full error message**
-- **Expected vs actual behavior**
-- **Minimal reproduction case**
+- **[FastEmbed](https://github.com/qdrant/fastembed)** - Fast, lightweight embedding generation
+- **[Hugging Face Transformers.js](https://github.com/huggingface/transformers.js)** - Machine learning for the web
+- **[LanceDB](https://lancedb.com/)** - High-performance vector database for embeddings
+- **[Commander.js](https://github.com/tj/commander.js)** - CLI framework for Node.js
+- **[Octokit](https://github.com/octokit/rest.js)** - GitHub API client for PR history analysis
+- **[Anthropic Claude](https://www.anthropic.com/)** - LLM powering intelligent code analysis
 
 ## License
 

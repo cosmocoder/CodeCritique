@@ -155,3 +155,42 @@ jobs:
       - name: Unit tests fail
         run: exit 1
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+
+  release:
+    needs: [deps, lint, test, coverage]
+    name: Release NPM Package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # to be able to publish a GitHub release
+      issues: write # to be able to comment on released issues
+      pull-requests: write # to be able to comment on released pull requests
+      id-token: write # to enable use of OIDC for trusted publishing and npm provenance
+    if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta' }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false # Security: don't persist git credentials
+
+      - name: Restore node modules cache
+        uses: actions/cache/restore@v5
+        with:
+          path: node_modules
+          key: ${{ env.NODE_MODULES_CACHE_PREFIX }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: 'package.json'
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify provenance of installed dependencies
+        run: npm audit signatures
+
+      - name: Semantic Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run create-release
