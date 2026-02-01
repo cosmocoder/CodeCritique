@@ -1089,84 +1089,13 @@ DEBUG=true codecritique analyze --file app.py
 
 ## Contributing
 
-We welcome contributions! Please follow these guidelines:
+We welcome contributions! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) guide for:
 
-### Development Setup
-
-1. **Clone the repository**:
-
-   ```bash
-   git clone https://github.com/cosmocoder/CodeCritique.git
-   cd CodeCritique
-   ```
-
-2. **Install dependencies**:
-
-   ```bash
-   npm install
-   ```
-
-3. **Set up environment**:
-
-   ```bash
-   cp .env.example .env
-   # Add your API keys to .env
-   ```
-
-4. **Run locally**:
-   ```bash
-   node src/index.js analyze --file test-file.js
-   ```
-
-### Code Standards
-
-- **ESLint**: Follow the configured ESLint rules
-- **Prettier**: Code is automatically formatted
-- **TypeScript**: Type definitions for better code quality
-
-### Testing
-
-```bash
-# Run linting
-npm run lint
-
-# Run formatting
-npm run prettier
-
-# Run tests
-npm run test
-
-# Check for unused dependencies
-npm run knip
-```
-
-### Submitting Changes
-
-1. **Fork the repository**
-2. **Create a feature branch**: `git checkout -b feature/amazing-feature`
-3. **Make your changes**
-4. **Run tests**: `npm run lint && npm run prettier:ci`
-5. **Commit your changes**: `git commit -m 'Add amazing feature'`
-6. **Push to the branch**: `git push origin feature/amazing-feature`
-7. **Open a Pull Request**
-
-### Areas for Contribution
-
-- **Language Support**: Add specialized rules for new programming languages
-- **LLM Providers**: Integrate additional LLM providers (OpenAI, etc.)
-- **Output Formats**: Add new output formats (XML, SARIF, etc.)
-- **Performance**: Optimize embedding generation and search
-- **Documentation**: Improve documentation and examples
-- **Testing**: Add comprehensive test coverage
-
-### Reporting Issues
-
-Please use GitHub Issues to report bugs or request features. Include:
-
-- **System information** (OS, Node.js version)
-- **Command used** and **full error message**
-- **Expected vs actual behavior**
-- **Minimal reproduction case**
+- Development setup instructions
+- Code style guidelines
+- Commit conventions (for semantic versioning)
+- Testing guidelines
+- Pull request process
 
 ## Acknowledgements
 
