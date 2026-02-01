@@ -44,14 +44,14 @@ runs:
       shell: bash
       working-directory: ${{ steps.tool.outputs.tool-root }}
       run: |
-        echo "📦 Installing AI Code Review tool dependencies..."
+        echo "📦 Installing CodeCritique tool dependencies..."
         npm ci --no-audit --silent
 
     - name: Download Embeddings Artifacts
       id: setup-artifacts
       uses: dawidd6/action-download-artifact@v11
       with:
-        name: ai-code-review-embeddings-${{ github.repository_id }}
+        name: codecritique-embeddings-${{ github.repository_id }}
         # Look specifically in the default branch where embeddings are generated daily
         branch: ${{ github.event.repository.default_branch }}
         # Only look for successful workflow conclusions
@@ -70,7 +70,7 @@ runs:
       working-directory: ${{ github.workspace }}
       run: |
         # Artifact download may extract to current directory or a subdirectory
-        ARTIFACT_SUBDIR="ai-code-review-embeddings-${{ github.repository_id }}"
+        ARTIFACT_SUBDIR="codecritique-embeddings-${{ github.repository_id }}"
 
         echo "📦 Setting up embeddings from artifacts..."
 

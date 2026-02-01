@@ -37,7 +37,7 @@ const embeddingsSystem = getDefaultEmbeddingsSystem();
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 // Configure command-line interface
-program.name('ai-code-review').description('CLI tool for AI-powered code review using the RAG approach').version(packageJson.version);
+program.name('codecritique').description('CLI tool for AI-powered code review using the RAG approach').version(packageJson.version);
 
 // Analyze command (restored from previous state if necessary, or kept as is)
 program
@@ -154,32 +154,32 @@ program
 program.on('--help', () => {
   console.log(`
 Examples:
-  $ ai-code-review analyze --directory src/components
-  $ ai-code-review analyze --file src/utils/validation.ts
-  $ ai-code-review analyze --files "src/**/*.tsx" "lib/*.js"
-  $ ai-code-review analyze -b main
-  $ ai-code-review analyze --doc "Our Eng Guidelines:./ENGINEERING_GUIDELINES.md" --file src/utils/validation.ts
-  $ ai-code-review analyze --diff-with feature-branch -d /path/to/repo
-  $ ai-code-review analyze --output json > review-results.json
-  $ ai-code-review analyze --track-feedback --feedback-path ./feedback-artifacts --file src/utils/validation.ts
-  $ ai-code-review analyze --track-feedback --feedback-threshold 0.8 -b main
-  $ ai-code-review embeddings:generate --directory src
-  $ ai-code-review embeddings:generate --exclude "**/*.test.js" "**/*.spec.js"
-  $ ai-code-review embeddings:generate --exclude-file .embedignore
-  $ ai-code-review embeddings:generate --no-gitignore
-  $ ai-code-review embeddings:generate --force-analysis
-  $ ai-code-review embeddings:stats
-  $ ai-code-review embeddings:stats --directory /path/to/project
-  $ ai-code-review embeddings:clear
-  $ ai-code-review embeddings:clear --directory /path/to/project
-  $ ai-code-review embeddings:clear-all
-  $ ai-code-review pr-history:analyze
-  $ ai-code-review pr-history:analyze --repository owner/repo --token ghp_xxx
-  $ ai-code-review pr-history:analyze --directory /path/to/project --since 2024-01-01
-  $ ai-code-review pr-history:status
-  $ ai-code-review pr-history:status --repository owner/repo
-  $ ai-code-review pr-history:clear
-  $ ai-code-review pr-history:clear --repository owner/repo --force
+  $ codecritique analyze --directory src/components
+  $ codecritique analyze --file src/utils/validation.ts
+  $ codecritique analyze --files "src/**/*.tsx" "lib/*.js"
+  $ codecritique analyze -b main
+  $ codecritique analyze --doc "Our Eng Guidelines:./ENGINEERING_GUIDELINES.md" --file src/utils/validation.ts
+  $ codecritique analyze --diff-with feature-branch -d /path/to/repo
+  $ codecritique analyze --output json > review-results.json
+  $ codecritique analyze --track-feedback --feedback-path ./feedback-artifacts --file src/utils/validation.ts
+  $ codecritique analyze --track-feedback --feedback-threshold 0.8 -b main
+  $ codecritique embeddings:generate --directory src
+  $ codecritique embeddings:generate --exclude "**/*.test.js" "**/*.spec.js"
+  $ codecritique embeddings:generate --exclude-file .embedignore
+  $ codecritique embeddings:generate --no-gitignore
+  $ codecritique embeddings:generate --force-analysis
+  $ codecritique embeddings:stats
+  $ codecritique embeddings:stats --directory /path/to/project
+  $ codecritique embeddings:clear
+  $ codecritique embeddings:clear --directory /path/to/project
+  $ codecritique embeddings:clear-all
+  $ codecritique pr-history:analyze
+  $ codecritique pr-history:analyze --repository owner/repo --token ghp_xxx
+  $ codecritique pr-history:analyze --directory /path/to/project --since 2024-01-01
+  $ codecritique pr-history:status
+  $ codecritique pr-history:status --repository owner/repo
+  $ codecritique pr-history:clear
+  $ codecritique pr-history:clear --repository owner/repo --force
 `);
 });
 
@@ -386,13 +386,13 @@ async function runCodeReview(options) {
       console.error(chalk.gray('\nOptional:'));
       console.error(chalk.gray('  -d, --directory <dir>            Working directory (for git operations with --diff-with)'));
       console.error(chalk.gray('\nExamples:'));
-      console.error(chalk.gray('  ai-code-review analyze --file src/component.tsx'));
-      console.error(chalk.gray('  ai-code-review analyze --files "src/**/*.ts"'));
-      console.error(chalk.gray('  ai-code-review analyze -b feature-branch'));
+      console.error(chalk.gray('  codecritique analyze --file src/component.tsx'));
+      console.error(chalk.gray('  codecritique analyze --files "src/**/*.ts"'));
+      console.error(chalk.gray('  codecritique analyze -b feature-branch'));
       console.error(
-        chalk.gray('  ai-code-review analyze --doc "Our Eng Guidelines:./ENGINEERING_GUIDELINES.md" --file src/utils/validation.ts')
+        chalk.gray('  codecritique analyze --doc "Our Eng Guidelines:./ENGINEERING_GUIDELINES.md" --file src/utils/validation.ts')
       );
-      console.error(chalk.gray('  ai-code-review analyze --diff-with feature-branch -d /path/to/repo'));
+      console.error(chalk.gray('  codecritique analyze --diff-with feature-branch -d /path/to/repo'));
       process.exit(1);
     }
 

@@ -1,4 +1,4 @@
-# AI Code Review Tool
+# CodeCritique
 
 A self-hosted, AI-powered code review tool using **RAG (Retrieval-Augmented Generation)** with local embeddings and Anthropic Claude for intelligent, context-aware code analysis. Supports any programming language with specialized features for JavaScript/TypeScript projects.
 
@@ -20,7 +20,7 @@ A self-hosted, AI-powered code review tool using **RAG (Retrieval-Augmented Gene
 
 ### How RAG Powers Intelligent Code Review
 
-The AI Code Review Tool uses **Retrieval-Augmented Generation (RAG)** to provide context-aware code analysis by combining:
+CodeCritique uses **Retrieval-Augmented Generation (RAG)** to provide context-aware code analysis by combining:
 
 - **Local embeddings** (via FastEmbed) for understanding your codebase patterns
 - **Vector similarity search** to find relevant code examples and documentation
@@ -78,7 +78,7 @@ ANTHROPIC_API_KEY=your_anthropic_api_key
 #### Option 3: Inline with Command
 
 ```bash
-ANTHROPIC_API_KEY=your_key npx ai-code-review analyze --file app.py
+ANTHROPIC_API_KEY=your_key npx codecritique analyze --file app.py
 ```
 
 ### Installation Options
@@ -90,8 +90,8 @@ ANTHROPIC_API_KEY=your_key npx ai-code-review analyze --file app.py
 1. **Clone the repository**:
 
    ```bash
-   git clone https://github.com/your-username/ai-code-review.git
-   cd ai-code-review
+   git clone https://github.com/cosmocoder/CodeCritique.git
+   cd CodeCritique
    ```
 
 2. **Install dependencies**:
@@ -117,9 +117,9 @@ For easier integration with non-JavaScript projects, you can use the provided sh
 1. **Copy the wrapper script** to your project:
 
    ```bash
-   # From the ai-code-review repository
-   cp src/ai-code-review.sh /path/to/your/project/ai-code-review.sh
-   chmod +x /path/to/your/project/ai-code-review.sh
+   # From the CodeCritique repository
+   cp src/codecritique.sh /path/to/your/project/codecritique.sh
+   chmod +x /path/to/your/project/codecritique.sh
    ```
 
 2. **Use the wrapper** (automatically handles environment setup):
@@ -131,8 +131,8 @@ For easier integration with non-JavaScript projects, you can use the provided sh
    # - Verify ANTHROPIC_API_KEY
    # - Try global installation first, then fall back to npx
 
-   ./ai-code-review.sh analyze --file path/to/file.py
-   ./ai-code-review.sh embeddings:generate --directory src
+   ./codecritique.sh analyze --file path/to/file.py
+   ./codecritique.sh embeddings:generate --directory src
    ```
 
 3. **Environment setup** (the script handles this automatically):
@@ -144,15 +144,15 @@ For easier integration with non-JavaScript projects, you can use the provided sh
 
 ```bash
 # This will be available once the tool is published to npm
-npx ai-code-review analyze --file path/to/file.py
+npx codecritique analyze --file path/to/file.py
 ```
 
 #### Option 3: Global Installation (Future - Once Published)
 
 ```bash
 # This will be available once the tool is published to npm
-npm install -g ai-code-review
-ai-code-review analyze --file path/to/file.py
+npm install -g codecritique
+codecritique analyze --file path/to/file.py
 ```
 
 ## Quick Start
@@ -165,13 +165,13 @@ Follow this three-step workflow for optimal code review results:
 
 ```bash
 # Generate embeddings for current directory
-npx ai-code-review embeddings:generate --directory src
+npx codecritique embeddings:generate --directory src
 
 # Generate for specific files or patterns
-npx ai-code-review embeddings:generate --files "src/**/*.ts" "lib/*.js"
+npx codecritique embeddings:generate --files "src/**/*.ts" "lib/*.js"
 
 # Generate with exclusions (recommended for large codebases)
-npx ai-code-review embeddings:generate --directory src --exclude "**/*.test.js" "**/*.spec.js"
+npx codecritique embeddings:generate --directory src --exclude "**/*.test.js" "**/*.spec.js"
 ```
 
 ### Step 2: Analyze PR History (Optional)
@@ -194,13 +194,13 @@ echo "GITHUB_TOKEN=your_github_token_here" >> .env
 
 ```bash
 # Analyze PR history for current project (auto-detects GitHub repo)
-npx ai-code-review pr-history:analyze
+npx codecritique pr-history:analyze
 
 # Analyze specific repository
-npx ai-code-review pr-history:analyze --repository owner/repo
+npx codecritique pr-history:analyze --repository owner/repo
 
 # Analyze with date range
-npx ai-code-review pr-history:analyze --since 2024-01-01 --until 2024-12-31
+npx codecritique pr-history:analyze --since 2024-01-01 --until 2024-12-31
 ```
 
 ### Step 3: Analyze Code (Final Step)
@@ -211,20 +211,20 @@ npx ai-code-review pr-history:analyze --since 2024-01-01 --until 2024-12-31
 
 ```bash
 # Analyze a single file
-npx ai-code-review analyze --file src/components/Button.tsx
+npx codecritique analyze --file src/components/Button.tsx
 
 # Analyze files matching patterns
-npx ai-code-review analyze --files "src/**/*.ts" "lib/*.js"
+npx codecritique analyze --files "src/**/*.ts" "lib/*.js"
 
 # Analyze changes in feature-branch vs main branch (auto-detects base branch)
-npx ai-code-review analyze --diff-with feature-branch
+npx codecritique analyze --diff-with feature-branch
 ```
 
 #### Using with Custom Guidelines
 
 ```bash
 # Include your team's coding standards
-npx ai-code-review analyze \
+npx codecritique analyze \
   --file src/utils/validation.ts \
   --doc "Engineering Guidelines:./docs/guidelines.md" \
   --doc "API Standards:./docs/api-standards.md"
@@ -235,13 +235,13 @@ npx ai-code-review analyze \
 ```bash
 # Python project
 cd /path/to/python/project
-npx ai-code-review analyze --file app.py
+npx codecritique analyze --file app.py
 
 # Ruby project
-npx ai-code-review analyze --files "**/*.rb"
+npx codecritique analyze --files "**/*.rb"
 
 # Any language with git diff
-npx ai-code-review analyze --diff-with feature-branch
+npx codecritique analyze --diff-with feature-branch
 ```
 
 ## GitHub Actions Integration
@@ -473,7 +473,7 @@ To use this feature:
 Analyze code using RAG (Retrieval-Augmented Generation) approach with dynamic context retrieval.
 
 ```bash
-ai-code-review analyze [options]
+codecritique analyze [options]
 ```
 
 #### Options
@@ -500,29 +500,29 @@ ai-code-review analyze [options]
 
 ```bash
 # Analyze a single file
-ai-code-review analyze --file src/components/Button.tsx
+codecritique analyze --file src/components/Button.tsx
 
 # Analyze multiple files with patterns
-ai-code-review analyze --files "src/**/*.tsx" "lib/*.js"
+codecritique analyze --files "src/**/*.tsx" "lib/*.js"
 
 # Analyze changes in feature-branch vs main branch (auto-detects base branch)
-ai-code-review analyze --diff-with feature-branch
+codecritique analyze --diff-with feature-branch
 
 # Analyze with custom documentation
-ai-code-review analyze --file src/utils/validation.ts \
+codecritique analyze --file src/utils/validation.ts \
   --doc "Engineering Guidelines:./docs/guidelines.md"
 
 # Analyze with custom LLM settings
-ai-code-review analyze --file app.py \
+codecritique analyze --file app.py \
   --temperature 0.1 \
   --max-tokens 4096 \
   --similarity-threshold 0.7
 
 # Analyze changes in specific directory
-ai-code-review analyze --diff-with feature-branch --directory /path/to/repo
+codecritique analyze --diff-with feature-branch --directory /path/to/repo
 
 # Output as JSON
-ai-code-review analyze --files "src/**/*.ts" --output json > review.json
+codecritique analyze --files "src/**/*.ts" --output json > review.json
 ```
 
 ### embeddings:generate
@@ -530,7 +530,7 @@ ai-code-review analyze --files "src/**/*.ts" --output json > review.json
 Generate embeddings for the codebase to enable context-aware analysis.
 
 ```bash
-ai-code-review embeddings:generate [options]
+codecritique embeddings:generate [options]
 ```
 
 #### Options
@@ -551,31 +551,31 @@ ai-code-review embeddings:generate [options]
 
 ```bash
 # Generate embeddings for current directory
-ai-code-review embeddings:generate
+codecritique embeddings:generate
 
 # Generate for specific directory
-ai-code-review embeddings:generate --directory src
+codecritique embeddings:generate --directory src
 
 # Generate for specific files
-ai-code-review embeddings:generate --files "src/**/*.tsx" "lib/*.js"
+codecritique embeddings:generate --files "src/**/*.tsx" "lib/*.js"
 
 # Exclude test files and docs
-ai-code-review embeddings:generate --exclude "**/*.test.js" "**/*.spec.js" "docs/**"
+codecritique embeddings:generate --exclude "**/*.test.js" "**/*.spec.js" "docs/**"
 
 # Use exclusion file
-ai-code-review embeddings:generate --exclude-file exclusion-patterns.txt
+codecritique embeddings:generate --exclude-file exclusion-patterns.txt
 
 # Process without gitignore exclusions
-ai-code-review embeddings:generate --no-gitignore
+codecritique embeddings:generate --no-gitignore
 
 # High concurrency for large codebases
-ai-code-review embeddings:generate --concurrency 20 --verbose
+codecritique embeddings:generate --concurrency 20 --verbose
 
 # Force regeneration of project analysis (useful after major codebase changes)
-ai-code-review embeddings:generate --force-analysis --verbose
+codecritique embeddings:generate --force-analysis --verbose
 
 # Combine force analysis with specific directory processing
-ai-code-review embeddings:generate --directory src --force-analysis
+codecritique embeddings:generate --directory src --force-analysis
 ```
 
 ### embeddings:stats
@@ -583,7 +583,7 @@ ai-code-review embeddings:generate --directory src --force-analysis
 Show statistics about stored embeddings.
 
 ```bash
-ai-code-review embeddings:stats [options]
+codecritique embeddings:stats [options]
 ```
 
 #### Options
@@ -596,10 +596,10 @@ ai-code-review embeddings:stats [options]
 
 ```bash
 # Show stats for all projects
-ai-code-review embeddings:stats
+codecritique embeddings:stats
 
 # Show stats for specific project
-ai-code-review embeddings:stats --directory /path/to/project
+codecritique embeddings:stats --directory /path/to/project
 ```
 
 ### embeddings:clear
@@ -607,7 +607,7 @@ ai-code-review embeddings:stats --directory /path/to/project
 Clear stored embeddings for the current project.
 
 ```bash
-ai-code-review embeddings:clear [options]
+codecritique embeddings:clear [options]
 ```
 
 #### Options
@@ -620,10 +620,10 @@ ai-code-review embeddings:clear [options]
 
 ```bash
 # Clear embeddings for current project
-ai-code-review embeddings:clear
+codecritique embeddings:clear
 
 # Clear embeddings for specific project
-ai-code-review embeddings:clear --directory /path/to/project
+codecritique embeddings:clear --directory /path/to/project
 ```
 
 ### embeddings:clear-all
@@ -631,7 +631,7 @@ ai-code-review embeddings:clear --directory /path/to/project
 Clear ALL stored embeddings (affects all projects - use with caution).
 
 ```bash
-ai-code-review embeddings:clear-all
+codecritique embeddings:clear-all
 ```
 
 **Warning**: This command clears embeddings for all projects on the machine.
@@ -641,7 +641,7 @@ ai-code-review embeddings:clear-all
 Analyze PR comment history for the current project or specified repository.
 
 ```bash
-ai-code-review pr-history:analyze [options]
+codecritique pr-history:analyze [options]
 ```
 
 #### Options
@@ -664,19 +664,19 @@ ai-code-review pr-history:analyze [options]
 
 ```bash
 # Analyze current project (auto-detect repo)
-ai-code-review pr-history:analyze
+codecritique pr-history:analyze
 
 # Analyze specific repository
-ai-code-review pr-history:analyze --repository owner/repo --token ghp_xxx
+codecritique pr-history:analyze --repository owner/repo --token ghp_xxx
 
 # Analyze with date range
-ai-code-review pr-history:analyze --since 2024-01-01 --until 2024-12-31
+codecritique pr-history:analyze --since 2024-01-01 --until 2024-12-31
 
 # Clear existing data and re-analyze
-ai-code-review pr-history:analyze --clear --limit 100
+codecritique pr-history:analyze --clear --limit 100
 
 # Resume interrupted analysis
-ai-code-review pr-history:analyze --resume
+codecritique pr-history:analyze --resume
 ```
 
 ### pr-history:status
@@ -684,7 +684,7 @@ ai-code-review pr-history:analyze --resume
 Check PR analysis status for the current project or specified repository.
 
 ```bash
-ai-code-review pr-history:status [options]
+codecritique pr-history:status [options]
 ```
 
 #### Options
@@ -698,10 +698,10 @@ ai-code-review pr-history:status [options]
 
 ```bash
 # Check status for current project
-ai-code-review pr-history:status
+codecritique pr-history:status
 
 # Check status for specific repository
-ai-code-review pr-history:status --repository owner/repo
+codecritique pr-history:status --repository owner/repo
 ```
 
 ### pr-history:clear
@@ -709,7 +709,7 @@ ai-code-review pr-history:status --repository owner/repo
 Clear PR analysis data for the current project or specified repository.
 
 ```bash
-ai-code-review pr-history:clear [options]
+codecritique pr-history:clear [options]
 ```
 
 #### Options
@@ -724,10 +724,10 @@ ai-code-review pr-history:clear [options]
 
 ```bash
 # Clear data for current project (with confirmation)
-ai-code-review pr-history:clear
+codecritique pr-history:clear
 
 # Clear data for specific repository without confirmation
-ai-code-review pr-history:clear --repository owner/repo --force
+codecritique pr-history:clear --repository owner/repo --force
 ```
 
 ## RAG Architecture
@@ -774,7 +774,7 @@ graph TD
 Integrate your team's guidelines and documentation:
 
 ```bash
-ai-code-review analyze --file src/component.tsx \
+codecritique analyze --file src/component.tsx \
   --doc "Engineering Guidelines:./docs/engineering.md" \
   --doc "React Standards:./docs/react-guide.md" \
   --doc "API Guidelines:./docs/api-standards.md"
@@ -809,7 +809,7 @@ vendor/
 #### Using command-line exclusions
 
 ```bash
-ai-code-review embeddings:generate \
+codecritique embeddings:generate \
   --exclude "**/*.test.js" "dist/**" "node_modules/**"
 ```
 
@@ -957,7 +957,7 @@ git commit -m "Initial commit"
 
 ```bash
 # Use absolute path
-ai-code-review analyze --file /full/path/to/file.js
+codecritique analyze --file /full/path/to/file.js
 
 # Or relative from current directory
 ls path/to/file.js  # Verify file exists
@@ -971,14 +971,14 @@ ls path/to/file.js  # Verify file exists
 
 ```bash
 # Clear existing embeddings and regenerate
-ai-code-review embeddings:clear
-ai-code-review embeddings:generate --verbose
+codecritique embeddings:clear
+codecritique embeddings:generate --verbose
 
 # Reduce concurrency for memory issues
-ai-code-review embeddings:generate --concurrency 5
+codecritique embeddings:generate --concurrency 5
 
 # Exclude problematic files
-ai-code-review embeddings:generate --exclude "large-files/**"
+codecritique embeddings:generate --exclude "large-files/**"
 ```
 
 #### Memory Issues
@@ -992,10 +992,10 @@ ai-code-review embeddings:generate --exclude "large-files/**"
 export NODE_OPTIONS="--max-old-space-size=4096"
 
 # Process fewer files at once
-ai-code-review embeddings:generate --concurrency 3
+codecritique embeddings:generate --concurrency 3
 
 # Exclude large files
-ai-code-review embeddings:generate --exclude "**/*.min.js" "dist/**"
+codecritique embeddings:generate --exclude "**/*.min.js" "dist/**"
 ```
 
 ### Debugging
@@ -1003,13 +1003,13 @@ ai-code-review embeddings:generate --exclude "**/*.min.js" "dist/**"
 Enable verbose output for detailed logging:
 
 ```bash
-ai-code-review analyze --file app.py --verbose
+codecritique analyze --file app.py --verbose
 ```
 
 Enable debug mode:
 
 ```bash
-DEBUG=true ai-code-review analyze --file app.py
+DEBUG=true codecritique analyze --file app.py
 ```
 
 ### Performance Optimization
@@ -1017,24 +1017,24 @@ DEBUG=true ai-code-review analyze --file app.py
 1. **Generate embeddings first** for better context:
 
    ```bash
-   ai-code-review embeddings:generate
-   ai-code-review analyze --files "src/**/*.ts"
+   codecritique embeddings:generate
+   codecritique analyze --files "src/**/*.ts"
    ```
 
 2. **Use exclusion patterns** to skip irrelevant files:
 
    ```bash
-   ai-code-review embeddings:generate --exclude "**/*.test.js" "dist/**"
+   codecritique embeddings:generate --exclude "**/*.test.js" "dist/**"
    ```
 
 3. **Adjust concurrency** based on system resources:
 
    ```bash
    # For powerful machines
-   ai-code-review embeddings:generate --concurrency 20
+   codecritique embeddings:generate --concurrency 20
 
    # For resource-constrained environments
-   ai-code-review embeddings:generate --concurrency 3
+   codecritique embeddings:generate --concurrency 3
    ```
 
 ## Dependencies
@@ -1068,8 +1068,8 @@ We welcome contributions! Please follow these guidelines:
 1. **Clone the repository**:
 
    ```bash
-   git clone https://github.com/your-username/ai-code-review.git
-   cd ai-code-review
+   git clone https://github.com/cosmocoder/CodeCritique.git
+   cd CodeCritique
    ```
 
 2. **Install dependencies**:

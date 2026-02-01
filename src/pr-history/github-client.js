@@ -35,7 +35,7 @@ export class GitHubAPIClient {
       options.octokit ||
       new Octokit({
         auth: this.token,
-        userAgent: 'ai-code-review-pr-history/1.0.0',
+        userAgent: 'codecritique-pr-history/1.0.0',
         request: {
           timeout: 30000, // 30 second timeout
         },

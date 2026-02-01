@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Shell script wrapper for ai-code-review
-# This script can be placed in any project to run ai-code-review
+# Shell script wrapper for codecritique
+# This script can be placed in any project to run codecritique
 
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then
@@ -24,18 +24,18 @@ if [ -z "$ANTHROPIC_API_KEY" ]; then
     echo "1. Creating a .env file in this directory with:"
     echo "   ANTHROPIC_API_KEY=your_anthropic_api_key"
     echo "2. Or by setting it as an environment variable before running this script:"
-    echo "   ANTHROPIC_API_KEY=your_key ./ai-code-review.sh ..."
+    echo "   ANTHROPIC_API_KEY=your_key ./codecritique.sh ..."
     echo ""
     echo "Continuing anyway, as you may have set it in your environment..."
     echo ""
 fi
 
-# Check if ai-code-review is installed globally
-if command -v ai-code-review &> /dev/null; then
+# Check if codecritique is installed globally
+if command -v codecritique &> /dev/null; then
     # Run the command with all arguments passed to this script
-    ai-code-review "$@"
+    codecritique "$@"
 else
     # Try to run with npx if not installed globally
-    echo "ai-code-review not found globally, trying with npx..."
-    npx ai-code-review "$@"
+    echo "codecritique not found globally, trying with npx..."
+    npx codecritique "$@"
 fi
