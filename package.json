@@ -1,6 +1,6 @@
 {
   "name": "codecritique",
-  "version": "1.0.0",
+  "version": "0.0.0-development",
   "description": "AI-powered code review tool for any programming language",
   "type": "module",
   "main": "src/index.js",
@@ -19,7 +19,8 @@
     "lint:fix": "eslint . --cache --fix",
     "prettier": "prettier --write . --cache --cache-location ./.prettier-cache",
     "prettier:ci": "prettier --check . --cache --cache-location ./.prettier-cache --cache-strategy content",
-    "knip": "knip"
+    "knip": "knip",
+    "create-release": "semantic-release"
   },
   "keywords": [
     "code-review",
@@ -67,6 +68,10 @@
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/github": "12.0.3",
+    "@semantic-release/npm": "13.1.3",
+    "@semantic-release/release-notes-generator": "14.1.0",
     "@types/node": "24.9.1",
     "@vitest/coverage-v8": "4.0.16",
     "@vitest/eslint-plugin": "1.3.23",
@@ -79,11 +84,11 @@
     "vitest": "4.0.16"
   },
   "volta": {
-    "node": "22.12.0",
+    "node": "22.14.0",
     "npm": "10.9.2"
   },
   "engines": {
-    "node": "22.x",
+    "node": ">=22.14.0",
     "npm": "10.x"
   },
   "engine-strict": true,
