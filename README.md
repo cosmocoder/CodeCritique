@@ -1,5 +1,11 @@
 # CodeCritique
 
+[![npm version](https://img.shields.io/npm/v/codecritique.svg)](https://www.npmjs.com/package/codecritique)
+[![npm downloads](https://img.shields.io/npm/dm/codecritique.svg)](https://www.npmjs.com/package/codecritique)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg)](https://nodejs.org/)
+[![CI](https://github.com/cosmocoder/CodeCritique/actions/workflows/release.yml/badge.svg)](https://github.com/cosmocoder/CodeCritique/actions/workflows/release.yml)
+
 A self-hosted, AI-powered code review tool using **RAG (Retrieval-Augmented Generation)** with local embeddings and Anthropic Claude for intelligent, context-aware code analysis. Supports any programming language with specialized features for JavaScript/TypeScript projects.
 
 ## Table of Contents
