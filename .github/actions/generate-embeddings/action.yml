@@ -108,8 +108,8 @@ runs:
         fi
 
         # Always exclude action-related directories and files
-        ARGS="${ARGS} --exclude 'ai-code-review-tool/**'"
-        ARGS="${ARGS} --exclude '.ai-code-review-artifacts/**'"
+        ARGS="${ARGS} --exclude 'codecritique-tool/**'"
+        ARGS="${ARGS} --exclude '.codecritique-artifacts/**'"
 
         # Add user-specified exclude patterns
         if [ -n "${{ inputs.exclude }}" ]; then
@@ -170,7 +170,7 @@ runs:
       if: steps.generate.outputs.success == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: ai-code-review-embeddings-${{ github.repository_id }}
+        name: codecritique-embeddings-${{ github.repository_id }}
         include-hidden-files: true
         path: ${{ github.workspace }}/.ai-review-artifacts/
         retention-days: ${{ inputs.embeddings-retention-days }}

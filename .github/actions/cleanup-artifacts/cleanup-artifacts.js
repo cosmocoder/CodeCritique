@@ -10,11 +10,11 @@ import fs from 'node:fs';
  * Artifact name patterns mapped by cleanup type
  */
 export const ARTIFACT_PATTERNS = {
-  embeddings: ['ai-code-review-embeddings-'],
+  embeddings: ['codecritique-embeddings-'],
   models: ['ai-model-cache-', 'ai-fastembed-cache-'],
   feedback: ['ai-review-feedback-'],
   reports: ['ai-review-report-'],
-  all: ['ai-code-review-embeddings-', 'ai-model-cache-', 'ai-fastembed-cache-', 'ai-review-feedback-', 'ai-review-report-'],
+  all: ['codecritique-embeddings-', 'ai-model-cache-', 'ai-fastembed-cache-', 'ai-review-feedback-', 'ai-review-report-'],
 };
 
 /**

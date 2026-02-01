@@ -21,7 +21,7 @@ vi.mock('node:fs');
 describe('cleanup-artifacts.js', () => {
   describe('ARTIFACT_PATTERNS', () => {
     it('should have patterns for all cleanup types', () => {
-      expect(ARTIFACT_PATTERNS.embeddings).toContain('ai-code-review-embeddings-');
+      expect(ARTIFACT_PATTERNS.embeddings).toContain('codecritique-embeddings-');
       expect(ARTIFACT_PATTERNS.models).toContain('ai-model-cache-');
       expect(ARTIFACT_PATTERNS.models).toContain('ai-fastembed-cache-');
       expect(ARTIFACT_PATTERNS.feedback).toContain('ai-review-feedback-');
@@ -30,7 +30,7 @@ describe('cleanup-artifacts.js', () => {
 
     it('should have all patterns for "all" cleanup type', () => {
       expect(ARTIFACT_PATTERNS.all).toHaveLength(5);
-      expect(ARTIFACT_PATTERNS.all).toContain('ai-code-review-embeddings-');
+      expect(ARTIFACT_PATTERNS.all).toContain('codecritique-embeddings-');
       expect(ARTIFACT_PATTERNS.all).toContain('ai-model-cache-');
       expect(ARTIFACT_PATTERNS.all).toContain('ai-fastembed-cache-');
       expect(ARTIFACT_PATTERNS.all).toContain('ai-review-feedback-');
@@ -41,12 +41,12 @@ describe('cleanup-artifacts.js', () => {
   describe('getArtifactPatterns', () => {
     it('should return patterns for cleanup type', () => {
       const patterns = getArtifactPatterns('embeddings');
-      expect(patterns).toContain('ai-code-review-embeddings-');
+      expect(patterns).toContain('codecritique-embeddings-');
     });
 
     it('should add custom pattern when provided', () => {
       const patterns = getArtifactPatterns('embeddings', 'custom-pattern');
-      expect(patterns).toContain('ai-code-review-embeddings-');
+      expect(patterns).toContain('codecritique-embeddings-');
       expect(patterns).toContain('custom-pattern');
     });
 
@@ -68,20 +68,20 @@ describe('cleanup-artifacts.js', () => {
 
   describe('artifactMatchesPatterns', () => {
     it('should match artifact name against patterns', () => {
-      expect(artifactMatchesPatterns('ai-code-review-embeddings-123', ['ai-code-review-embeddings-'])).toBe(true);
+      expect(artifactMatchesPatterns('codecritique-embeddings-123', ['codecritique-embeddings-'])).toBe(true);
       expect(artifactMatchesPatterns('ai-review-feedback-456', ['ai-review-feedback-'])).toBe(true);
     });
 
     it('should not match when pattern is not found', () => {
-      expect(artifactMatchesPatterns('other-artifact', ['ai-code-review-embeddings-'])).toBe(false);
+      expect(artifactMatchesPatterns('other-artifact', ['codecritique-embeddings-'])).toBe(false);
     });
 
     it('should match against any of multiple patterns', () => {
-      expect(artifactMatchesPatterns('ai-model-cache-test', ['ai-code-review-embeddings-', 'ai-model-cache-'])).toBe(true);
+      expect(artifactMatchesPatterns('ai-model-cache-test', ['codecritique-embeddings-', 'ai-model-cache-'])).toBe(true);
     });
 
     it('should not match when patterns array is empty', () => {
-      expect(artifactMatchesPatterns('ai-code-review-embeddings-123', [])).toBe(false);
+      expect(artifactMatchesPatterns('codecritique-embeddings-123', [])).toBe(false);
     });
   });
 
@@ -147,7 +147,7 @@ describe('cleanup-artifacts.js', () => {
 
   describe('filterArtifacts', () => {
     const now = Date.now();
-    const patterns = ['ai-code-review-embeddings-', 'ai-review-feedback-'];
+    const patterns = ['codecritique-embeddings-', 'ai-review-feedback-'];
 
     const createArtifact = (name, daysAgo, expired = false) => ({
       name,
@@ -158,7 +158,7 @@ describe('cleanup-artifacts.js', () => {
     });
 
     it('should filter artifacts matching patterns', () => {
-      const artifacts = [createArtifact('ai-code-review-embeddings-123', 40), createArtifact('unrelated-artifact', 40)];
+      const artifacts = [createArtifact('codecritique-embeddings-123', 40), createArtifact('unrelated-artifact', 40)];
 
       const result = filterArtifacts(artifacts, {
         patterns,
@@ -169,11 +169,11 @@ describe('cleanup-artifacts.js', () => {
       });
 
       expect(result.toDelete).toHaveLength(1);
-      expect(result.toDelete[0].name).toBe('ai-code-review-embeddings-123');
+      expect(result.toDelete[0].name).toBe('codecritique-embeddings-123');
     });
 
     it('should skip expired artifacts', () => {
-      const artifacts = [createArtifact('ai-code-review-embeddings-123', 40, true)];
+      const artifacts = [createArtifact('codecritique-embeddings-123', 40, true)];
 
       const result = filterArtifacts(artifacts, {
         patterns,
@@ -188,10 +188,7 @@ describe('cleanup-artifacts.js', () => {
     });
 
     it('should respect exclude patterns', () => {
-      const artifacts = [
-        createArtifact('ai-code-review-embeddings-important', 40),
-        createArtifact('ai-code-review-embeddings-regular', 40),
-      ];
+      const artifacts = [createArtifact('codecritique-embeddings-important', 40), createArtifact('codecritique-embeddings-regular', 40)];
 
       const result = filterArtifacts(artifacts, {
         patterns,
@@ -202,11 +199,11 @@ describe('cleanup-artifacts.js', () => {
       });
 
       expect(result.toDelete).toHaveLength(1);
-      expect(result.toDelete[0].name).toBe('ai-code-review-embeddings-regular');
+      expect(result.toDelete[0].name).toBe('codecritique-embeddings-regular');
     });
 
     it('should respect age filter', () => {
-      const artifacts = [createArtifact('ai-code-review-embeddings-old', 40), createArtifact('ai-code-review-embeddings-recent', 10)];
+      const artifacts = [createArtifact('codecritique-embeddings-old', 40), createArtifact('codecritique-embeddings-recent', 10)];
 
       const result = filterArtifacts(artifacts, {
         patterns,
@@ -217,14 +214,14 @@ describe('cleanup-artifacts.js', () => {
       });
 
       expect(result.toDelete).toHaveLength(1);
-      expect(result.toDelete[0].name).toBe('ai-code-review-embeddings-old');
+      expect(result.toDelete[0].name).toBe('codecritique-embeddings-old');
     });
 
     it('should respect max artifacts limit', () => {
       const artifacts = [
-        createArtifact('ai-code-review-embeddings-1', 40),
-        createArtifact('ai-code-review-embeddings-2', 40),
-        createArtifact('ai-code-review-embeddings-3', 40),
+        createArtifact('codecritique-embeddings-1', 40),
+        createArtifact('codecritique-embeddings-2', 40),
+        createArtifact('codecritique-embeddings-3', 40),
       ];
 
       const result = filterArtifacts(artifacts, {
@@ -242,10 +239,10 @@ describe('cleanup-artifacts.js', () => {
 
     it('should limit based on processed count, not delete count (matching bash behavior)', () => {
       const artifacts = [
-        createArtifact('ai-code-review-embeddings-recent-1', 10), // Too recent
-        createArtifact('ai-code-review-embeddings-recent-2', 10), // Too recent
-        createArtifact('ai-code-review-embeddings-old-1', 40), // Old enough - would be deleted
-        createArtifact('ai-code-review-embeddings-old-2', 40), // Old enough - but not reached due to limit
+        createArtifact('codecritique-embeddings-recent-1', 10), // Too recent
+        createArtifact('codecritique-embeddings-recent-2', 10), // Too recent
+        createArtifact('codecritique-embeddings-old-1', 40), // Old enough - would be deleted
+        createArtifact('codecritique-embeddings-old-2', 40), // Old enough - but not reached due to limit
       ];
 
       const result = filterArtifacts(artifacts, {
@@ -267,9 +264,9 @@ describe('cleanup-artifacts.js', () => {
 
     it('should track skipped artifacts with reasons', () => {
       const artifacts = [
-        createArtifact('ai-code-review-embeddings-recent', 10),
+        createArtifact('codecritique-embeddings-recent', 10),
         createArtifact('unrelated-artifact', 40),
-        createArtifact('ai-code-review-embeddings-expired', 40, true),
+        createArtifact('codecritique-embeddings-expired', 40, true),
       ];
 
       const result = filterArtifacts(artifacts, {
@@ -288,8 +285,8 @@ describe('cleanup-artifacts.js', () => {
 
     it('should count artifacts matching patterns even if too recent', () => {
       const artifacts = [
-        createArtifact('ai-code-review-embeddings-recent', 10), // Too recent
-        createArtifact('ai-code-review-embeddings-old', 40), // Old enough
+        createArtifact('codecritique-embeddings-recent', 10), // Too recent
+        createArtifact('codecritique-embeddings-old', 40), // Old enough
       ];
 
       const result = filterArtifacts(artifacts, {
@@ -304,9 +301,9 @@ describe('cleanup-artifacts.js', () => {
       expect(result.processedCount).toBe(2);
       // Only the old one should be in toDelete
       expect(result.toDelete).toHaveLength(1);
-      expect(result.toDelete[0].name).toBe('ai-code-review-embeddings-old');
+      expect(result.toDelete[0].name).toBe('codecritique-embeddings-old');
       // The recent one should be in skipped
-      expect(result.skipped.find((s) => s.artifact.name === 'ai-code-review-embeddings-recent' && s.reason === 'too_recent')).toBeDefined();
+      expect(result.skipped.find((s) => s.artifact.name === 'codecritique-embeddings-recent' && s.reason === 'too_recent')).toBeDefined();
     });
   });
 
@@ -598,7 +595,7 @@ describe('cleanup-artifacts.js', () => {
       const mockArtifacts = [
         {
           id: 1,
-          name: 'ai-code-review-embeddings-123',
+          name: 'codecritique-embeddings-123',
           size_in_bytes: 1024 * 1024 * 10, // 10 MB
           created_at: oldDate,
           expired: false,
@@ -635,7 +632,7 @@ describe('cleanup-artifacts.js', () => {
       const mockArtifacts = [
         {
           id: 1,
-          name: 'ai-code-review-embeddings-123',
+          name: 'codecritique-embeddings-123',
           size_in_bytes: 1024 * 1024 * 10,
           created_at: oldDate,
           expired: false,
@@ -701,7 +698,7 @@ describe('cleanup-artifacts.js', () => {
       const mockArtifacts = [
         {
           id: 1,
-          name: 'ai-code-review-embeddings-123',
+          name: 'codecritique-embeddings-123',
           size_in_bytes: 1024 * 1024 * 10,
           created_at: oldDate,
           expired: false,
@@ -737,7 +734,7 @@ describe('cleanup-artifacts.js', () => {
       const mockArtifacts = [
         {
           id: 1,
-          name: 'ai-code-review-embeddings-123',
+          name: 'codecritique-embeddings-123',
           size_in_bytes: 1024 * 1024 * 10,
           created_at: oldDate,
           expired: false,
@@ -770,7 +767,7 @@ describe('cleanup-artifacts.js', () => {
       const mockArtifacts = [
         {
           id: 1,
-          name: 'ai-code-review-embeddings-123',
+          name: 'codecritique-embeddings-123',
           size_in_bytes: 1024 * 1024 * 10,
           created_at: oldDate,
           expired: false,
@@ -810,7 +807,7 @@ describe('cleanup-artifacts.js', () => {
       const mockArtifacts = [
         {
           id: 1,
-          name: 'ai-code-review-embeddings-123',
+          name: 'codecritique-embeddings-123',
           size_in_bytes: 1024 * 1024 * 10,
           created_at: oldDate,
           expired: false,
@@ -847,14 +844,14 @@ describe('cleanup-artifacts.js', () => {
       const mockArtifacts = [
         {
           id: 1,
-          name: 'ai-code-review-embeddings-old',
+          name: 'codecritique-embeddings-old',
           size_in_bytes: 1024 * 1024 * 10,
           created_at: oldDate,
           expired: false,
         },
         {
           id: 2,
-          name: 'ai-code-review-embeddings-recent',
+          name: 'codecritique-embeddings-recent',
           size_in_bytes: 1024 * 1024 * 10,
           created_at: recentDate,
           expired: false,
@@ -890,14 +887,14 @@ describe('cleanup-artifacts.js', () => {
       const mockArtifacts = [
         {
           id: 1,
-          name: 'ai-code-review-embeddings-expired',
+          name: 'codecritique-embeddings-expired',
           size_in_bytes: 1024 * 1024 * 10,
           created_at: oldDate,
           expired: true,
         },
         {
           id: 2,
-          name: 'ai-code-review-embeddings-old',
+          name: 'codecritique-embeddings-old',
           size_in_bytes: 1024 * 1024 * 10,
           created_at: oldDate,
           expired: false,
@@ -933,14 +930,14 @@ describe('cleanup-artifacts.js', () => {
       const mockArtifacts = [
         {
           id: 1,
-          name: 'ai-code-review-embeddings-important',
+          name: 'codecritique-embeddings-important',
           size_in_bytes: 1024 * 1024 * 10,
           created_at: oldDate,
           expired: false,
         },
         {
           id: 2,
-          name: 'ai-code-review-embeddings-regular',
+          name: 'codecritique-embeddings-regular',
           size_in_bytes: 1024 * 1024 * 10,
           created_at: oldDate,
           expired: false,
@@ -976,7 +973,7 @@ describe('cleanup-artifacts.js', () => {
 
       const mockArtifacts = Array.from({ length: 5 }, (_, i) => ({
         id: i + 1,
-        name: `ai-code-review-embeddings-${i + 1}`,
+        name: `codecritique-embeddings-${i + 1}`,
         size_in_bytes: 1024 * 1024 * 10,
         created_at: oldDate,
         expired: false,
@@ -1007,7 +1004,7 @@ describe('cleanup-artifacts.js', () => {
       const mockArtifacts = [
         {
           id: 1,
-          name: 'ai-code-review-embeddings-123',
+          name: 'codecritique-embeddings-123',
           size_in_bytes: undefined,
           created_at: oldDate,
           expired: false,
@@ -1079,14 +1076,14 @@ describe('cleanup-artifacts.js', () => {
       const mockArtifacts = [
         {
           id: 1,
-          name: 'ai-code-review-embeddings-important',
+          name: 'codecritique-embeddings-important',
           size_in_bytes: 1024 * 1024 * 10,
           created_at: oldDate,
           expired: false,
         },
         {
           id: 2,
-          name: 'ai-code-review-embeddings-regular',
+          name: 'codecritique-embeddings-regular',
           size_in_bytes: 1024 * 1024 * 10,
           created_at: oldDate,
           expired: false,

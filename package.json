@@ -1,11 +1,11 @@
 {
-  "name": "ai-code-review",
-  "version": "0.1.0",
+  "name": "codecritique",
+  "version": "1.0.0",
   "description": "AI-powered code review tool for any programming language",
   "type": "module",
   "main": "src/index.js",
   "bin": {
-    "ai-code-review": "./src/index.js"
+    "codecritique": "./src/index.js"
   },
   "scripts": {
     "start": "node src/index.js",
@@ -36,12 +36,19 @@
   ],
   "files": [
     "src/*.js",
-    "src/ai-code-review.sh",
     "README.md",
     "LICENSE"
   ],
-  "author": "",
+  "homepage": "https://github.com/cosmocoder/CodeCritique#readme",
+  "bugs": {
+    "url": "https://github.com/cosmocoder/CodeCritique/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cosmocoder/CodeCritique.git"
+  },
   "license": "MIT",
+  "author": "cosmocoder",
   "dependencies": {
     "@anthropic-ai/sdk": "0.71.0",
     "@huggingface/transformers": "3.8.0",
@@ -78,5 +85,10 @@
   "engines": {
     "node": "22.x",
     "npm": "10.x"
+  },
+  "engine-strict": true,
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }
