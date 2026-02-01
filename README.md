@@ -6,7 +6,47 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg)](https://nodejs.org/)
 [![CI](https://github.com/cosmocoder/CodeCritique/actions/workflows/release.yml/badge.svg)](https://github.com/cosmocoder/CodeCritique/actions/workflows/release.yml)
 
-A self-hosted, AI-powered code review tool using **RAG (Retrieval-Augmented Generation)** with local embeddings and Anthropic Claude for intelligent, context-aware code analysis. Supports any programming language with specialized features for JavaScript/TypeScript projects.
+**AI-Powered Code Review. Context-Aware. Privacy-First.**
+
+A self-hosted code review tool using **RAG (Retrieval-Augmented Generation)** with local embeddings and Anthropic Claude for intelligent, context-aware code analysis. Works with any programming language.
+
+[Features](#key-features) • [Installation](#installation) • [Quick Start](#quick-start) • [GitHub Actions](#github-actions-integration) • [Commands](#commands-reference) • [Contributing](#contributing)
+
+---
+
+## ❌ The Problem
+
+Traditional code review tools fall short:
+
+- ❌ **Generic static analysis** doesn't understand your codebase's unique patterns
+- ❌ **No historical context** - ignores lessons from past code reviews
+- ❌ **One-size-fits-all** rules that don't adapt to your team's standards
+- ❌ **Limited language support** - often focused on specific tech stacks
+
+## ✅ The Solution
+
+**CodeCritique** uses RAG to deliver intelligent, context-aware code reviews:
+
+- ✅ **Learns your codebase** - embeddings capture your patterns and conventions
+- ✅ **Remembers PR history** - learns from past review comments and decisions
+- ✅ **Custom guidelines** - integrates your team's coding standards
+- ✅ **Any language** - works with JavaScript, Python, Go, Rust, and more
+
+---
+
+## 🚀 Quick Install
+
+```bash
+npx codecritique analyze --file src/app.ts
+```
+
+Or install globally:
+
+```bash
+npm install -g codecritique
+```
+
+---
 
 ## Table of Contents
 
@@ -1047,28 +1087,6 @@ DEBUG=true codecritique analyze --file app.py
    codecritique embeddings:generate --concurrency 3
    ```
 
-## Dependencies
-
-### Core Dependencies
-
-- **[@anthropic-ai/sdk](https://www.npmjs.com/package/@anthropic-ai/sdk)** `0.55.0` - Anthropic Claude API integration
-- **[@lancedb/lancedb](https://www.npmjs.com/package/@lancedb/lancedb)** `0.19.0` - Vector database for embeddings
-- **[fastembed](https://www.npmjs.com/package/fastembed)** `^1.14.4` - Local embedding generation
-- **[commander](https://www.npmjs.com/package/commander)** `^11.0.0` - CLI framework
-- **[chalk](https://www.npmjs.com/package/chalk)** `^5.3.0` - Terminal colors
-- **[glob](https://www.npmjs.com/package/glob)** `^10.3.0` - File pattern matching
-
-### Optional Dependencies
-
-- **[@octokit/rest](https://www.npmjs.com/package/@octokit/rest)** `21.1.1` - GitHub API (for PR history analysis)
-- **[dotenv](https://www.npmjs.com/package/dotenv)** `16.5.0` - Environment variable loading
-
-### Development Dependencies
-
-- **[eslint](https://www.npmjs.com/package/eslint)** `9.29.0` - Code linting
-- **[prettier](https://www.npmjs.com/package/prettier)** `3.5.3` - Code formatting
-- **[typescript](https://www.npmjs.com/package/typescript)** `5.8.3` - TypeScript support
-
 ## Contributing
 
 We welcome contributions! Please follow these guidelines:
@@ -1149,6 +1167,17 @@ Please use GitHub Issues to report bugs or request features. Include:
 - **Command used** and **full error message**
 - **Expected vs actual behavior**
 - **Minimal reproduction case**
+
+## Acknowledgements
+
+This project is built with these amazing technologies:
+
+- **[FastEmbed](https://github.com/qdrant/fastembed)** - Fast, lightweight embedding generation
+- **[Hugging Face Transformers.js](https://github.com/huggingface/transformers.js)** - Machine learning for the web
+- **[LanceDB](https://lancedb.com/)** - High-performance vector database for embeddings
+- **[Commander.js](https://github.com/tj/commander.js)** - CLI framework for Node.js
+- **[Octokit](https://github.com/octokit/rest.js)** - GitHub API client for PR history analysis
+- **[Anthropic Claude](https://www.anthropic.com/)** - LLM powering intelligent code analysis
 
 ## License
 
