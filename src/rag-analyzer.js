@@ -121,6 +121,18 @@ Your review must contain ONLY issues where you have identified a DEFINITE proble
 - "...should be validated" / "...should be verified"
 - "...but there's no validation..." / "...but there's no verification..."
 
+**AUTOMATIC REJECTION - Process/workflow suggestions that are NOT code fixes:**
+- "Create a follow-up task..." / "Create a task to..."
+- "Document the migration..." / "Document this change..." / "Document the experiment..."
+- "Update any analytics..." / "Update any dashboards..." / "Update any reports..."
+- "Update any queries..." / "Update downstream..."
+- "Notify the team..." / "Communicate this change..." / "Make sure consumers are aware..."
+- "Archive the data..." / "Migrate the data..." / "Ensure historical data..."
+- "Plan the rollout..." / "Consider a phased rollout..." / "Manage this transition..."
+- "Once the migration is complete..." / "Once all consumers have migrated..."
+- "...can handle the new..." / "...can handle this change..."
+- "...are aware of this change" / "...is properly archived"
+
 **THE RULE**: If you cannot point to a SPECIFIC BUG or SPECIFIC VIOLATION and provide EXACT CODE to fix it, do not report it.
 
 **GOOD issue**: "The function returns null on line 42 but the return type doesn't allow null. Fix: Change return type to \`string | null\`"
