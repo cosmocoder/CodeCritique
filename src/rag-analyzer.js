@@ -104,43 +104,100 @@ DO NOT report "low" severity issues. Low severity issues typically include:
 These concerns are handled by project linters (ESLint, Prettier, etc.) and should NOT be included in your review.
 Only report issues with severity: "critical", "high", or "medium".
 
-**🚨 CRITICAL: ACTIONABLE CODE ISSUES ONLY - NO VERIFICATION REQUESTS 🚨**
-Your review must contain ONLY issues where you have identified a DEFINITE problem and can provide a SPECIFIC code fix.
+**🚨 ABSOLUTE RULE: YOUR SUGGESTION MUST FIX BROKEN CODE 🚨**
 
-**AUTOMATIC REJECTION - If your suggestion contains ANY of these phrases, DO NOT include it:**
-- "Verify that..." / "Verify the..." / "Verify if..."
-- "Ensure that..." / "Ensure the..."
-- "Confirm that..." / "Confirm the..."
-- "Validate that..." / "Validate the..."
-- "Check that..." / "Check if..." / "Check whether..."
-- "Add a comment explaining..." / "Add documentation..."
-- "Review the documentation..." / "Reference the migration guide..."
-- "Consider whether..." / "Consider if..."
-- "This could potentially..." / "This might..." / "This may..."
-- "If this is intentional..." / "If this change is to fix..."
-- "...should be validated" / "...should be verified"
-- "...but there's no validation..." / "...but there's no verification..."
+Every issue you report MUST identify CODE THAT IS BROKEN OR INCORRECT.
 
-**AUTOMATIC REJECTION - Process/workflow suggestions that are NOT code fixes:**
-- "Create a follow-up task..." / "Create a task to..."
-- "Document the migration..." / "Document this change..." / "Document the experiment..."
-- "Update any analytics..." / "Update any dashboards..." / "Update any reports..."
-- "Update any queries..." / "Update downstream..."
-- "Notify the team..." / "Communicate this change..." / "Make sure consumers are aware..."
-- "Archive the data..." / "Migrate the data..." / "Ensure historical data..."
-- "Plan the rollout..." / "Consider a phased rollout..." / "Manage this transition..."
-- "Once the migration is complete..." / "Once all consumers have migrated..."
-- "...can handle the new..." / "...can handle this change..."
-- "...are aware of this change" / "...is properly archived"
+Your suggestion MUST be a CODE FIX that changes program behavior, not documentation.
 
-**THE RULE**: If you cannot point to a SPECIFIC BUG or SPECIFIC VIOLATION and provide EXACT CODE to fix it, do not report it.
+**🚨 COMMENTS ARE NOT CODE FIXES - DO NOT SUGGEST ADDING COMMENTS 🚨**
 
-**GOOD issue**: "The function returns null on line 42 but the return type doesn't allow null. Fix: Change return type to \`string | null\`"
-**BAD issue**: "Verify that the function handles null correctly" (This asks for verification, not a code fix)
-**BAD issue**: "The type cast may bypass type safety" (This expresses uncertainty - "may" - without identifying a definite problem)
-**BAD issue**: "Add a comment explaining why this type was changed" (This requests documentation, not a code fix)
+Adding comments is DOCUMENTATION, not a code fix. DO NOT suggest:
+- "Add a comment explaining..."
+- "Add a comment above..."
+- "Add a comment to clarify..."
+- "Include a comment..."
+- Any suggestion that involves writing comments
 
-When in doubt, leave it out. Only report issues you are CERTAIN about.`;
+Comments do not fix bugs. Comments do not change behavior. Comments are NOT acceptable suggestions.
+
+**🚨 BANNED WORDS IN SUGGESTIONS - AUTOMATIC DELETION 🚨**
+
+If your suggestion contains ANY of these words/phrases, DELETE THE ISSUE IMMEDIATELY:
+- "Add a comment" / "Add comment" / "Include a comment" / "comment explaining" / "comment to clarify"
+- "Consider" / "consider whether" / "consider normalizing"
+- "Verify" / "verify that" / "verify the"
+- "Ensure" / "ensure that" / "ensure all"
+- "Document" / "document why" / "document that"
+- "Check" / "check if" / "check whether"
+- "Confirm" / "confirm that"
+- "Clarify" / "make clearer" / "could be clearer" / "more explicit"
+- "Analytics" / "dashboards" / "tracking" / "tracking system"
+- "Migration" / "migrated" / "migrate"
+- "Downstream" / "consumers" / "external systems"
+- "Experiment" / "experiment results" / "experiment analysis"
+- "Backward compatibility" / "breaking change" (unless you provide code to fix it)
+- "Future maintainers" / "maintainability" / "for clarity"
+
+**🚨 YOUR SUGGESTION MUST START WITH A VERB THAT CHANGES CODE 🚨**
+
+GOOD suggestion starters:
+- "Change X to Y"
+- "Replace X with Y"
+- "Add X"
+- "Remove X"
+- "Rename X to Y"
+- "Move X to Y"
+- "Update X to Y"
+
+BAD suggestion starters (DELETE THESE):
+- "Consider..." - NO! This is advice, not a code change
+- "Verify that..." - NO! This asks someone to check something
+- "Ensure that..." - NO! This is a request, not a code change
+- "Document..." - NO! Documentation is not a code fix
+- "Check..." - NO! This asks for verification
+
+**EXAMPLES OF ISSUES YOU MUST DELETE:**
+❌ Description: "The default value inconsistency could lead to confusion"
+   Suggestion: "Consider whether X should also default to Y or document why they differ"
+   WHY DELETE: "Consider" and "document" are banned. No code change provided.
+
+❌ Description: "This could break analytics dashboards"
+   Suggestion: "Verify that the tracking system can handle the new data structure"
+   WHY DELETE: "Verify" is banned. "tracking system" is banned. No code change provided.
+
+❌ Description: "Users might lose access to features"
+   Suggestion: "Ensure that all users are properly migrated"
+   WHY DELETE: "Ensure" is banned. "migrated" is banned. No code change provided.
+
+❌ Description: "Tracking data format inconsistency"
+   Suggestion: "Consider normalizing the value or document that this experiment uses..."
+   WHY DELETE: "Consider" is banned. "document" is banned. "experiment" is banned.
+
+**EXAMPLES OF ACCEPTABLE ISSUES:**
+✅ Description: "The function returns null but the return type doesn't allow null"
+   Suggestion: "Change the return type from \`string\` to \`string | null\` on line 42"
+   WHY ACCEPT: Identifies a specific bug with a specific code change.
+
+✅ Description: "Missing null check will cause runtime error"
+   Suggestion: "Add optional chaining: change \`user.name\` to \`user?.name\` on line 15"
+   WHY ACCEPT: Identifies a specific problem with exact code to fix it.
+
+✅ Description: "Promise is not awaited"
+   Suggestion: "Add \`await\` before \`fetchData()\` on line 28"
+   WHY ACCEPT: Specific bug with specific code fix.
+
+**THE ONLY ACCEPTABLE ISSUE FORMAT:**
+1. Description: Identifies a SPECIFIC BUG or CODE QUALITY PROBLEM
+2. Suggestion: Provides EXACT CODE CHANGE to fix it (no "consider", "verify", "ensure", "document")
+
+**FINAL CHECK BEFORE INCLUDING ANY ISSUE:**
+□ Does my suggestion contain "consider", "verify", "ensure", "document", "check", or "confirm"? → DELETE
+□ Does my suggestion mention "analytics", "tracking", "migration", "downstream", or "experiment"? → DELETE
+□ Is my suggestion a request for someone to do something (not a code change)? → DELETE
+□ Can I write the exact code change in the suggestion? → If NO, DELETE
+
+When in doubt, DELETE THE ISSUE. Only report issues with EXACT CODE FIXES.`;
 }
 
 /**
