@@ -5,6 +5,11 @@
  * for code analysis and review. Enhanced to leverage project-specific patterns and
  * feedback from PR reviews for more context-aware recommendations.
  * Currently supports Anthropic's Claude Sonnet 4.
+ *
+ * Prompt Caching:
+ * This module uses Anthropic's prompt caching feature for cost optimization.
+ * Static content in the system message is cached and reused across multiple
+ * requests, reducing input token costs by 75%.
  */
 
 import { Anthropic } from '@anthropic-ai/sdk';
@@ -15,6 +20,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 let anthropic = null;
+
 /**
  * Get the Anthropic client
  * @returns {Anthropic} The Anthropic client
@@ -36,80 +42,93 @@ const DEFAULT_MODEL = 'claude-sonnet-4-5';
 const MAX_TOKENS = 4096;
 
 /**
- * Send a prompt to Claude and get a structured JSON response using tool calling
+ * Send a prompt to Claude and get a structured JSON response using tool calling.
+ * Uses prompt caching for system prompts to reduce token costs.
  *
  * @param {string} prompt - The prompt to send to Claude
  * @param {Object} options - Options for the request
+ * @param {string} options.system - System prompt (will be cached for cost optimization)
  * @param {Object} options.jsonSchema - JSON schema for structured output
+ * @param {string} options.cacheTtl - Cache TTL: '5m' (default, no extra cost) or '1h' (extended, extra cost for writes)
  * @returns {Promise<Object>} The response from Claude with structured data
  */
 async function sendPromptToClaude(prompt, options = {}) {
-  const { model = DEFAULT_MODEL, maxTokens = MAX_TOKENS, temperature = 0.7, system = '', jsonSchema = null } = options;
+  const { model = DEFAULT_MODEL, maxTokens = MAX_TOKENS, temperature = 0.7, system = '', jsonSchema = null, cacheTtl = '5m' } = options;
 
   try {
     console.log(chalk.cyan('Sending prompt to Claude...'));
 
     const client = getAnthropicClient();
 
-    // Use structured output with tool calling if schema is provided
+    // Build system content with cache_control for cost optimization
+    // The system is passed as an array of blocks with cache_control on the static portion
+    // TTL options: '5m' (default, no extra cost) or '1h' (extended, extra cost for cache writes)
+    const cacheControl = cacheTtl === '1h' ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
+
+    const systemContent = system
+      ? [
+          {
+            type: 'text',
+            text: system,
+            cache_control: cacheControl,
+          },
+        ]
+      : 'You are an expert code reviewer with deep knowledge of software engineering principles, design patterns, and best practices.';
+
+    // Build base request parameters
+    const requestParams = {
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      system: systemContent,
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+    };
+
+    // Add tool calling if JSON schema is provided
     if (jsonSchema) {
-      const tools = [
+      requestParams.tools = [
         {
           name: 'return_json',
           description: 'Return the final answer strictly as JSON matching the schema.',
           input_schema: jsonSchema,
         },
       ];
+      requestParams.tool_choice = { type: 'tool', name: 'return_json' };
+    }
 
-      const response = await client.messages.create({
-        model,
-        max_tokens: maxTokens,
-        temperature,
-        tools,
-        tool_choice: { type: 'tool', name: 'return_json' },
-        system:
-          system ||
-          'You are an expert code reviewer with deep knowledge of software engineering principles, design patterns, and best practices.',
-        messages: [
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-      });
+    const response = await client.messages.create(requestParams);
 
-      // Find the tool_use block and extract the structured data
+    // Log response structure for debugging
+    console.log(chalk.gray(`  Response stop_reason: ${response.stop_reason}`));
+    console.log(chalk.gray(`  Response content blocks: ${response.content?.length || 0}`));
+
+    // Process response based on whether we used tool calling
+    if (jsonSchema) {
       const toolUse = response.content.find((block) => block.type === 'tool_use' && block.name === 'return_json');
 
       if (!toolUse) {
+        // Log actual content for debugging
+        console.error(chalk.red('No tool_use block found. Response content:'));
+        response.content?.forEach((block, i) => {
+          console.error(chalk.gray(`  Block ${i}: type=${block.type}, name=${block.name || 'N/A'}`));
+        });
         throw new Error('No structured output received from Claude');
       }
 
       return {
-        content: JSON.stringify(toolUse.input, null, 2), // For backward compatibility
+        content: JSON.stringify(toolUse.input, null, 2),
         model: response.model,
         usage: response.usage,
-        json: toolUse.input, // The parsed JavaScript object
+        json: toolUse.input,
       };
     } else {
-      // Fallback to regular text response
-      const response = await client.messages.create({
-        model,
-        max_tokens: maxTokens,
-        temperature,
-        system:
-          system ||
-          'You are an expert code reviewer with deep knowledge of software engineering principles, design patterns, and best practices.',
-        messages: [
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-      });
-
       return {
-        content: response.content[0].text,
+        content: response.content[0]?.text || '',
         model: response.model,
         usage: response.usage,
       };

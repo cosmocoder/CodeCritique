@@ -161,15 +161,16 @@ The action includes intelligent feedback tracking that monitors user reactions a
 
 ### Complete Input Parameters
 
-| Parameter           | Description                                          | Required | Default              |
-| ------------------- | ---------------------------------------------------- | -------- | -------------------- |
-| `anthropic-api-key` | Anthropic API key for Claude models                  | **Yes**  | -                    |
-| `skip-label`        | Label name to skip AI review                         | No       | `ai-review-disabled` |
-| `verbose`           | Show verbose output                                  | No       | `false`              |
-| `model`             | LLM model to use                                     | No       | Auto-selected        |
-| `max-tokens`        | Maximum tokens for LLM response                      | No       | Auto-calculated      |
-| `concurrency`       | Concurrency for processing multiple files            | No       | `3`                  |
-| `custom-docs`       | Custom documents (format: `"title:path,title:path"`) | No       | `''`                 |
+| Parameter           | Description                                                                                              | Required | Default              |
+| ------------------- | -------------------------------------------------------------------------------------------------------- | -------- | -------------------- |
+| `anthropic-api-key` | Anthropic API key for Claude models                                                                      | **Yes**  | -                    |
+| `skip-label`        | Label name to skip AI review                                                                             | No       | `ai-review-disabled` |
+| `verbose`           | Show verbose output                                                                                      | No       | `false`              |
+| `model`             | LLM model to use                                                                                         | No       | Auto-selected        |
+| `max-tokens`        | Maximum tokens for LLM response                                                                          | No       | Auto-calculated      |
+| `cache-ttl`         | Cache TTL for LLM prompts: "5m" (default, no extra cost) or "1h" (extended, extra cost for cache writes) | No       | `5m`                 |
+| `concurrency`       | Concurrency for processing multiple files                                                                | No       | `3`                  |
+| `custom-docs`       | Custom documents (format: `"title:path,title:path"`)                                                     | No       | `''`                 |
 
 ### Output Values
 

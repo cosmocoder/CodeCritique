@@ -29,6 +29,11 @@ inputs:
     description: 'LLM max tokens'
     required: false
 
+  cache-ttl:
+    description: 'Cache TTL for LLM prompts: "5m" (default, no extra cost) or "1h" (extended, extra cost for cache writes)'
+    required: false
+    default: '5m'
+
   concurrency:
     description: 'Concurrency for processing multiple files'
     required: false
@@ -170,6 +175,10 @@ runs:
         # Only add optional parameters if they have values
         if [ -n "${{ inputs.max-tokens }}" ]; then
           CLI_ARGS="$CLI_ARGS --max-tokens ${{ inputs.max-tokens }}"
+        fi
+
+        if [ -n "${{ inputs.cache-ttl }}" ]; then
+          CLI_ARGS="$CLI_ARGS --cache-ttl ${{ inputs.cache-ttl }}"
         fi
 
         if [ -n "${{ inputs.concurrency }}" ]; then

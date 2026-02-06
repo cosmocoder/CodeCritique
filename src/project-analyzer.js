@@ -11,6 +11,7 @@ import path from 'path';
 import chalk from 'chalk';
 import { getDefaultEmbeddingsSystem } from './embeddings/factory.js';
 import * as llm from './llm.js';
+import { FILE_SELECTION_SYSTEM_PROMPT, PROJECT_SUMMARY_SYSTEM_PROMPT } from './prompt-cache.js';
 import { isDocumentationFile, isTestFile } from './utils/file-validation.js';
 
 // Consolidated file classification configuration
@@ -494,18 +495,7 @@ Project: ${path.basename(projectPath)}
 Files found by embeddings search:
 ${candidatesSummary}
 
-Select files that best reveal the project's architecture:
-- Framework setup & key configurations
-- Custom utilities, hooks, and wrappers
-- API/data layer patterns and GraphQL setup
-- Type definitions & core interfaces
-- Entry points, routing, and main structure
-- State management and data flow patterns
-
-IMPORTANT: Return ONLY a JSON array of file paths, nothing else:
-["path1", "path2", "path3"]
-
-Select files that define HOW this project works, especially custom implementations.`;
+Select files following the criteria in the system instructions.`;
 
     try {
       const fileSelectionSchema = {
@@ -524,6 +514,7 @@ Select files that define HOW this project works, especially custom implementatio
       };
 
       const response = await this.llm.sendPromptToClaude(prompt, {
+        system: FILE_SELECTION_SYSTEM_PROMPT,
         temperature: 0.1,
         maxTokens: 1000,
         jsonSchema: fileSelectionSchema,
@@ -636,11 +627,15 @@ Select files that define HOW this project works, especially custom implementatio
   async generateProjectSummary(keyFiles, projectPath) {
     const fileContents = await this.extractFileContents(keyFiles);
 
-    const prompt = `Analyze this project's architecture and provide a comprehensive summary. Here are the key files:
+    const prompt = `Analyze this project's architecture and provide a comprehensive summary.
+
+## KEY FILES
 
 ${fileContents}
 
-Please analyze this project and provide a JSON response with:
+## OUTPUT FORMAT
+
+Provide a JSON response with this structure:
 
 {
   "projectName": "Project name from package.json or inferred",
@@ -661,7 +656,7 @@ Please analyze this project and provide a JSON response with:
       "name": "Custom feature/hook/utility name",
       "description": "What it does and HOW it modifies standard library behavior",
       "files": ["Files where it's defined"],
-      "properties": ["Key properties/methods it exposes, especially any that extend standard objects"],
+      "properties": ["Key properties/methods it exposes"],
       "usage": "How it should be used",
       "extendsStandard": "Which standard library/framework objects or APIs this modifies"
     }
@@ -697,44 +692,11 @@ Please analyze this project and provide a JSON response with:
   "reviewGuidelines": [
     "Specific guidelines for code review based on this project's patterns",
     "What to look for in PRs",
-    "Common patterns that should be maintained",
-    "Potential issues specific to this architecture"
+    "Common patterns that should be maintained"
   ]
 }
 
-Focus on identifying patterns that would help in code review, especially:
-- Custom utilities or modules that extend standard frameworks and libraries
-- **CRITICAL: Custom properties or methods added to standard library objects** (e.g., custom properties on database query results, API responses, or framework objects)
-- **Extensions to library APIs** - any way this project modifies or enhances standard library behavior
-- Specific ways APIs are called and results are handled (look for non-standard patterns)
-- Data flow and processing patterns
-- Module organization and code structure patterns
-- Type definitions and interfaces that define contracts, especially those that extend standard types
-- Configuration patterns and environment handling
-- **Custom wrappers** around standard libraries that add functionality
-
-**CRITICAL ANALYSIS REQUIRED**: Look specifically for code that:
-1. **Takes standard library return values and adds custom properties** - For example:
-   - Functions that take query results and add success/loading/error properties
-   - Wrappers that enhance API responses with additional metadata
-   - Custom hooks that extend standard framework hooks with extra functionality
-2. **Modifies or extends standard library interfaces** - Look for:
-   - TypeScript interfaces that extend standard types with additional fields
-   - Custom implementations that add methods to standard objects
-   - Wrapper classes that enhance standard library functionality
-3. **Creates custom versions of standard patterns** - Such as:
-   - Custom error handling that adds properties to standard error objects
-   - Middleware that modifies standard request/response patterns
-   - Custom state management that extends standard patterns
-
-**EXAMPLES TO RECOGNIZE**:
-- If you see a function that takes a standard query result and returns an object with added success/error properties, identify this as a custom implementation
-- If you see custom hooks that wrap standard library hooks and add properties, document these
-- If you see type definitions that extend standard interfaces, note what properties they add
-
-**OUTPUT REQUIREMENT**: For each custom implementation found, specifically identify what standard library object or pattern it extends in the "extendsStandard" field.
-
-Be thorough but concise. This summary will be used to provide context during automated code reviews to prevent false positives about "non-standard" properties that are actually valid custom implementations in this project.`;
+Follow the analysis guidelines from the system instructions to identify custom implementations and patterns.`;
 
     try {
       const projectSummarySchema = {
@@ -807,6 +769,7 @@ Be thorough but concise. This summary will be used to provide context during aut
       };
 
       const response = await this.llm.sendPromptToClaude(prompt, {
+        system: PROJECT_SUMMARY_SYSTEM_PROMPT,
         temperature: 0.1,
         maxTokens: 4000,
         jsonSchema: projectSummarySchema,

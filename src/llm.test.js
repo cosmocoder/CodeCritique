@@ -75,7 +75,13 @@ describe('sendPromptToClaude', () => {
           model: 'claude-3-opus',
           max_tokens: 8192,
           temperature: 0.5,
-          system: 'Custom system prompt',
+          system: [
+            {
+              type: 'text',
+              text: 'Custom system prompt',
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
         })
       );
     });
@@ -225,7 +231,13 @@ describe('sendPromptToClaude', () => {
 
       expect(mockMessagesCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          system: customSystem,
+          system: [
+            {
+              type: 'text',
+              text: customSystem,
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
         })
       );
     });

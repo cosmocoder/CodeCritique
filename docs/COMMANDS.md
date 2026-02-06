@@ -23,6 +23,7 @@ codecritique analyze [options]
 | `--model <model>`                 | LLM model to use (e.g., claude-sonnet-4-5)                                                               | Auto-selected |
 | `--temperature <number>`          | LLM temperature                                                                                          | `0.2`         |
 | `--max-tokens <number>`           | LLM max tokens                                                                                           | `8192`        |
+| `--cache-ttl <ttl>`               | Cache TTL for LLM prompts: "5m" (default, no extra cost) or "1h" (extended, extra cost for cache writes) | `5m`          |
 | `--similarity-threshold <number>` | Threshold for finding similar code examples                                                              | `0.6`         |
 | `--max-examples <number>`         | Max similar code examples to use                                                                         | `5`           |
 | `--concurrency <number>`          | Concurrency for processing multiple files                                                                | `3`           |
@@ -52,6 +53,9 @@ codecritique analyze --file app.py \
   --temperature 0.1 \
   --max-tokens 4096 \
   --similarity-threshold 0.7
+
+# Use extended cache TTL for large PRs (higher cache hit rate, extra cost for writes)
+codecritique analyze --diff-with feature-branch --cache-ttl 1h
 
 # Analyze changes in specific directory
 codecritique analyze --diff-with feature-branch --directory /path/to/repo
