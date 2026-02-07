@@ -3,3 +3,5 @@ node_modules
 .prettier-cache
 .eslintcache
 coverage
+plans
+
