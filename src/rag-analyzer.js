@@ -21,6 +21,7 @@ import {
 } from './feedback-loader.js';
 import * as llm from './llm.js';
 import { findRelevantPRComments } from './pr-history/database.js';
+import { buildCachedSystemPrompt } from './prompt-cache.js';
 import { inferContextFromCodeContent, inferContextFromDocumentContent } from './utils/context-inference.js';
 import { isGenericDocument, getGenericDocumentContext } from './utils/document-detection.js';
 import { isTestFile, shouldProcessFile } from './utils/file-validation.js';
@@ -60,183 +61,10 @@ async function ensureSemanticSimilarityInitialized() {
 }
 
 // ============================================================================
-// COMMON PROMPT INSTRUCTIONS
+// PROMPT FORMATTING HELPERS
+// Note: Static prompt content (critical rules, citation requirements, etc.) is
+// centralized in prompt-cache.js for optimal caching across LLM calls.
 // ============================================================================
-
-/**
- * Generate the common critical rules block for all prompts
- * @param {Object} options - Options for customization
- * @param {string} options.importRuleContext - Context-specific text for import rule ('code', 'test', or 'pr')
- * @returns {string} Critical rules block
- */
-function getCriticalRulesBlock(options = {}) {
-  const { importRuleContext = 'code' } = options;
-
-  // Customize import rule based on context
-  let importRuleText;
-  switch (importRuleContext) {
-    case 'test':
-      importRuleText =
-        'DO NOT flag missing imports or files referenced in import statements as issues. Focus only on test quality, logic, and patterns within the provided test files.';
-      break;
-    case 'pr':
-      importRuleText =
-        'DO NOT flag missing imports or files referenced in import statements as issues. In PR analysis, some files (especially assets like images, fonts, or excluded files) may not be included in the review scope. Focus only on code quality, logic, and patterns within the provided PR files.';
-      break;
-    default:
-      importRuleText =
-        'DO NOT flag missing imports or files referenced in import statements as issues. Focus only on code quality, logic, and patterns within the provided files.';
-  }
-
-  return `**🚨 CRITICAL: LINE NUMBER REPORTING RULE - READ CAREFULLY 🚨**
-When reporting issues in the JSON output, NEVER provide exhaustive lists of line numbers. For repeated issues, list only 3-5 representative line numbers maximum. Exhaustive line number lists are considered errors and must be avoided.
-
-**🚨 CRITICAL: IMPORT STATEMENT RULE - READ CAREFULLY 🚨**
-${importRuleText}
-
-**🚨 CRITICAL: NO LOW SEVERITY ISSUES - READ CAREFULLY 🚨**
-DO NOT report "low" severity issues. Low severity issues typically include:
-- Import statement ordering or grouping
-- Code formatting and whitespace
-- Minor stylistic preferences
-- Comment placement or formatting
-- Line length or wrapping suggestions
-These concerns are handled by project linters (ESLint, Prettier, etc.) and should NOT be included in your review.
-Only report issues with severity: "critical", "high", or "medium".
-
-**🚨 ABSOLUTE RULE: YOUR SUGGESTION MUST FIX BROKEN CODE 🚨**
-
-Every issue you report MUST identify CODE THAT IS BROKEN OR INCORRECT.
-
-Your suggestion MUST be a CODE FIX that changes program behavior, not documentation.
-
-**🚨 COMMENTS ARE NOT CODE FIXES - DO NOT SUGGEST ADDING COMMENTS 🚨**
-
-Adding comments is DOCUMENTATION, not a code fix. DO NOT suggest:
-- "Add a comment explaining..."
-- "Add a comment above..."
-- "Add a comment to clarify..."
-- "Include a comment..."
-- Any suggestion that involves writing comments
-
-Comments do not fix bugs. Comments do not change behavior. Comments are NOT acceptable suggestions.
-
-**🚨 BANNED WORDS IN SUGGESTIONS - AUTOMATIC DELETION 🚨**
-
-If your suggestion contains ANY of these words/phrases, DELETE THE ISSUE IMMEDIATELY:
-- "Add a comment" / "Add comment" / "Include a comment" / "comment explaining" / "comment to clarify"
-- "Consider" / "consider whether" / "consider normalizing"
-- "Verify" / "verify that" / "verify the"
-- "Ensure" / "ensure that" / "ensure all"
-- "Document" / "document why" / "document that"
-- "Check" / "check if" / "check whether"
-- "Confirm" / "confirm that"
-- "Clarify" / "make clearer" / "could be clearer" / "more explicit"
-- "Analytics" / "dashboards" / "tracking" / "tracking system"
-- "Migration" / "migrated" / "migrate"
-- "Downstream" / "consumers" / "external systems"
-- "Experiment" / "experiment results" / "experiment analysis"
-- "Backward compatibility" / "breaking change" (unless you provide code to fix it)
-- "Future maintainers" / "maintainability" / "for clarity"
-
-**🚨 YOUR SUGGESTION MUST START WITH A VERB THAT CHANGES CODE 🚨**
-
-GOOD suggestion starters:
-- "Change X to Y"
-- "Replace X with Y"
-- "Add X"
-- "Remove X"
-- "Rename X to Y"
-- "Move X to Y"
-- "Update X to Y"
-
-BAD suggestion starters (DELETE THESE):
-- "Consider..." - NO! This is advice, not a code change
-- "Verify that..." - NO! This asks someone to check something
-- "Ensure that..." - NO! This is a request, not a code change
-- "Document..." - NO! Documentation is not a code fix
-- "Check..." - NO! This asks for verification
-
-**EXAMPLES OF ISSUES YOU MUST DELETE:**
-❌ Description: "The default value inconsistency could lead to confusion"
-   Suggestion: "Consider whether X should also default to Y or document why they differ"
-   WHY DELETE: "Consider" and "document" are banned. No code change provided.
-
-❌ Description: "This could break analytics dashboards"
-   Suggestion: "Verify that the tracking system can handle the new data structure"
-   WHY DELETE: "Verify" is banned. "tracking system" is banned. No code change provided.
-
-❌ Description: "Users might lose access to features"
-   Suggestion: "Ensure that all users are properly migrated"
-   WHY DELETE: "Ensure" is banned. "migrated" is banned. No code change provided.
-
-❌ Description: "Tracking data format inconsistency"
-   Suggestion: "Consider normalizing the value or document that this experiment uses..."
-   WHY DELETE: "Consider" is banned. "document" is banned. "experiment" is banned.
-
-**EXAMPLES OF ACCEPTABLE ISSUES:**
-✅ Description: "The function returns null but the return type doesn't allow null"
-   Suggestion: "Change the return type from \`string\` to \`string | null\` on line 42"
-   WHY ACCEPT: Identifies a specific bug with a specific code change.
-
-✅ Description: "Missing null check will cause runtime error"
-   Suggestion: "Add optional chaining: change \`user.name\` to \`user?.name\` on line 15"
-   WHY ACCEPT: Identifies a specific problem with exact code to fix it.
-
-✅ Description: "Promise is not awaited"
-   Suggestion: "Add \`await\` before \`fetchData()\` on line 28"
-   WHY ACCEPT: Specific bug with specific code fix.
-
-**THE ONLY ACCEPTABLE ISSUE FORMAT:**
-1. Description: Identifies a SPECIFIC BUG or CODE QUALITY PROBLEM
-2. Suggestion: Provides EXACT CODE CHANGE to fix it (no "consider", "verify", "ensure", "document")
-
-**FINAL CHECK BEFORE INCLUDING ANY ISSUE:**
-□ Does my suggestion contain "consider", "verify", "ensure", "document", "check", or "confirm"? → DELETE
-□ Does my suggestion mention "analytics", "tracking", "migration", "downstream", or "experiment"? → DELETE
-□ Is my suggestion a request for someone to do something (not a code change)? → DELETE
-□ Can I write the exact code change in the suggestion? → If NO, DELETE
-
-When in doubt, DELETE THE ISSUE. Only report issues with EXACT CODE FIXES.`;
-}
-
-/**
- * Generate the common citation requirement block
- * @returns {string} Citation requirement block
- */
-function getCitationRequirementBlock() {
-  return `**🚨 CRITICAL CITATION REQUIREMENT 🚨**
-When you identify issues that violate custom instructions provided at the beginning of this prompt, you MUST:
-- Include the source document name in your issue description (e.g., "violates the coding standards specified in '[Document Name]'")
-- Reference the source document in your suggestion (e.g., "as required by '[Document Name]'" or "according to '[Document Name]'")
-- Do NOT provide generic suggestions - always tie violations back to the specific custom instruction source`;
-}
-
-/**
- * Generate the common code suggestions format block
- * @returns {string} Code suggestions format block
- */
-function getCodeSuggestionsFormatBlock() {
-  return `**🚨 CODE SUGGESTIONS FORMAT 🚨**
-When suggesting code changes, you can optionally include a codeSuggestion object with:
-- startLine: The starting line number of the code to replace
-- endLine: (optional) The ending line number if replacing multiple lines
-- oldCode: The exact current code that should be replaced (must match exactly)
-- newCode: The proposed replacement code
-
-Code suggestions enable reviewers to apply fixes directly as GitHub suggestions. Only provide code suggestions when:
-1. The fix is concrete and can be applied automatically
-2. You have the exact current code from the file content
-3. The suggestion is a direct code replacement (not architectural changes)`;
-}
-
-/**
- * Generate the final reminder block for custom instructions
- * @returns {string} Final reminder block
- */
-function getFinalReminderBlock() {
-  return `**FINAL REMINDER: If custom instructions were provided at the start of this prompt, they MUST be followed and take precedence over all other guidelines.**`;
-}
 
 /**
  * Format custom docs section for prompts
@@ -920,18 +748,21 @@ async function callLLMForAnalysis(context, options = {}) {
       prompt = options.isTestFile ? generateTestFileAnalysisPrompt(context) : generateAnalysisPrompt(context);
     }
 
-    // Call LLM with the prompt
+    // Call LLM with the prompt (supports both cached and non-cached structures)
     const llmResponse = await sendPromptToLLM(prompt, {
       temperature: 0,
       maxTokens: maxTokens,
       model: model,
       isJsonMode: true, // Standardize on using JSON mode if available
+      verbose: options.verbose || false, // Pass verbose flag for cache statistics
+      cacheTtl: options.cacheTtl || '5m', // Pass cache TTL option (default: 5m, no extra cost)
     });
 
     console.log(chalk.blue('Received LLM response, attempting to parse...'));
 
     console.log(chalk.gray(`Response type: ${typeof llmResponse}`));
-    console.log(chalk.gray(`Response length: ${llmResponse?.length || 0} characters`));
+    console.log(chalk.gray(`Response has json: ${!!llmResponse?.json}`));
+    console.log(chalk.gray(`Response content length: ${llmResponse?.content?.length || 0} characters`));
 
     // Parse the raw LLM response
     const analysisResponse = parseAnalysisResponse(llmResponse);
@@ -993,8 +824,8 @@ MARKDOWN FORMATTING IN DESCRIPTIONS AND SUGGESTIONS:
 Your response must start with { and end with } with no additional text.`;
 }
 
-// LLM call function
-async function sendPromptToLLM(prompt, llmOptions) {
+// LLM call function - sends prompt with cached system content for cost optimization
+async function sendPromptToLLM(promptConfig, llmOptions) {
   try {
     if (!llm || typeof llm.sendPromptToClaude !== 'function') {
       throw new Error('LLM module does not contain required function: sendPromptToClaude');
@@ -1100,24 +931,46 @@ async function sendPromptToLLM(prompt, llmOptions) {
       required: ['summary'],
     };
 
-    const response = await llm.sendPromptToClaude(prompt, {
+    // Debug: Log prompt structure
+    console.log(chalk.gray(`  Prompt config has systemPrompt: ${!!promptConfig.systemPrompt}`));
+    console.log(chalk.gray(`  Prompt config has userPrompt: ${!!promptConfig.userPrompt}`));
+    console.log(chalk.gray(`  System prompt length: ${promptConfig.systemPrompt?.length || 0} chars`));
+    console.log(chalk.gray(`  User prompt length: ${promptConfig.userPrompt?.length || 0} chars`));
+
+    // Send prompt with system (cached) and user (dynamic) content
+    const response = await llm.sendPromptToClaude(promptConfig.userPrompt, {
       ...llmOptions,
+      system: promptConfig.systemPrompt,
       jsonSchema: codeReviewSchema,
     });
 
-    // Return the response object so parseAnalysisResponse can access the json property
     return response;
   } catch (error) {
     console.error(chalk.red(`Error in LLM call: ${error.message}`));
-    throw error; // Re-throw to properly handle the error
+    throw error;
   }
 }
 
 /**
- * Generate analysis prompt for LLM
+ * Generate analysis prompt for LLM with support for prompt caching.
+ * Returns separate system and user prompts for optimal caching.
+ *
+ * PROMPT ARCHITECTURE FOR CACHING:
+ * - System prompt (cached): Contains all static rules, analysis methodology, and JSON schema
+ * - User prompt (dynamic): Contains the actual file content, code examples, and guidelines
+ *
+ * WHY STATIC INSTRUCTIONS APPEAR AT THE END OF USER PROMPT ("YOUR TASK" section):
+ * While the detailed analysis methodology is in the cached system prompt, we include a brief
+ * task summary at the END of the user prompt because:
+ * 1. LLMs perform better when task instructions are near the content they reference
+ * 2. The system prompt's strict filtering rules ("delete the issue when in doubt") can cause
+ *    over-filtering when the task context is too far away
+ * 3. The "CRITICAL RULES" section counterbalances the aggressive filtering by reminding
+ *    the LLM to report actual issues with concrete fixes
+ * 4. This hybrid approach preserves caching benefits while maintaining review quality
  *
  * @param {Object} context - Context for LLM
- * @returns {string} Analysis prompt
+ * @returns {Object} { systemPrompt, userPrompt } for cached prompt structure
  */
 function generateAnalysisPrompt(context) {
   const { file, codeExamples, guidelineSnippets, customDocs, feedbackContext } = context;
@@ -1227,8 +1080,13 @@ ${file.content}
     'code'
   );
 
-  // Corrected prompt with full two-stage analysis + combined output stage
-  return finalizePrompt(`
+  // Build the cached system prompt (contains all static rules)
+  const systemPrompt = buildCachedSystemPrompt('code');
+
+  // Build the dynamic user prompt (contains all variable content)
+  const userPrompt = finalizePrompt(`
+## REVIEW TYPE: CODE FILE ANALYSIS
+
 ${roleDefinition}
 
 ${reviewInstructions}
@@ -1250,114 +1108,29 @@ ${prHistorySection}
 
 ${feedbackContext || ''}
 
-INSTRUCTIONS:
+## YOUR TASK
 
-${getCriticalRulesBlock({ importRuleContext: 'code' })}
+Analyze the FILE TO REVIEW above using the 4-stage methodology:
+1. Check against CONTEXT A (Guidelines) and any custom instructions
+2. Check against CONTEXT B (Code Examples) for implicit patterns - flag deviations from patterns appearing in 3+ examples
+3. Check CONTEXT C (Historical Comments) for matching issues
+4. Consolidate and output issues in the required JSON format
 
-**Perform the following analysis stages sequentially:**
-
-**STAGE 1: Custom Instructions & Guideline-Based Review**
-1.  **FIRST AND MOST IMPORTANT**: If custom instructions were provided at the beginning of this prompt, analyze the 'FILE TO REVIEW' against those custom instructions BEFORE all other analysis. Custom instructions always take precedence.
-2.  Analyze the 'FILE TO REVIEW' strictly against the standards, rules, and explanations provided in 'CONTEXT A: EXPLICIT GUIDELINES'.
-3.  Identify any specific deviations where the reviewed code violates custom instructions OR explicit guidelines. **CRITICAL**: When you find violations of custom instructions, you MUST cite the specific custom instruction source document name in your issue description and suggestion.
-4.  Temporarily ignore 'CONTEXT B: SIMILAR CODE EXAMPLES' during this stage.
-
-**STAGE 2: Code Example-Based Review (CRITICAL FOR IMPLICIT PATTERNS)**
-1.  **CRITICAL FIRST STEP**: Scan ALL code examples in Context B and create a mental list of:
-    - Common import statements (especially those containing 'helper', 'util', 'shared', 'common', 'test')
-    - Frequently used function calls that appear across multiple examples
-    - Project-specific wrappers or utilities (e.g., \`renderWithTestHelpers\` instead of direct \`render\`)
-    - Consistent patterns in how operations are performed
-2.  **IMPORTANT**: For each common utility or pattern you identify, note:
-    - Which files use it (cite specific examples)
-    - What the pattern appears to do
-    - Whether the reviewed file is using this pattern or not
-3.  Analyze the 'FILE TO REVIEW' against these discovered patterns. Focus on:
-    - Missing imports of commonly used utilities
-    - Direct library usage where others use project wrappers
-    - Deviations from established patterns
-4.  **HIGH PRIORITY**: Flag any instances where:
-    - The reviewed code uses a direct library call (e.g., \`render\`) when multiple examples use a project wrapper (e.g., \`renderWithTestHelpers\`)
-    - Common utility functions available in the project are not being imported or used
-    - The code deviates from patterns that appear in 3+ examples
-5.  Pay special attention to imports - if most similar files import certain utilities, the reviewed file should too.
-
-**STAGE 3: Historical Review Comments Analysis**
-1.  **CRITICAL**: If 'CONTEXT C: HISTORICAL REVIEW COMMENTS' is present, analyze each historical comment:
-    - Look for patterns in the types of issues human reviewers have identified in similar code
-    - Identify if the SAME DEFINITE issue exists in the current file (not similar - the SAME)
-    - Pay special attention to comments with high relevance scores (>70%)
-2.  **Apply Historical Insights**: For each historical comment:
-    - Only report if the EXACT same issue type exists with a SPECIFIC code fix
-    - Do NOT report speculative issues based on historical patterns
-3.  **Prioritize Historical Issues**: Issues DEFINITELY matching historical patterns get high priority
-
-**STAGE 4: Consolidate, Prioritize, and Generate Output**
-1.  **CRITICAL REMINDER**: If custom instructions were provided at the beginning of this prompt, they take ABSOLUTE PRECEDENCE over all other guidelines and must be followed strictly.
-2.  Combine the potential issues identified in Stage 1 (Guideline-Based), Stage 2 (Example-Based), and Stage 3 (Historical Review Comments).
-3.  **Apply Conflict Resolution AND Citation Rules:**
-    *   **Guideline Precedence:** If an issue identified in Stage 2 (from code examples) or Stage 3 (from historical comments) **contradicts** an explicit guideline from Stage 1, **discard the conflicting issue**. Guidelines always take precedence.
-    *   **Citation Priority:** When reporting an issue:
-       *   **CRITICAL FOR CUSTOM INSTRUCTIONS**: If the issue violates a custom instruction provided at the beginning of this prompt, you MUST include the source document name in both the description and suggestion. For example: "violates the coding standards specified in '[Document Name]'" or "as required by '[Document Name]'".
-       *   If the relevant convention or standard is defined in 'CONTEXT A: EXPLICIT GUIDELINES', cite the guideline document.
-       *   For implicit patterns discovered from code examples (like helper utilities, common practices), cite the specific code examples that demonstrate the pattern.
-       *   For issues identified from historical review comments, report them as standard code review findings without referencing the historical source.
-       *   **IMPORTANT**: When citing implicit patterns from Context B, be specific about which files demonstrate the pattern and what the pattern is.
-4.  **Special attention to implicit patterns**: Issues related to not using project-specific utilities or helpers should be marked as high priority if the pattern appears consistently across multiple examples in Context B.
-5.  **Special attention to historical patterns**: Issues DEFINITELY matching historical patterns get high priority.
-6.  Assess for DEFINITE logic errors or bugs only - do NOT report speculative issues.
-7.  **CRITICAL OUTPUT FILTER**: Before reporting ANY issue, ask yourself: "Do I have a SPECIFIC code fix?" If not, do NOT report it. Do NOT ask the developer to verify, ensure, or check anything.
-8.  **CRITICAL 'lineNumbers' RULE - MANDATORY COMPLIANCE**:
-    - **ALWAYS provide line numbers** - this field is REQUIRED for every issue
-    - If you can identify specific lines, provide them (max 3-5 for repeated issues)
-    - If the issue affects the entire file or cannot be pinpointed, provide [1] or relevant section line numbers
-    - For ANY issue that occurs multiple times in a file, list ONLY the first 3-5 occurrences maximum
-    - NEVER provide exhaustive lists of line numbers (e.g., [1,2,3,4,5,6,7,8,9,10...])
-    - If an issue affects many lines, use representative examples only
-    - Exhaustive line number lists are considered hallucination and must be avoided
-    - Example: Instead of listing 20+ line numbers, use [15, 23, 47]
-    - **NEVER omit lineNumbers** - empty arrays [] are not allowed
-9.  Format the final, consolidated, and prioritized list of issues, along with a brief overall summary, **strictly** according to the JSON structure below.
-10. CRITICAL: Respond ONLY with valid JSON - start with { and end with }, no additional text.
-
-${getFinalReminderBlock()}
-
-${getCitationRequirementBlock()}
-
-REQUIRED JSON OUTPUT FORMAT:
-
-**REMINDER: lineNumbers is REQUIRED - always provide at least one line number. Use ONLY 3-5 representative line numbers for repeated issues. NEVER provide exhaustive lists or empty arrays.**
-
-${getCodeSuggestionsFormatBlock()}
-
-You must respond with EXACTLY this JSON structure, with no additional text:
-
-{
-  "summary": "Brief summary of the review, highlighting adherence to documented guidelines and consistency with code examples, plus any major issues found.",
-  "issues": [
-    {
-      "type": "bug | improvement | convention | performance | security",
-      "severity": "critical | high | medium",
-      "description": "Description of the issue, clearly stating the deviation from the prioritized project pattern (guideline or example) OR the nature of the bug/improvement.",
-      "lineNumbers": [42, 55, 61],
-      "suggestion": "Concrete suggestion for fixing the issue or aligning with the prioritized inferred pattern. Ensure the suggestion is additive if adding missing functionality (like a hook) and doesn't wrongly suggest replacing existing, unrelated code.",
-      "codeSuggestion": {
-        "startLine": 42,
-        "endLine": 44,
-        "oldCode": "    const result = data.map(item => item.value);",
-        "newCode": "    const result = data?.map(item => item?.value) ?? [];"
-      }
-    }
-  ]
-}
+**CRITICAL RULES**:
+- **ONLY report issues that require a code change** - if your analysis concludes the code is correct, DO NOT report it as an issue
+- Every issue MUST have a concrete code fix in the suggestion - never suggest "no action needed" or "the code is correct"
+- If you analyzed something and found it's fine, simply don't include it in the output
 `);
+
+  return { systemPrompt, userPrompt };
 }
 
 /**
- * Generate test file analysis prompt for LLM
+ * Generate test file analysis prompt for LLM with support for prompt caching.
+ * Returns separate system and user prompts for optimal caching.
  *
  * @param {Object} context - Context for LLM
- * @returns {string} Test file analysis prompt
+ * @returns {Object} { systemPrompt, userPrompt } for cached prompt structure
  */
 function generateTestFileAnalysisPrompt(context) {
   const { file, codeExamples, guidelineSnippets, customDocs } = context;
@@ -1426,8 +1199,13 @@ ${file.content}
     projectArchitectureSection = formatProjectSummaryForLLM(context.projectSummary);
   }
 
-  // Test-specific prompt
-  return finalizePrompt(`
+  // Build the cached system prompt (contains all static rules)
+  const systemPrompt = buildCachedSystemPrompt('test');
+
+  // Build the dynamic user prompt (contains all variable content)
+  const userPrompt = finalizePrompt(`
+## REVIEW TYPE: TEST FILE ANALYSIS
+
 ${roleDefinition}
 
 ${reviewInstructions}
@@ -1446,90 +1224,30 @@ ${formattedGuidelines}
 CONTEXT B: SIMILAR TEST EXAMPLES FROM PROJECT
 ${formattedCodeExamples}
 
-INSTRUCTIONS:
+## YOUR TASK
 
-${getCriticalRulesBlock({ importRuleContext: 'test' })}
+Analyze the TEST FILE above using the 5-stage methodology:
+1. Check against custom instructions and test coverage
+2. Evaluate test quality and best practices
+3. Check CONTEXT B for testing patterns - flag deviations from patterns in 3+ examples
+4. Check for performance and maintainability issues
+5. Consolidate and output issues in the required JSON format
 
-**Perform the following test-specific analysis:**
-
-**STAGE 1: Custom Instructions & Test Coverage Analysis**
-1. **FIRST AND MOST IMPORTANT**: If custom instructions were provided at the beginning of this prompt, analyze the test file against those custom instructions BEFORE all other analysis. Custom instructions always take precedence.
-2. Analyze test coverage - identify SPECIFIC missing test cases only if you can name the exact scenario that should be tested.
-3. Only report coverage gaps where you can provide a concrete test case to add.
-
-**STAGE 2: Test Quality and Best Practices**
-1. Evaluate test naming conventions - report only DEFINITE violations where you can show the correct naming.
-2. Analyze test organization - report only if tests are clearly misorganized with a specific fix.
-3. Assess assertion quality - report only weak assertions where you can provide a stronger alternative.
-4. Review test isolation - report only if you find a DEFINITE side effect issue with a specific fix.
-
-**STAGE 3: Testing Patterns and Conventions (CRITICAL)**
-1. **IMPORTANT**: Carefully analyze ALL code examples in Context B to identify:
-   - Common helper functions or utilities that appear across multiple test files
-   - Consistent patterns in how certain operations are performed (e.g., rendering, mocking, assertions)
-   - Any project-specific abstractions or wrappers around standard testing libraries
-2. **CRITICAL**: Compare the reviewed test file against these discovered patterns. Flag ONLY instances where:
-   - The test DEFINITELY uses a direct library call when a project wrapper exists (cite the wrapper)
-   - A common utility is DEFINITELY available but not used (cite where it's defined)
-   - The test CLEARLY deviates from a pattern shown in 3+ examples (cite the examples)
-3. Report mocking/stubbing issues only with a specific code fix.
-4. Report fixture issues only with a specific code fix showing the correct pattern.
-5. Report async handling issues only with specific code showing the correct approach.
-
-**STAGE 4: Performance and Maintainability**
-1. Report slow tests only if you can identify the specific cause and fix.
-2. Report code duplication only with a specific refactoring suggestion.
-
-**STAGE 5: Consolidate and Generate Output**
-1. **CRITICAL**: Prioritize issues where the test deviates from implicit project patterns shown in Context B (similar test examples), especially regarding test utilities and helper functions.
-2. Provide concrete suggestions that align with the project's testing patterns, referencing specific examples from Context B when applicable.
-3. Assess for any potential logic errors or bugs within the reviewed code itself, independent of conventions, and include them as separate issues.
-4. **CRITICAL 'lineNumbers' RULE - MANDATORY COMPLIANCE**:
-   - For ANY issue that occurs multiple times in a test file, list ONLY the first 3-5 occurrences maximum
-   - NEVER provide exhaustive lists of line numbers (e.g., [1,2,3,4,5,6,7,8,9,10...])
-   - If an issue affects many lines, use representative examples only
-   - Exhaustive line number lists are considered hallucination and must be avoided
-   - Example: Instead of listing 20+ line numbers, use [15, 23, 47, "...and 12 other occurrences"]
-5. Format the output according to the JSON structure below.
-
-${getFinalReminderBlock()}
-
-${getCitationRequirementBlock()}
-
-REQUIRED JSON OUTPUT FORMAT:
-
-**REMINDER: For lineNumbers array, use ONLY 3-5 representative line numbers for repeated issues. NEVER provide exhaustive lists.**
-
-${getCodeSuggestionsFormatBlock()}
-
-You must respond with EXACTLY this JSON structure, with no additional text:
-
-{
-  "summary": "Brief summary of the test file review, highlighting coverage completeness, adherence to testing best practices, and any critical issues found.",
-  "issues": [
-    {
-      "type": "bug | improvement | convention | performance | coverage",
-      "severity": "critical | high | medium",
-      "description": "Description of the issue, clearly stating the problem with the test implementation or coverage gap.",
-      "lineNumbers": [25, 38],
-      "suggestion": "Concrete suggestion for improving the test, adding missing coverage, or following testing best practices.",
-      "codeSuggestion": {
-        "startLine": 25,
-        "endLine": 27,
-        "oldCode": "    expect(result).toBe(true);",
-        "newCode": "    expect(result).toBe(true);\n    expect(result).not.toBeNull();"
-      }
-    }
-  ]
-}
+**CRITICAL RULES**:
+- **ONLY report issues that require a code change** - if your analysis concludes the code is correct, DO NOT report it as an issue
+- Every issue MUST have a concrete code fix in the suggestion - never suggest "no action needed" or "the code is correct"
+- If you analyzed something and found it's fine, simply don't include it in the output
 `);
+
+  return { systemPrompt, userPrompt };
 }
 
 /**
- * Generate holistic PR analysis prompt for LLM
+ * Generate holistic PR analysis prompt for LLM with support for prompt caching.
+ * Returns separate system and user prompts for optimal caching.
  *
  * @param {Object} context - Holistic context for LLM
- * @returns {string} Holistic PR analysis prompt
+ * @returns {Object} { systemPrompt, userPrompt } for cached prompt structure
  */
 function generateHolisticPRAnalysisPrompt(context) {
   const { file, context: contextSections, customDocs } = context;
@@ -1637,7 +1355,13 @@ For each file in this PR, you have access to:
     projectArchitectureSection = formatProjectSummaryForLLM(context.projectSummary);
   }
 
-  return finalizePrompt(`
+  // Build the cached system prompt (contains all static rules)
+  const systemPrompt = buildCachedSystemPrompt('pr');
+
+  // Build the dynamic user prompt (contains all variable content)
+  const userPrompt = finalizePrompt(`
+## REVIEW TYPE: HOLISTIC PR ANALYSIS
+
 ${roleDefinition}
 
 ## PULL REQUEST OVERVIEW
@@ -1660,151 +1384,27 @@ ${formattedPRComments}
 ## PR FILES WITH CHANGES
 ${formattedPRFiles}
 
-## ANALYSIS CONTEXT
+## CUSTOM INSTRUCTIONS
 ${customDocsSection}
 
-## ANALYSIS INSTRUCTIONS
+## YOUR TASK
 
-${getCriticalRulesBlock({ importRuleContext: 'pr' })}
+Analyze ALL PR FILES above using the 5-stage methodology:
+1. Scan PROJECT CODE EXAMPLES for patterns - note which patterns appear in 3+ files
+2. Check all files against custom instructions and PROJECT GUIDELINES
+3. Check HISTORICAL REVIEW COMMENTS for matching issues
+4. Perform cross-file analysis for consistency issues
+5. Consolidate and output using the PR review JSON format (crossFileIssues, fileSpecificIssues, recommendations)
 
-**Perform the following holistic analysis stages sequentially for all PR files:**
-
-### **STAGE 1: Project Pattern Analysis (CRITICAL FOR CONSISTENCY)**
-
-1. **CRITICAL FIRST STEP**: Scan ALL code examples in PROJECT CODE EXAMPLES and create a comprehensive list of:
-   - Common import statements (especially those containing 'helper', 'util', 'shared', 'common', 'test')
-   - Frequently used function calls that appear across multiple examples
-   - Project-specific wrappers or utilities (e.g., \`renderWithTestHelpers\` instead of direct \`render\`)
-   - Consistent patterns in how operations are performed
-   - Testing patterns and helper functions
-   - Component patterns and architectural approaches
-
-2. **IMPORTANT**: For each common utility or pattern you identify, note:
-   - Which example files demonstrate it (cite specific examples)
-   - What the pattern appears to do
-   - Whether ALL PR files are using this pattern consistently
-
-3. **HIGH PRIORITY CROSS-FILE CHECKS**: Flag any instances where:
-   - Files use direct library calls when multiple examples use project wrappers
-   - Common utility functions available in the project are not being imported/used consistently
-   - Files deviate from patterns that appear in 3+ examples
-   - Test files don't follow established test helper patterns
-   - Import statements are inconsistent across similar files
-
-### **STAGE 2: Custom Instructions & Guideline Compliance Analysis**
-
-1. **FIRST AND MOST IMPORTANT**: If custom instructions were provided at the beginning of this prompt, analyze ALL PR files against those custom instructions BEFORE all other analysis. Custom instructions always take precedence.
-2. Analyze ALL PR files strictly against the standards, rules, and explanations in PROJECT GUIDELINES
-3. Identify specific deviations where any file violates custom instructions OR explicit guidelines. Note the source for each deviation found.
-4. Check for consistency of guideline application across all files
-5. Ensure architectural decisions are consistent across the PR
-
-### **STAGE 3: Historical Pattern Recognition**
-
-1. **CRITICAL**: Analyze HISTORICAL REVIEW COMMENTS to identify patterns:
-   - Types of issues human reviewers frequently flag in similar code
-   - Recurring themes across multiple historical comments
-   - High-relevance issues (>70% relevance score) that apply to current PR
-
-2. **Apply Historical Insights to Each File**:
-   - Identify DEFINITE issues that match historical patterns across PR files
-   - Apply reviewer suggestions that are relevant to current changes
-   - Look for patterns that span multiple files in the PR
-
-### **STAGE 4: Cross-File Integration Analysis**
-
-1. **Naming and Import Consistency**:
-   - Report naming inconsistencies only with specific examples and fixes
-   - Report import/export issues only with specific missing/incorrect imports identified
-   - Report duplicated logic only with specific refactoring suggestions
-
-2. **Test Coverage and Quality**:
-   - Report missing tests only if you can specify EXACTLY which test case should be added
-   - Report test pattern deviations only with specific code fixes
-   - Do NOT suggest "adding tests" without specifying the exact test
-
-3. **Architectural Integration**:
-   - Report breaking changes only if you can identify the SPECIFIC break
-   - Report API inconsistencies only with SPECIFIC mismatches identified
-   - Report separation of concerns issues only with SPECIFIC refactoring suggestions
-
-### **STAGE 5: Consolidate and Prioritize Issues**
-
-1. **Apply Conflict Resolution Rules**:
-   - **Guideline Precedence**: If pattern-based or historical insights contradict explicit guidelines, guidelines take precedence
-   - **Cross-File Priority**: Issues affecting multiple files get higher priority
-   - **Pattern Consistency**: Missing project-specific utilities/helpers are high priority if pattern appears in 3+ examples
-
-2. **Citation Rules**:
-   - For guideline violations: cite the specific guideline document
-   - For pattern deviations: cite specific code examples that demonstrate the correct pattern
-   - For historical issues: report as standard findings without referencing historical source
-   - For cross-file issues: specify all affected files
-
-3. **CRITICAL OUTPUT FILTER - Apply before reporting ANY issue**:
-   - **Only report issues where you have a DEFINITE problem AND a SPECIFIC code fix**
-   - **Do NOT report issues that require the developer to "verify", "ensure", or "check" something**
-   - **Do NOT report issues where you are uncertain** - if you find yourself writing "may", "might", "could", or "consider", do not report it
-   - **Do NOT suggest adding comments or documentation**
-
-4. Assess for DEFINITE logic errors or bugs only - do not report speculative issues.
-5. DO NOT check if any file referenced in a import statement, is missing.
-6. **CRITICAL 'lineNumbers' RULE - MANDATORY COMPLIANCE**:
-   - For ANY issue that occurs multiple times in a file, list ONLY the first 3-5 occurrences maximum
-   - NEVER provide exhaustive lists of line numbers (e.g., [1,2,3,4,5,6,7,8,9,10...])
-   - If an issue affects many lines, use representative examples only
-   - Exhaustive line number lists are considered hallucination and must be avoided
-   - Example: Instead of listing 20+ line numbers, use [15, 23, 47, "...and 12 other occurrences"]
-
-${getFinalReminderBlock()}
-
-${getCitationRequirementBlock()}
-
-REQUIRED JSON OUTPUT FORMAT:
-
-**REMINDER: For lineNumbers array, use ONLY 3-5 representative line numbers for repeated issues. NEVER provide exhaustive lists.**
-
-${getCodeSuggestionsFormatBlock()}
-
-You must respond with EXACTLY this JSON structure, with no additional text:
-
-{
-      "summary": "Brief, high-level summary of the entire PR review...",
-  "crossFileIssues": [
-    {
-          "type": "bug | improvement | convention | architecture",
-          "severity": "critical | high | medium",
-          "description": "Detailed description of an issue that spans multiple files...",
-          "suggestion": "Actionable suggestion to resolve the cross-file issue.",
-          "filesInvolved": ["path/to/file1.js", "path/to/file2.ts"]
-    }
-  ],
-  "fileSpecificIssues": {
-        "path/to/file1.js": [
-      {
-        "type": "bug | improvement | convention | performance | security",
-        "severity": "critical | high | medium",
-            "description": "Description of the issue specific to this file.",
-            "lineNumbers": [10, 15],
-            "suggestion": "Concrete suggestion for fixing the issue in this file.",
-            "codeSuggestion": {
-              "startLine": 10,
-              "endLine": 15,
-              "oldCode": "    const result = data.map(item => item.value);",
-              "newCode": "    const result = data?.map(item => item?.value) ?? [];"
-            }
-      }
-    ]
-  },
-  "recommendations": [
-    {
-          "type": "refactoring | testing | documentation",
-          "description": "A high-level recommendation for improving the codebase...",
-          "filesInvolved": ["path/to/relevant/file.js"]
-        }
-      ]
-    }
+**CRITICAL RULES**:
+- Review ONLY the CHANGED lines in the git diffs (lines with + or -)
+- For cross-file issues, specify all affected files
+- **ONLY report issues that require a code change** - if your analysis concludes the code is correct, DO NOT report it as an issue
+- Every issue MUST have a concrete code fix in the suggestion - never suggest "no action needed" or "the code is correct"
+- If you analyzed something and found it's fine, simply don't include it in the output
 `);
+
+  return { systemPrompt, userPrompt };
 }
 
 /**

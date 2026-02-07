@@ -54,6 +54,7 @@ program
   .option('--model <model>', 'LLM model to use (e.g., claude-sonnet-4-5)')
   .option('--temperature <number>', 'LLM temperature', parseFloat, 0.2)
   .option('--max-tokens <number>', 'LLM max tokens', parseInt, 8192)
+  .option('--cache-ttl <ttl>', 'Cache TTL for LLM prompts: "5m" (default, no extra cost) or "1h" (extended, extra cost for writes)', '5m')
   .option('--similarity-threshold <number>', 'Threshold for finding similar code examples', parseFloat, 0.6)
   .option('--max-examples <number>', 'Max similar code examples to use', parseInt, 5)
   .option('--concurrency <number>', 'Concurrency for processing multiple files', parseInt, 3)
@@ -329,6 +330,7 @@ async function runCodeReview(options) {
     model: options.model,
     temperature: options.temperature,
     maxTokens: options.maxTokens,
+    cacheTtl: options.cacheTtl,
     similarityThreshold: options.similarityThreshold,
     maxExamples: options.maxExamples,
     concurrency: options.concurrency,
