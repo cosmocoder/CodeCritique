@@ -50,10 +50,10 @@ Thank you for your interest in contributing to CodeCritique! This document provi
 
 ### Environment Setup
 
-1. **Copy the example environment file**:
+1. **Create a `.env` file** in the project root:
 
    ```bash
-   cp .env.example .env
+   touch .env
    ```
 
 2. **Add your API keys**:
@@ -81,12 +81,30 @@ npm run knip             # Check for unused dependencies
 ```
 src/
 ├── index.js                 # Main CLI entry point
-├── ai/                      # LLM integration (Anthropic Claude)
-├── embeddings/              # FastEmbed vector generation
-├── github/                  # GitHub API integration
+├── llm.js                   # LLM integration (Anthropic Claude)
+├── rag-analyzer.js          # RAG-based code analysis
+├── rag-review.js            # Code review orchestration
+├── project-analyzer.js      # Project structure analysis
+├── content-retrieval.js     # Context retrieval for RAG
+├── custom-documents.js      # Custom document processing
+├── feedback-loader.js       # Feedback tracking utilities
+├── zero-shot-classifier-open.js  # NLP classification
+├── embeddings/              # FastEmbed vector generation & LanceDB storage
+│   ├── factory.js           # Embeddings system factory
+│   ├── database.js          # LanceDB database manager
+│   ├── file-processor.js    # File processing for embeddings
+│   ├── model-manager.js     # Embedding model management
+│   └── ...
 ├── pr-history/              # PR history analysis
-├── storage/                 # LanceDB storage
-└── utils/                   # Utility functions
+│   ├── analyzer.js          # PR history analyzer
+│   ├── github-client.js     # GitHub API integration
+│   ├── database.js          # PR comments storage
+│   └── ...
+├── utils/                   # Utility functions
+│   ├── git.js               # Git operations
+│   ├── file-validation.js   # File validation
+│   └── ...
+└── test-utils/              # Test utilities and fixtures
 .github/
 ├── actions/                 # Reusable GitHub Actions
 │   ├── generate-embeddings/ # Embedding generation action
@@ -304,9 +322,9 @@ npm run test:coverage
 
 ### Adding Support for a New LLM Provider
 
-1. Create a new provider module in `src/ai/`
-2. Implement the standard interface for LLM interactions
-3. Add configuration options for the new provider
+1. Create a new provider module or extend `src/llm.js`
+2. Implement the standard interface for LLM interactions (see existing `sendPrompt` function)
+3. Add configuration options for the new provider (CLI flags, environment variables)
 4. Write tests with mocked API responses
 5. Document the new provider in README.md
 
@@ -347,6 +365,11 @@ npm run knip          # No unused dependencies
 ## Additional Resources
 
 - **[README.md](README.md)** - Project overview and user documentation
+- **[Architecture](docs/ARCHITECTURE.md)** - RAG architecture and component details
+- **[Commands Reference](docs/COMMANDS.md)** - Complete CLI command documentation
+- **[GitHub Actions](docs/GITHUB_ACTIONS.md)** - CI/CD integration guide
+- **[Output Formats](docs/OUTPUT_FORMATS.md)** - Output format examples
+- **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 
 ---
 

@@ -22,7 +22,7 @@ inputs:
     default: 'false'
 
   model:
-    description: 'LLM model to use (e.g., claude-sonnet-4-20250514)'
+    description: 'LLM model to use (e.g., claude-sonnet-4-5)'
     required: false
 
   max-tokens:
