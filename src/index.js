@@ -420,19 +420,18 @@ async function runCodeReview(options) {
         outputFn(reviewResult.results, options);
         console.log(chalk.bold.green(`\nAnalysis complete for ${operationDescription}! (${duration}s)`));
       } else {
-        console.log(chalk.yellow('No results to display. Review result structure:'));
-        console.log(chalk.yellow('reviewResult.results exists?'), reviewResult.results ? 'Yes' : 'No');
-        if (reviewResult.results) {
-          console.log(chalk.yellow('reviewResult.results type:'), typeof reviewResult.results);
-          console.log(chalk.yellow('reviewResult.results is array?'), Array.isArray(reviewResult.results));
-          if (!Array.isArray(reviewResult.results)) {
-            console.log(
-              chalk.yellow('reviewResult.results content:'),
-              JSON.stringify(reviewResult.results, null, 2).substring(0, 500) + '...'
-            );
-          }
+        // No results to display (e.g., all files were excluded/skipped)
+        const message = reviewResult.message || 'All files were excluded from review (e.g., config files, lock files).';
+        console.log(chalk.yellow(message));
+
+        // Still output empty results if outputFile is specified (for CI/CD pipelines)
+        if (options.outputFile) {
+          const outputFn = options.output === 'json' ? outputJson : options.output === 'markdown' ? outputMarkdown : outputText;
+          outputFn([], options);
+          console.log(chalk.yellow(`Empty results written to: ${options.outputFile}`));
         }
-        console.log(chalk.yellow(reviewResult.message || 'Review completed, but no results to display.'));
+
+        console.log(chalk.bold.yellow(`\nReview complete for ${operationDescription} - no reviewable files found (${duration}s)`));
       }
     } else {
       console.error(chalk.red('\nCode review process failed.'));
