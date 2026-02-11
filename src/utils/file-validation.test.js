@@ -243,8 +243,13 @@ describe('shouldProcessFile', () => {
       expect(shouldProcessFile('/project/Makefile', '')).toBe(true);
     });
 
-    it('should still reject other config files like Dockerfile', () => {
-      expect(shouldProcessFile('/project/Dockerfile', '')).toBe(false);
+    it('should accept Dockerfile for review (contains build logic and security-sensitive config)', () => {
+      // Dockerfile should be reviewed as it contains build commands and security-sensitive settings
+      expect(shouldProcessFile('/project/Dockerfile', '')).toBe(true);
+    });
+
+    it('should still reject ignore/pattern files like .dockerignore', () => {
+      expect(shouldProcessFile('/project/.dockerignore', '')).toBe(false);
     });
   });
 

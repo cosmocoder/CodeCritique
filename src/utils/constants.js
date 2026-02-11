@@ -228,7 +228,6 @@ export const SKIP_FILENAMES = [
   'vite.config.js',
   'vite.config.ts',
   'rollup.config.js',
-  'Dockerfile',
   '.dockerignore',
   '.gitignore',
   '.gitattributes',
