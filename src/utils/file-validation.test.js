@@ -237,6 +237,15 @@ describe('shouldProcessFile', () => {
       expect(shouldProcessFile('/project/package-lock.json', '')).toBe(false);
       expect(shouldProcessFile('/project/yarn.lock', '')).toBe(false);
     });
+
+    it('should accept Makefile for review (build automation files are valid code)', () => {
+      // Makefile should be reviewed as it contains build logic
+      expect(shouldProcessFile('/project/Makefile', '')).toBe(true);
+    });
+
+    it('should still reject other config files like Dockerfile', () => {
+      expect(shouldProcessFile('/project/Dockerfile', '')).toBe(false);
+    });
   });
 
   describe('custom exclude patterns', () => {
