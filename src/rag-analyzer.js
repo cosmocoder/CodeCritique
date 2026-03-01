@@ -774,7 +774,7 @@ async function callLLMForAnalysis(context, options = {}) {
       return {
         summary: analysisResponse.summary || 'Analysis completed with parsing issues',
         issues: Array.isArray(analysisResponse.issues) ? analysisResponse.issues : [],
-        rawResponse: analysisResponse.rawResponse || llmResponse.substring(0, 500),
+        rawResponse: analysisResponse.rawResponse || JSON.stringify(llmResponse).substring(0, 500),
         parseWarning: 'Response structure was reconstructed due to parsing issues',
       };
     }

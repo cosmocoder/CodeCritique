@@ -385,6 +385,17 @@ describe('rag-analyzer', () => {
       expect(result.results).toBeDefined();
     });
 
+    it('should reconstruct malformed responses without crashing', async () => {
+      llm.sendPromptToClaude.mockResolvedValue({
+        content: 'non-json fallback text',
+        json: { foo: 'bar' },
+      });
+      const result = await runAnalysis('/test/file.js');
+      expect(result.success).toBe(true);
+      expect(result.results.summary).toBeDefined();
+      expect(Array.isArray(result.results.issues)).toBe(true);
+    });
+
     it('should handle LLM response with null json', async () => {
       llm.sendPromptToClaude.mockResolvedValue({ json: null });
       const result = await runAnalysis('/test/file.js');
