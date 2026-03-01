@@ -576,35 +576,37 @@ async function generateEmbeddings(options) {
 
     // Start the progress update interval
     const progressInterval = setInterval(updateSpinner, 100);
+    let results;
+    try {
+      results = await embeddingsSystem.processBatchEmbeddings(filesToProcess, {
+        concurrency,
+        verbose: options.verbose,
+        excludePatterns,
+        respectGitignore: options.gitignore !== false,
+        baseDir: baseDir,
+        batchSize: 100, // Set a reasonable batch size
+        maxLines: parseInt(options.maxLines || '1000', 10),
+        onProgress: (status) => {
+          // Update counters based on status
+          if (status === 'processed') {
+            processedCount++;
+          } else if (status === 'skipped') {
+            skippedCount++;
+          } else if (status === 'failed') {
+            failedCount++;
+          } else if (status === 'excluded') {
+            excludedCount++;
+          }
 
-    const results = await embeddingsSystem.processBatchEmbeddings(filesToProcess, {
-      concurrency,
-      verbose: options.verbose,
-      excludePatterns,
-      respectGitignore: options.gitignore !== false,
-      baseDir: baseDir,
-      batchSize: 100, // Set a reasonable batch size
-      maxLines: parseInt(options.maxLines || '1000', 10),
-      onProgress: (status) => {
-        // Update counters based on status
-        if (status === 'processed') {
-          processedCount++;
-        } else if (status === 'skipped') {
-          skippedCount++;
-        } else if (status === 'failed') {
-          failedCount++;
-        } else if (status === 'excluded') {
-          excludedCount++;
-        }
-
-        // Update the spinner with new progress information
-        updateSpinner();
-      },
-    });
-
-    // Clean up the progress display
-    clearInterval(progressInterval);
-    spinner.stop(true);
+          // Update the spinner with new progress information
+          updateSpinner();
+        },
+      });
+    } finally {
+      // Clean up the progress display even if embedding generation fails.
+      clearInterval(progressInterval);
+      spinner.stop(true);
+    }
 
     console.log(chalk.green(`\nEmbedding generation complete!`));
     console.log(chalk.cyan(`Processed: ${results.processed} files`));

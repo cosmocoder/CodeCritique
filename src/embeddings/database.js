@@ -445,6 +445,14 @@ export class DatabaseManager {
       this.dbConnection = null;
       this.tablesInitialized = false;
       throw error;
+    } finally {
+      if (db) {
+        try {
+          await db.close();
+        } catch (closeError) {
+          console.warn(chalk.yellow(`Warning: Failed to close temporary database connection: ${closeError.message}`));
+        }
+      }
     }
   }
 
@@ -524,6 +532,14 @@ export class DatabaseManager {
     } catch (error) {
       console.error(chalk.red(`Error clearing project embeddings: ${error.message}`), error);
       throw error;
+    } finally {
+      if (db) {
+        try {
+          await db.close();
+        } catch (closeError) {
+          console.warn(chalk.yellow(`Warning: Failed to close temporary database connection: ${closeError.message}`));
+        }
+      }
     }
   }
 

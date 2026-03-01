@@ -257,6 +257,11 @@ export default async ({ github, context, core }) => {
     const currentFeedback = {};
 
     // Check if review output exists
+    if (!reviewOutputPath) {
+      console.log('❌ REVIEW_OUTPUT_PATH is not set');
+      return;
+    }
+
     if (!fs.existsSync(reviewOutputPath)) {
       console.log('❌ Review output file not found');
       return;

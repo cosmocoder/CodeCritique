@@ -392,11 +392,11 @@ describe('PR History Database', () => {
 
   describe('getLastAnalysisTimestamp', () => {
     const setupMockLastAnalysis = (results) => {
-      mockTable.search.mockReturnValue({
+      mockTable.query.mockReturnValue({
         where: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockReturnThis(),
         select: vi.fn().mockReturnThis(),
         orderBy: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
         toArray: vi.fn().mockResolvedValue(results),
       });
     };
@@ -407,11 +407,11 @@ describe('PR History Database', () => {
       [
         'null on errors',
         () =>
-          mockTable.search.mockReturnValue({
+          mockTable.query.mockReturnValue({
             where: vi.fn().mockReturnThis(),
-            limit: vi.fn().mockReturnThis(),
             select: vi.fn().mockReturnThis(),
             orderBy: vi.fn().mockReturnThis(),
+            limit: vi.fn().mockReturnThis(),
             toArray: vi.fn().mockRejectedValue(new Error('Search error')),
           }),
         null,
