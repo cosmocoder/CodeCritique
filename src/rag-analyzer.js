@@ -27,6 +27,7 @@ import { isGenericDocument, getGenericDocumentContext } from './utils/document-d
 import { isTestFile, shouldProcessFile } from './utils/file-validation.js';
 import { detectFileType, detectLanguageFromExtension } from './utils/language-detection.js';
 import { debug } from './utils/logging.js';
+import { addLineNumbers } from './utils/string-utils.js';
 
 // Constants for content processing
 const MAX_QUERY_CONTEXT_LENGTH = 1500;
@@ -1047,10 +1048,10 @@ You have access to TWO pieces of information:
 - Do NOT flag functions/variables as missing if they exist elsewhere in the full file
 - The unchanged code is part of the file - check it before making assumptions
 
-**FULL FILE CONTENT (for context - DO NOT review unchanged code):**
+**FULL FILE CONTENT (for context - DO NOT review unchanged code, line numbers shown for reference):**
 
 \`\`\`${file.language}
-${file.fullFileContent || file.content}
+${addLineNumbers(file.fullFileContent || file.content)}
 \`\`\`
 
 **GIT DIFF TO REVIEW (critique ONLY these changes):**
@@ -1063,7 +1064,7 @@ Path: ${file.path}
 Language: ${file.language}
 
 \`\`\`${file.language}
-${file.content}
+${addLineNumbers(file.content)}
 \`\`\``;
 
   // Add project architecture context if available
@@ -1166,10 +1167,10 @@ You have access to TWO pieces of information:
 - Check the full file for existing test cases before making assumptions
 - The unchanged test code is part of the file - review it before suggesting additions
 
-**FULL TEST FILE CONTENT (for context - check for existing tests):**
+**FULL TEST FILE CONTENT (for context - check for existing tests, line numbers shown for reference):**
 
 \`\`\`${file.language}
-${file.fullFileContent || file.content}
+${addLineNumbers(file.fullFileContent || file.content)}
 \`\`\`
 
 **GIT DIFF TO REVIEW (critique ONLY these changes):**
@@ -1182,7 +1183,7 @@ Path: ${file.path}
 Language: ${file.language}
 
 \`\`\`${file.language}
-${file.content}
+${addLineNumbers(file.content)}
 \`\`\``;
 
   // Use shared helpers for custom docs and role definition
@@ -1317,9 +1318,9 @@ ${g.content}
 ${prFile.diff}
 \`\`\`
 
-### Full File Content (For Context):
+### Full File Content (For Context - line numbers shown for reference):
 \`\`\`${prFile.language}
-${prFile.fullContent}
+${addLineNumbers(prFile.fullContent)}
 \`\`\`
 `;
     })

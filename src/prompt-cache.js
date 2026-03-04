@@ -195,6 +195,7 @@ Code suggestions enable reviewers to apply fixes directly as GitHub suggestions.
  */
 const LINE_NUMBERS_RULE = `**CRITICAL 'lineNumbers' RULE - MANDATORY COMPLIANCE**:
 - **ALWAYS provide line numbers** - this field is REQUIRED for every issue
+- **Line numbers are shown in the file content** as a prefix on each line (e.g., "  42 | const x = 1;"). Use THESE line numbers directly - do NOT try to count lines yourself.
 - If you can identify specific lines, provide them (max 3-5 for repeated issues)
 - If the issue affects the entire file or cannot be pinpointed, provide [1] or relevant section line numbers
 - For ANY issue that occurs multiple times in a file, list ONLY the first 3-5 occurrences maximum
