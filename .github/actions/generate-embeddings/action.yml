@@ -91,45 +91,44 @@ runs:
       run: |
         echo "🧠 Generating embeddings for codebase..."
 
-        # Build command arguments based on actual CLI options
-        ARGS="embeddings:generate"
-        ARGS="${ARGS} --directory \"$GITHUB_WORKSPACE\""
+        # Build command arguments safely - avoid eval/string interpolation
+        ARGS=("embeddings:generate" "--directory" "$GITHUB_WORKSPACE")
 
         # Add concurrency only if provided
         if [ -n "${{ inputs.concurrency }}" ]; then
-          ARGS="${ARGS} --concurrency ${{ inputs.concurrency }}"
+          ARGS+=("--concurrency" "${{ inputs.concurrency }}")
         fi
 
         # Add specific files if provided
         if [ -n "${{ inputs.files }}" ]; then
           for file_pattern in ${{ inputs.files }}; do
-            ARGS="${ARGS} --files '${file_pattern}'"
+            ARGS+=("--files" "${file_pattern}")
           done
         fi
 
         # Always exclude action-related directories and files
-        ARGS="${ARGS} --exclude 'codecritique-tool/**'"
-        ARGS="${ARGS} --exclude '.codecritique-artifacts/**'"
+        ARGS+=("--exclude" "codecritique-tool/**")
+        ARGS+=("--exclude" ".codecritique-artifacts/**")
 
         # Add user-specified exclude patterns
         if [ -n "${{ inputs.exclude }}" ]; then
           for pattern in ${{ inputs.exclude }}; do
-            ARGS="${ARGS} --exclude '${pattern}'"
+            ARGS+=("--exclude" "${pattern}")
           done
         fi
 
         # Add exclude file if specified
         if [ -n "${{ inputs.exclude-file }}" ] && [ -f "$GITHUB_WORKSPACE/${{ inputs.exclude-file }}" ]; then
-          ARGS="${ARGS} --exclude-file \"$GITHUB_WORKSPACE/${{ inputs.exclude-file }}\""
+          ARGS+=("--exclude-file" "$GITHUB_WORKSPACE/${{ inputs.exclude-file }}")
         fi
 
         # Add verbose flag
         if [ "${{ inputs.verbose }}" = "true" ]; then
-          ARGS="${ARGS} --verbose"
+          ARGS+=("--verbose")
         fi
 
         # Execute with error handling
-        if eval "node src/index.js ${ARGS}"; then
+        if node src/index.js "${ARGS[@]}"; then
           echo "✅ Embedding generation completed successfully"
           echo "success=true" >> $GITHUB_OUTPUT
         else

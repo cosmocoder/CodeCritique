@@ -350,7 +350,7 @@ export class CustomDocumentProcessor {
       }
 
       // Try cache manager
-      const cachedChunks = await this.cacheManager.getCustomDocuments(resolvedProjectPath);
+      const cachedChunks = this.cacheManager.getCustomDocumentChunks(resolvedProjectPath);
       if (cachedChunks && cachedChunks.length > 0) {
         // Restore to memory
         this.customDocumentChunks.set(resolvedProjectPath, cachedChunks);
@@ -520,7 +520,7 @@ export class CustomDocumentProcessor {
     try {
       const resolvedProjectPath = path.resolve(projectPath);
       this.customDocumentChunks.delete(resolvedProjectPath);
-      await this.cacheManager.clearCustomDocuments(resolvedProjectPath);
+      this.cacheManager.customDocumentChunks.delete(resolvedProjectPath);
       console.log(chalk.green(`Cleared custom document chunks for project: ${resolvedProjectPath}`));
     } catch (error) {
       console.error(chalk.red(`Error clearing project chunks: ${error.message}`));

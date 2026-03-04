@@ -156,33 +156,33 @@ runs:
         DEBUG: ${{ inputs.verbose }}
         VERBOSE: ${{ inputs.verbose }}
       run: |
-        # Build CLI command arguments - analyze workspace directly
-        CLI_ARGS="analyze -b ${{ github.head_ref }} --directory \"$GITHUB_WORKSPACE\""
+        # Build CLI command arguments safely - avoid eval/string interpolation.
+        CLI_ARGS=("analyze" "-b" "${{ github.head_ref }}" "--directory" "$GITHUB_WORKSPACE")
 
         # Add output format and output file (always JSON)
-        CLI_ARGS="$CLI_ARGS --output json --output-file review_output.json"
+        CLI_ARGS+=("--output" "json" "--output-file" "review_output.json")
 
         # Add verbose flag if enabled
         if [ "${{ inputs.verbose }}" = "true" ]; then
-          CLI_ARGS="$CLI_ARGS --verbose"
+          CLI_ARGS+=("--verbose")
         fi
 
         # Add model configuration
         if [ -n "${{ inputs.model }}" ]; then
-          CLI_ARGS="$CLI_ARGS --model ${{ inputs.model }}"
+          CLI_ARGS+=("--model" "${{ inputs.model }}")
         fi
 
         # Only add optional parameters if they have values
         if [ -n "${{ inputs.max-tokens }}" ]; then
-          CLI_ARGS="$CLI_ARGS --max-tokens ${{ inputs.max-tokens }}"
+          CLI_ARGS+=("--max-tokens" "${{ inputs.max-tokens }}")
         fi
 
         if [ -n "${{ inputs.cache-ttl }}" ]; then
-          CLI_ARGS="$CLI_ARGS --cache-ttl ${{ inputs.cache-ttl }}"
+          CLI_ARGS+=("--cache-ttl" "${{ inputs.cache-ttl }}")
         fi
 
         if [ -n "${{ inputs.concurrency }}" ]; then
-          CLI_ARGS="$CLI_ARGS --concurrency ${{ inputs.concurrency }}"
+          CLI_ARGS+=("--concurrency" "${{ inputs.concurrency }}")
         fi
 
         # Add custom documents if specified
@@ -190,22 +190,21 @@ runs:
           IFS=',' read -ra DOCS <<< "${{ inputs.custom-docs }}"
           for doc in "${DOCS[@]}"; do
             if [ -n "$doc" ]; then
-              CLI_ARGS="$CLI_ARGS --doc \"$doc\""
+              CLI_ARGS+=("--doc" "$doc")
             fi
           done
         fi
 
         # Add feedback parameters
-        CLI_ARGS="$CLI_ARGS --track-feedback"
-        CLI_ARGS="$CLI_ARGS --feedback-path \"$GITHUB_WORKSPACE/.ai-feedback\""
+        CLI_ARGS+=("--track-feedback" "--feedback-path" "$GITHUB_WORKSPACE/.ai-feedback")
 
         # Run the AI code review
         echo "🤖 Running AI Code Review..."
-        echo "Command: node src/index.js $CLI_ARGS"
+        echo "Command: node src/index.js ${CLI_ARGS[*]}"
 
         # Execute the command and capture output
         # Run the CLI - JSON output goes to file, logs to console
-        eval "node src/index.js $CLI_ARGS" || {
+        node src/index.js "${CLI_ARGS[@]}" || {
           echo "❌ AI Code Review failed"
           exit 1
         }

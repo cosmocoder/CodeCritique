@@ -138,7 +138,7 @@ describe('ensureBranchExists', () => {
       if (cmd === 'git show-ref' && args?.includes('refs/remotes/origin/feature-branch')) {
         return ''; // Remote branch exists
       }
-      if (cmd === 'git checkout') {
+      if (cmd === 'git branch') {
         return '';
       }
       throw new Error('Unexpected call');
@@ -163,11 +163,12 @@ describe('ensureBranchExists', () => {
 
 describe('getChangedLinesInfo', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mockConsoleSelective('error');
   });
 
   it('should parse added lines from diff', () => {
-    execSync.mockReturnValue(`@@ -10,3 +10,5 @@ function test() {
+    command.execGitSafe.mockReturnValue(`@@ -10,3 +10,5 @@ function test() {
  context line
 +added line 1
 +added line 2
@@ -185,7 +186,7 @@ describe('getChangedLinesInfo', () => {
   });
 
   it('should parse removed lines from diff', () => {
-    execSync.mockReturnValue(`@@ -10,4 +10,2 @@ function test() {
+    command.execGitSafe.mockReturnValue(`@@ -10,4 +10,2 @@ function test() {
  context line
 -removed line 1
 -removed line 2
@@ -201,7 +202,7 @@ describe('getChangedLinesInfo', () => {
   });
 
   it('should parse context lines from diff', () => {
-    execSync.mockReturnValue(`@@ -10,3 +10,4 @@ function test() {
+    command.execGitSafe.mockReturnValue(`@@ -10,3 +10,4 @@ function test() {
  context before
 +added line
  context after
@@ -215,7 +216,7 @@ describe('getChangedLinesInfo', () => {
   });
 
   it('should return hasChanges false for empty diff', () => {
-    execSync.mockReturnValue('');
+    command.execGitSafe.mockReturnValue('');
 
     const result = getChangedLinesInfo('src/file.js', 'main', 'feature');
 
@@ -225,7 +226,7 @@ describe('getChangedLinesInfo', () => {
   });
 
   it('should handle multiple hunks', () => {
-    execSync.mockReturnValue(`@@ -5,3 +5,4 @@ first section
+    command.execGitSafe.mockReturnValue(`@@ -5,3 +5,4 @@ first section
  context
 +first add
  more context
@@ -242,7 +243,7 @@ describe('getChangedLinesInfo', () => {
   });
 
   it('should handle hunk headers without line counts', () => {
-    execSync.mockReturnValue(`@@ -10 +10 @@ function
+    command.execGitSafe.mockReturnValue(`@@ -10 +10 @@ function
 +single line change
 `);
 
@@ -254,7 +255,7 @@ describe('getChangedLinesInfo', () => {
 
   it('should include full diff in result', () => {
     const diffContent = '@@ -1,1 +1,2 @@\n context\n+added';
-    execSync.mockReturnValue(diffContent);
+    command.execGitSafe.mockReturnValue(diffContent);
 
     const result = getChangedLinesInfo('src/file.js', 'main', 'feature');
 
@@ -262,7 +263,7 @@ describe('getChangedLinesInfo', () => {
   });
 
   it('should handle errors gracefully', () => {
-    execSync.mockImplementation(() => {
+    command.execGitSafe.mockImplementation(() => {
       throw new Error('Git error');
     });
 

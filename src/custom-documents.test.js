@@ -11,8 +11,7 @@ vi.mock('./embeddings/model-manager.js', () => ({
 vi.mock('./embeddings/cache-manager.js', () => ({
   CacheManager: class {
     storeCustomDocuments = vi.fn().mockResolvedValue(undefined);
-    getCustomDocuments = vi.fn().mockResolvedValue([]);
-    clearCustomDocuments = vi.fn().mockResolvedValue(undefined);
+    getCustomDocumentChunks = vi.fn().mockReturnValue([]);
   },
 }));
 
@@ -32,8 +31,7 @@ describe('CustomDocumentProcessor', () => {
 
     mockCacheManager = {
       storeCustomDocuments: vi.fn().mockResolvedValue(undefined),
-      getCustomDocuments: vi.fn().mockResolvedValue([]),
-      clearCustomDocuments: vi.fn().mockResolvedValue(undefined),
+      getCustomDocumentChunks: vi.fn().mockReturnValue([]),
     };
 
     processor = new CustomDocumentProcessor({
@@ -319,7 +317,7 @@ describe('CustomDocumentProcessor', () => {
 
     it('should return chunks from cache if not in memory', async () => {
       const cachedChunks = [{ id: 'cached', content: 'from cache' }];
-      mockCacheManager.getCustomDocuments.mockResolvedValue(cachedChunks);
+      mockCacheManager.getCustomDocumentChunks.mockReturnValue(cachedChunks);
 
       const result = await processor.getExistingChunks('/project');
 
@@ -328,7 +326,7 @@ describe('CustomDocumentProcessor', () => {
 
     it('should restore cached chunks to memory', async () => {
       const cachedChunks = [{ id: 'cached', content: 'from cache' }];
-      mockCacheManager.getCustomDocuments.mockResolvedValue(cachedChunks);
+      mockCacheManager.getCustomDocumentChunks.mockReturnValue(cachedChunks);
 
       await processor.getExistingChunks('/project');
 
@@ -336,7 +334,7 @@ describe('CustomDocumentProcessor', () => {
     });
 
     it('should return empty array when no chunks exist', async () => {
-      mockCacheManager.getCustomDocuments.mockResolvedValue([]);
+      mockCacheManager.getCustomDocumentChunks.mockReturnValue([]);
 
       const result = await processor.getExistingChunks('/project');
 
@@ -353,10 +351,14 @@ describe('CustomDocumentProcessor', () => {
       expect(processor.customDocumentChunks.has('/project')).toBe(false);
     });
 
-    it('should clear chunks from cache', async () => {
+    it('should clear chunks for only the selected project', async () => {
+      processor.customDocumentChunks.set('/project', [{ id: 'chunk-a' }]);
+      processor.customDocumentChunks.set('/other', [{ id: 'chunk-b' }]);
+
       await processor.clearProjectChunks('/project');
 
-      expect(mockCacheManager.clearCustomDocuments).toHaveBeenCalled();
+      expect(processor.customDocumentChunks.has('/project')).toBe(false);
+      expect(processor.customDocumentChunks.has('/other')).toBe(true);
     });
   });
 

@@ -65,8 +65,8 @@ export function ensureBranchExists(branchName, workingDir = process.cwd()) {
       // Check if branch exists on remote
       try {
         execGitSafe('git show-ref', ['--verify', '--quiet', `refs/remotes/origin/${branchName}`], { cwd: workingDir });
-        // Create local tracking branch
-        execGitSafe('git checkout', ['-b', branchName, `origin/${branchName}`], { stdio: 'pipe', cwd: workingDir });
+        // Create local tracking branch without switching working tree.
+        execGitSafe('git branch', ['--track', branchName, `origin/${branchName}`], { stdio: 'pipe', cwd: workingDir });
         console.log(chalk.green(`Successfully created local branch '${branchName}' tracking origin/${branchName}`));
       } catch {
         throw new Error(`Branch '${branchName}' not found locally or on remote origin`);
@@ -125,10 +125,8 @@ export function findBaseBranch(workingDir = process.cwd()) {
  */
 function getFileDiff(filePath, baseBranch, targetBranch, workingDir = process.cwd()) {
   try {
-    // Use git diff to get changes for the specific file
-    // Format: git diff base...target -- filepath
-    const gitCommand = `git diff ${baseBranch}...${targetBranch} -- "${filePath}"`;
-    const diffOutput = execSync(gitCommand, { cwd: workingDir, encoding: 'utf8' });
+    // Use safely escaped args to avoid command injection.
+    const diffOutput = execGitSafe('git diff', [`${baseBranch}...${targetBranch}`, '--', filePath], { cwd: workingDir, encoding: 'utf8' });
 
     return diffOutput;
   } catch (error) {

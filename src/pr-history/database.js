@@ -421,11 +421,11 @@ export async function getLastAnalysisTimestamp(repository, projectPath) {
     const filters = [`repository = '${repository.replace(/'/g, "''")}'`, `project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`];
 
     const results = await table
-      .search()
+      .query()
       .where(filters.join(' AND '))
-      .limit(1)
       .select(['created_at'])
       .orderBy([{ column: 'created_at', order: 'desc' }])
+      .limit(1)
       .toArray();
 
     if (results.length > 0) {
