@@ -24,6 +24,8 @@ import * as lancedb from '@lancedb/lancedb';
 import { Field, FixedSizeList, Float32, Int32, Schema, Utf8 } from 'apache-arrow';
 import chalk from 'chalk';
 import { debug, verboseLog } from '../utils/logging.js';
+import { isPathWithinProject } from '../utils/path-utils.js';
+import { escapeSqlString } from '../utils/string-utils.js';
 import { EMBEDDING_DIMENSIONS, TABLE_NAMES } from './constants.js';
 import { LANCEDB_PATH } from './constants.js';
 import { createDatabaseError, ERROR_CODES } from './errors.js';
@@ -467,7 +469,6 @@ export class DatabaseManager {
     let db = null;
     try {
       const resolvedProjectPath = path.resolve(projectPath);
-      const projectName = path.basename(resolvedProjectPath);
 
       // Safety check: ensure project path is valid and not root
       if (!resolvedProjectPath || resolvedProjectPath === '/' || resolvedProjectPath === path.resolve('/')) {
@@ -480,7 +481,7 @@ export class DatabaseManager {
         throw new Error(`Project path too generic: ${resolvedProjectPath}. For safety, project must be at least 3 levels deep.`);
       }
 
-      verboseLog({}, chalk.cyan(`Clearing embeddings for project: ${resolvedProjectPath} (${projectName})`));
+      verboseLog({}, chalk.cyan(`Clearing embeddings for project: ${resolvedProjectPath}`));
 
       if (!fs.existsSync(this.dbPath)) {
         verboseLog({}, chalk.yellow('LanceDB directory does not exist, nothing to clear.'));
@@ -495,27 +496,21 @@ export class DatabaseManager {
       if (tableNames.includes(this.fileEmbeddingsTable)) {
         const fileTable = await db.openTable(this.fileEmbeddingsTable);
         await this._validateTableHasProjectPath(fileTable, this.fileEmbeddingsTable);
-        deletedCount += await this._clearProjectTableRecords(
-          db,
-          this.fileEmbeddingsTable,
-          resolvedProjectPath,
-          projectName,
-          'project_path'
-        );
+        deletedCount += await this._clearProjectTableRecords(db, this.fileEmbeddingsTable, resolvedProjectPath, 'project_path');
       }
 
       // Clear document chunk embeddings for this project
       if (tableNames.includes(this.documentChunkTable)) {
         const docTable = await db.openTable(this.documentChunkTable);
         await this._validateTableHasProjectPath(docTable, this.documentChunkTable);
-        deletedCount += await this._clearProjectTableRecords(db, this.documentChunkTable, resolvedProjectPath, projectName, 'project_path');
+        deletedCount += await this._clearProjectTableRecords(db, this.documentChunkTable, resolvedProjectPath, 'project_path');
       }
 
       // Clear project summaries for this project
       if (tableNames.includes(PROJECT_SUMMARIES_TABLE)) {
         const summariesTable = await db.openTable(PROJECT_SUMMARIES_TABLE);
         await this._validateTableHasProjectPath(summariesTable, PROJECT_SUMMARIES_TABLE);
-        deletedCount += await this._clearProjectTableRecords(db, PROJECT_SUMMARIES_TABLE, resolvedProjectPath, projectName, 'project_path');
+        deletedCount += await this._clearProjectTableRecords(db, PROJECT_SUMMARIES_TABLE, resolvedProjectPath, 'project_path');
       }
 
       // Note: PR comments are cleared via separate pr-history:clear command
@@ -543,6 +538,82 @@ export class DatabaseManager {
         }
       }
     }
+  }
+
+  /**
+   * Prune file embeddings whose paths are no longer live for a project.
+   * @param {string} projectPath - Project path
+   * @param {Iterable<string>} livePaths - Paths that should remain
+   * @returns {Promise<number>} Number of deleted records
+   */
+  async pruneProjectFileEmbeddings(projectPath, livePaths = []) {
+    const resolvedProjectPath = path.resolve(projectPath);
+    const table = await this.getTable(this.fileEmbeddingsTable);
+    if (!table) {
+      return 0;
+    }
+
+    const livePathSet = new Set(Array.from(livePaths));
+    const records = await table
+      .query()
+      .where(`project_path = '${escapeSqlString(resolvedProjectPath)}'`)
+      .toArray();
+    let deletedCount = 0;
+
+    for (const record of records) {
+      if (record.type === 'directory-structure') {
+        continue;
+      }
+
+      if (!record.path || livePathSet.has(record.path)) {
+        continue;
+      }
+
+      try {
+        await table.delete(`id = '${escapeSqlString(record.id)}'`);
+        deletedCount++;
+      } catch (deleteError) {
+        console.warn(chalk.yellow(`Warning: Could not prune file embedding ${record.id}: ${deleteError.message}`));
+      }
+    }
+
+    return deletedCount;
+  }
+
+  /**
+   * Prune document chunk embeddings whose source docs are no longer live for a project.
+   * @param {string} projectPath - Project path
+   * @param {Iterable<string>} liveDocumentPaths - Document paths that should remain
+   * @returns {Promise<number>} Number of deleted records
+   */
+  async pruneProjectDocumentChunks(projectPath, liveDocumentPaths = []) {
+    const resolvedProjectPath = path.resolve(projectPath);
+    const table = await this.getTable(this.documentChunkTable);
+    if (!table) {
+      return 0;
+    }
+
+    const liveDocumentPathSet = new Set(Array.from(liveDocumentPaths));
+    const records = await table
+      .query()
+      .where(`project_path = '${escapeSqlString(resolvedProjectPath)}'`)
+      .toArray();
+    let deletedCount = 0;
+
+    for (const record of records) {
+      if (!record.original_document_path || liveDocumentPathSet.has(record.original_document_path)) {
+        continue;
+      }
+
+      try {
+        await table.delete(`id = '${escapeSqlString(record.id)}'`);
+        deletedCount++;
+      } catch (deleteError) {
+        console.warn(chalk.yellow(`Warning: Could not prune document chunk ${record.id}: ${deleteError.message}`));
+      }
+    }
+
+    return deletedCount;
   }
 
   // ============================================================================
@@ -673,32 +744,24 @@ export class DatabaseManager {
    * @param {LanceDBConnection} db - Database connection
    * @param {string} tableName - Table name
    * @param {string} resolvedProjectPath - Resolved project path
-   * @param {string} projectName - Project name
    * @param {string} pathField - Path field name
    * @returns {Promise<number>} Number of deleted records
    * @private
    */
-  async _clearProjectTableRecords(db, tableName, resolvedProjectPath, projectName, pathField) {
+  async _clearProjectTableRecords(db, tableName, resolvedProjectPath, pathField) {
     const table = await db.openTable(tableName);
     const allRecords = await table.query().toArray();
 
     const projectRecords = allRecords.filter((record) => {
       if (!record[pathField]) return false;
 
-      // Check for project-specific structure
-      if (record.id === `__project_structure__${projectName}` || record.id === '__project_structure__') {
-        return true;
-      }
-
       // Check if this record belongs to the current project
       try {
         if (pathField === 'project_path') {
-          // For project_path field, do direct equality check
           return record[pathField] === resolvedProjectPath;
         } else {
-          // For other path fields (like 'path'), resolve relative to project path
           const absolutePath = path.resolve(resolvedProjectPath, record[pathField]);
-          return absolutePath.startsWith(resolvedProjectPath);
+          return isPathWithinProject(absolutePath, resolvedProjectPath);
         }
       } catch {
         return false;
@@ -711,7 +774,7 @@ export class DatabaseManager {
       let deletedCount = 0;
       for (const record of projectRecords) {
         try {
-          await table.delete(`id = '${record.id.replace(/'/g, "''")}'`);
+          await table.delete(`id = '${escapeSqlString(record.id)}'`);
           deletedCount++;
         } catch (deleteError) {
           console.warn(chalk.yellow(`Warning: Could not delete record ${record.id}: ${deleteError.message}`));

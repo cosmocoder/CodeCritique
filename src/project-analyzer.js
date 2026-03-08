@@ -209,12 +209,17 @@ export class ProjectAnalyzer {
       // Check for existing analysis
       const existingSummary = forceAnalysis ? null : await this.loadExistingAnalysis(projectPath);
       if (existingSummary && !forceAnalysis) {
-        const currentHash = await this.calculateKeyFilesHash(existingSummary.keyFiles);
-        if (existingSummary.keyFilesHash === currentHash) {
-          verboseLog(verbose, chalk.green('✅ Project analysis up-to-date (no key file changes detected)'));
-          return existingSummary;
+        const currentEmbeddingInventoryHash = await this.calculateEmbeddingInventoryHash(projectPath);
+        if (existingSummary.embeddingInventoryHash !== currentEmbeddingInventoryHash) {
+          verboseLog(verbose, chalk.yellow('🔄 Embedding inventory changed, regenerating analysis...'));
+        } else {
+          const currentHash = await this.calculateKeyFilesHash(existingSummary.keyFiles);
+          if (existingSummary.keyFilesHash === currentHash) {
+            verboseLog(verbose, chalk.green('✅ Project analysis up-to-date (no key file changes detected)'));
+            return existingSummary;
+          }
+          verboseLog(verbose, chalk.yellow('🔄 Key files changed, regenerating analysis...'));
         }
-        verboseLog(verbose, chalk.yellow('🔄 Key files changed, regenerating analysis...'));
       } else {
         verboseLog(
           verbose,
@@ -241,6 +246,7 @@ export class ProjectAnalyzer {
       const currentHash = await this.calculateKeyFilesHash(keyFiles);
       projectSummary.keyFiles = keyFiles;
       projectSummary.keyFilesHash = currentHash;
+      projectSummary.embeddingInventoryHash = await this.calculateEmbeddingInventoryHash(projectPath);
 
       await this.storeAnalysis(projectPath, projectSummary);
 
@@ -611,6 +617,39 @@ Select files following the criteria in the system instructions.`;
     }
 
     return hash.digest('hex');
+  }
+
+  /**
+   * Calculate a project-scoped hash of the current embedding inventory.
+   */
+  async calculateEmbeddingInventoryHash(projectPath) {
+    try {
+      const embeddingsSystem = getDefaultEmbeddingsSystem();
+      await embeddingsSystem.initialize();
+      const table = await embeddingsSystem.databaseManager.getTable(embeddingsSystem.databaseManager.fileEmbeddingsTable);
+
+      if (!table) {
+        return 'no-file-embeddings-table';
+      }
+
+      const records = await table
+        .query()
+        .select(['type', 'path', 'content_hash', 'project_path'])
+        .where(`project_path = '${projectPath.replace(/'/g, "''")}'`)
+        .toArray();
+
+      const hash = crypto.createHash('sha256');
+      const normalizedRows = records.map((record) => `${record.type || 'file'}:${record.path || ''}:${record.content_hash || ''}`).sort();
+
+      for (const row of normalizedRows) {
+        hash.update(row);
+      }
+
+      return hash.digest('hex');
+    } catch (error) {
+      verboseLog({}, chalk.yellow(`Warning: Could not calculate embedding inventory hash: ${error.message}`));
+      return 'embedding-inventory-unavailable';
+    }
   }
 
   /**

@@ -1,4 +1,4 @@
-import { slugify, addLineNumbers } from './string-utils.js';
+import { slugify, addLineNumbers, escapeSqlString } from './string-utils.js';
 
 describe('slugify', () => {
   describe('basic transformations', () => {
@@ -151,5 +151,19 @@ describe('addLineNumbers', () => {
       const result = addLineNumbers(input);
       expect(result).toBe('1 | line1\n2 | line2\n3 | ');
     });
+  });
+});
+
+describe('escapeSqlString', () => {
+  it('should escape single quotes', () => {
+    expect(escapeSqlString("it's fine")).toBe("it''s fine");
+  });
+
+  it('should coerce non-string values', () => {
+    expect(escapeSqlString(42)).toBe('42');
+  });
+
+  it('should leave strings without single quotes unchanged', () => {
+    expect(escapeSqlString('plain text')).toBe('plain text');
   });
 });

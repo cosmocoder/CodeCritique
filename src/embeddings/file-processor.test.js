@@ -174,7 +174,11 @@ describe('FileProcessor', () => {
     });
 
     it('should delete existing structure embedding before adding new one', async () => {
-      fs.readdirSync.mockReturnValue([]);
+      fs.readdirSync.mockReturnValue([createDirEntry('file.js')]);
+      mockTable.query.mockReturnValue({
+        where: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([{ id: 'existing-structure', content_hash: 'different' }]),
+      });
       await processor.generateDirectoryStructureEmbedding();
       expect(mockTable.delete).toHaveBeenCalled();
     });
@@ -281,7 +285,7 @@ describe('FileProcessor', () => {
     });
 
     it('should handle file table not found', async () => {
-      mockDatabaseManager.getTable.mockResolvedValueOnce(mockTable).mockResolvedValueOnce(null);
+      mockDatabaseManager.getTable.mockResolvedValue(null);
       fs.readdirSync.mockReturnValue([]);
       const result = await processor.processBatchEmbeddings(['/test/file.js']);
       expect(result.failed).toBe(1);
@@ -371,7 +375,19 @@ describe('FileProcessor', () => {
         toArray: vi.fn().mockResolvedValue([{ path: 'file.js', content_hash: 'abc12345', last_modified: new Date().toISOString() }]),
       });
       const result = await processor.processBatchEmbeddings(['/test/file.js'], { baseDir: '/test' });
-      expect(result.skipped).toBeGreaterThanOrEqual(0);
+      expect(result.skipped).toBeGreaterThan(0);
+      expect(mockModelManager.calculateEmbeddingBatch).not.toHaveBeenCalled();
+    });
+
+    it('should ignore CI-style mtime churn when content hash is unchanged', async () => {
+      setupFileSystemMocks();
+      mockTable.query.mockReturnValue({
+        where: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([{ path: 'file.js', content_hash: 'abc12345', last_modified: '2000-01-01T00:00:00.000Z' }]),
+      });
+      const result = await processor.processBatchEmbeddings(['/test/file.js'], { baseDir: '/test' });
+      expect(result.skipped).toBeGreaterThan(0);
+      expect(mockModelManager.calculateEmbeddingBatch).not.toHaveBeenCalled();
     });
 
     it('should delete old version when content hash differs', async () => {
@@ -469,7 +485,9 @@ describe('FileProcessor', () => {
         documentH1: 'Document Title',
       });
       setupFileSystemMocks('# Title\n\n## Section 1\nContent');
-      mockModelManager.calculateEmbeddingBatch.mockResolvedValue([createMockEmbedding(), createMockEmbedding()]);
+      mockModelManager.calculateEmbeddingBatch
+        .mockResolvedValueOnce([createMockEmbedding()])
+        .mockResolvedValueOnce([createMockEmbedding(), createMockEmbedding()]);
       expect(await processor.processBatchEmbeddings(['/test/doc.md'], { baseDir: '/test' })).toBeDefined();
     });
 
@@ -481,10 +499,13 @@ describe('FileProcessor', () => {
       const docMockTable = createMockTable({
         query: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
-          toArray: vi.fn().mockResolvedValue([{ original_document_path: 'doc.md', content_hash: 'abc12345' }]),
+          toArray: vi.fn().mockResolvedValue([{ id: 'doc.md#section-1_1', original_document_path: 'doc.md', content_hash: 'abc12345' }]),
         }),
       });
-      mockDatabaseManager.getTable.mockResolvedValueOnce(mockTable).mockResolvedValueOnce(mockTable).mockResolvedValueOnce(docMockTable);
+      mockDatabaseManager.getTable.mockImplementation((tableName) => {
+        if (tableName === 'document_chunk_embeddings') return Promise.resolve(docMockTable);
+        return Promise.resolve(mockTable);
+      });
       setupFileSystemMocks('# Title\n\nChunk 1');
       expect(await processor.processBatchEmbeddings(['/test/doc.md'], { baseDir: '/test' })).toBeDefined();
     });
@@ -506,13 +527,14 @@ describe('FileProcessor', () => {
         documentH1: 'Title',
       });
       const docMockTable = createMockTable();
-      let callCount = 0;
-      mockDatabaseManager.getTable.mockImplementation(() => {
-        callCount++;
-        return Promise.resolve(callCount === 3 ? docMockTable : mockTable);
+      mockDatabaseManager.getTable.mockImplementation((tableName) => {
+        if (tableName === 'document_chunk_embeddings') return Promise.resolve(docMockTable);
+        return Promise.resolve(mockTable);
       });
       setupFileSystemMocks('# Title\n\nContent');
-      mockModelManager.calculateEmbeddingBatch.mockResolvedValue([createMockEmbedding()]);
+      mockModelManager.calculateEmbeddingBatch
+        .mockResolvedValueOnce([createMockEmbedding()])
+        .mockResolvedValueOnce([createMockEmbedding()]);
       await processor.processBatchEmbeddings(['/test/doc.md'], { baseDir: '/test' });
       expect(docMockTable.add).toHaveBeenCalled();
     });
@@ -523,13 +545,14 @@ describe('FileProcessor', () => {
         documentH1: 'Title',
       });
       const docMockTable = createMockTable({ optimize: vi.fn().mockRejectedValue(new Error('legacy format')) });
-      let callCount = 0;
-      mockDatabaseManager.getTable.mockImplementation(() => {
-        callCount++;
-        return Promise.resolve(callCount === 3 ? docMockTable : mockTable);
+      mockDatabaseManager.getTable.mockImplementation((tableName) => {
+        if (tableName === 'document_chunk_embeddings') return Promise.resolve(docMockTable);
+        return Promise.resolve(mockTable);
       });
       setupFileSystemMocks('# Title\n\nContent');
-      mockModelManager.calculateEmbeddingBatch.mockResolvedValue([createMockEmbedding()]);
+      mockModelManager.calculateEmbeddingBatch
+        .mockResolvedValueOnce([createMockEmbedding()])
+        .mockResolvedValueOnce([createMockEmbedding()]);
       await processor.processBatchEmbeddings(['/test/doc.md'], { baseDir: '/test' });
       expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('legacy index format'));
     });
@@ -541,6 +564,27 @@ describe('FileProcessor', () => {
       });
       fs.promises.readFile.mockResolvedValue('# Title');
       expect(await processor.processBatchEmbeddings(['/test/error.md'], { baseDir: '/test' })).toBeDefined();
+    });
+
+    it('should skip doc chunk generation for excluded markdown files', async () => {
+      shouldProcessFile.mockReturnValue(false);
+      setupFileSystemMocks('# Title');
+      await processor.processBatchEmbeddings(['/test/doc.md'], { baseDir: '/test' });
+      expect(extractMarkdownChunks).not.toHaveBeenCalled();
+    });
+
+    it('should prune stale embeddings on full scans', async () => {
+      setupFileSystemMocks('# Title');
+      await processor.processBatchEmbeddings(['/test/doc.md'], { baseDir: '/test', runMode: 'full' });
+      expect(mockDatabaseManager.pruneProjectFileEmbeddings).toHaveBeenCalledWith('/test', expect.any(Set));
+      expect(mockDatabaseManager.pruneProjectDocumentChunks).toHaveBeenCalledWith('/test', expect.any(Set));
+    });
+
+    it('should not prune stale embeddings on partial runs', async () => {
+      setupFileSystemMocks('# Title');
+      await processor.processBatchEmbeddings(['/test/doc.md'], { baseDir: '/test', runMode: 'partial' });
+      expect(mockDatabaseManager.pruneProjectFileEmbeddings).not.toHaveBeenCalled();
+      expect(mockDatabaseManager.pruneProjectDocumentChunks).not.toHaveBeenCalled();
     });
   });
 

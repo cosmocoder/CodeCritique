@@ -21,9 +21,31 @@ import { isDocumentationFile, shouldProcessFile as utilsShouldProcessFile, batch
 import { detectLanguageFromExtension } from '../utils/language-detection.js';
 import { debug, verboseLog } from '../utils/logging.js';
 import { extractMarkdownChunks } from '../utils/markdown.js';
-import { slugify } from '../utils/string-utils.js';
+import { escapeSqlString, slugify } from '../utils/string-utils.js';
 import { TABLE_NAMES, LANCEDB_DIR_NAME, FASTEMBED_CACHE_DIR_NAME } from './constants.js';
 import { createFileProcessingError } from './errors.js';
+
+const FILE_EMBEDDING_BATCH_SIZE = 50;
+const DIRECTORY_STRUCTURE_TYPE = 'directory-structure';
+
+function createShortHash(content) {
+  return createHash('md5').update(content).digest('hex').substring(0, 8);
+}
+
+function createProjectStructureId(projectPath) {
+  return `__project_structure__#${createShortHash(path.resolve(projectPath))}`;
+}
+
+function buildDocumentChunkId(originalDocumentPath, heading, startLineInDoc) {
+  return `${originalDocumentPath}#${slugify(heading || 'section')}_${startLineInDoc}`;
+}
+
+function buildExistingDocumentSignature(chunks) {
+  return chunks
+    .map((chunk) => `${chunk.id}:${chunk.content_hash}`)
+    .sort()
+    .join('|');
+}
 
 // ============================================================================
 // FILE PROCESSOR CLASS
@@ -165,25 +187,42 @@ export class FileProcessor {
         throw new Error(`[generateDirEmb] Table ${this.fileEmbeddingsTable} not found.`);
       }
 
-      // Create project-specific structure ID based on the root directory
       const rootDir = options.rootDir || process.cwd();
       const projectName = path.basename(path.resolve(rootDir));
-      const structureId = `__project_structure__${projectName}`;
-
-      try {
-        await table.delete(`id = '${structureId}'`);
-        debug('[generateDirEmb] Deleted existing project structure embedding');
-      } catch (error) {
-        if (!error.message.includes('Record not found') && !error.message.includes('cannot find')) {
-          debug(`[generateDirEmb] Error deleting existing project structure: ${error.message}`);
-        } else {
-          debug('[generateDirEmb] No existing project structure to delete.');
-        }
-      }
+      const resolvedRootDir = path.resolve(rootDir);
+      const structureId = createProjectStructureId(resolvedRootDir);
 
       const directoryStructure = this.generateDirectoryStructure(options);
       if (!directoryStructure) throw new Error('[generateDirEmb] Failed to generate directory structure string');
       debug('[generateDirEmb] Directory structure string generated.');
+
+      const directoryStructureHash = createShortHash(directoryStructure);
+      let existingStructureRecords = [];
+      try {
+        existingStructureRecords = await table
+          .query()
+          .where(`project_path = '${escapeSqlString(resolvedRootDir)}' AND type = '${DIRECTORY_STRUCTURE_TYPE}'`)
+          .toArray();
+      } catch (queryError) {
+        debug(`[generateDirEmb] Could not query existing project structure embeddings: ${queryError.message}`);
+      }
+
+      const matchingStructure = existingStructureRecords.find((record) => record.content_hash === directoryStructureHash);
+      if (matchingStructure) {
+        debug('[generateDirEmb] Directory structure unchanged, skipping regeneration.');
+        return true;
+      }
+
+      for (const existingRecord of existingStructureRecords) {
+        try {
+          await table.delete(`id = '${escapeSqlString(existingRecord.id)}'`);
+          debug(`[generateDirEmb] Deleted stale project structure embedding: ${existingRecord.id}`);
+        } catch (error) {
+          if (!error.message.includes('Record not found') && !error.message.includes('cannot find')) {
+            debug(`[generateDirEmb] Error deleting existing project structure: ${error.message}`);
+          }
+        }
+      }
 
       // *** Calculate embedding explicitly ***
       const embedding = await this.modelManager.calculateEmbedding(directoryStructure);
@@ -198,13 +237,13 @@ export class FileProcessor {
         vector: embedding, // Include calculated embedding
         id: structureId,
         content: directoryStructure,
-        type: 'directory-structure',
+        type: DIRECTORY_STRUCTURE_TYPE,
         name: `${projectName} Project Structure`,
-        path: `${projectName} Project Structure`, // Project-specific path
-        project_path: path.resolve(rootDir), // Add project path for consistency with new schema
+        path: `${projectName} Project Structure`,
+        project_path: resolvedRootDir,
         language: 'text',
-        content_hash: createHash('md5').update(directoryStructure).digest('hex').substring(0, 8),
-        last_modified: new Date().toISOString(), // Use current timestamp for directory structure
+        content_hash: directoryStructureHash,
+        last_modified: new Date().toISOString(),
       };
 
       debug(`[generateDirEmb] Prepared record: ID=${record.id}, Vector length=${record.vector?.length}`);
@@ -245,7 +284,9 @@ export class FileProcessor {
       respectGitignore = true,
       baseDir: optionBaseDir = process.cwd(),
       maxLines = 1000,
-      onProgress, // <<< Add onProgress here
+      batchSize = FILE_EMBEDDING_BATCH_SIZE,
+      onProgress,
+      runMode = 'full',
     } = options;
     const resolvedCanonicalBaseDir = path.resolve(optionBaseDir);
     debug(`Resolved canonical base directory: ${resolvedCanonicalBaseDir}`);
@@ -280,6 +321,8 @@ export class FileProcessor {
     this.progressTracker.reset(filePaths.length);
     verboseLog(options, chalk.blue(`Starting batch processing of ${filePaths.length} files...`));
 
+    const sharedState = await this._createSharedProcessingState(filePaths, resolvedCanonicalBaseDir, exclusionOptions, options);
+
     // Generate directory structure embedding first
     try {
       await this.generateDirectoryStructureEmbedding({
@@ -287,13 +330,13 @@ export class FileProcessor {
         maxDepth: 5,
         ignorePatterns: excludePatterns,
         showFiles: true,
+        verbose: options.verbose,
       });
     } catch (structureError) {
       console.warn(chalk.yellow(`Warning: Failed to generate directory structure embedding: ${structureError.message}`));
     }
 
-    const fileTable = await this.databaseManager.getTable(this.fileEmbeddingsTable);
-    if (!fileTable) {
+    if (!sharedState.fileTable) {
       console.error(chalk.red(`Table ${this.fileEmbeddingsTable} not found. Aborting batch file embedding.`));
       results.failed = filePaths.length;
       results.failedFiles = [...filePaths];
@@ -302,33 +345,23 @@ export class FileProcessor {
       return results;
     }
 
-    // Process files in batches
+    const candidates = await this._prepareCandidateFiles(filePaths, exclusionOptions, sharedState, results, onProgress);
+
     verboseLog(options, chalk.cyan('--- Starting Phase 1: File Embeddings ---'));
-    const BATCH_SIZE = 50; // Process files in smaller batches for better performance
-
-    for (let i = 0; i < filePaths.length; i += BATCH_SIZE) {
-      const batch = filePaths.slice(i, i + BATCH_SIZE);
-      const batchResults = await this._processBatch(
-        batch,
-        resolvedCanonicalBaseDir,
-        exclusionOptions,
-        onProgress,
-        maxLines,
-        options.verbose
-      );
-
-      // Merge results
-      results.processed += batchResults.processed;
-      results.failed += batchResults.failed;
-      results.skipped += batchResults.skipped;
-      results.excluded += batchResults.excluded;
-      results.files.push(...batchResults.files);
-      results.failedFiles.push(...batchResults.failedFiles);
-      results.excludedFiles.push(...batchResults.excludedFiles);
-    }
+    await this._processFileEmbeddings(candidates, sharedState, {
+      batchSize,
+      maxLines,
+      onProgress,
+      results,
+      verbose: options.verbose,
+    });
 
     // Process document chunks
-    await this._processDocumentChunks(filePaths, resolvedCanonicalBaseDir, excludePatterns);
+    await this._processDocumentChunks(candidates, sharedState, options.verbose);
+
+    if (runMode === 'full') {
+      await this._pruneStaleEmbeddings(sharedState, options.verbose);
+    }
 
     verboseLog(options, chalk.green(`Batch processing complete!`));
 
@@ -353,69 +386,81 @@ export class FileProcessor {
    * @returns {Promise<Object>} Batch processing results
    * @private
    */
-  async _processBatch(filePaths, baseDir, exclusionOptions, onProgress, maxLines = 1000, verbose = false) {
-    const results = { processed: 0, failed: 0, skipped: 0, excluded: 0, files: [], failedFiles: [], excludedFiles: [] };
+  async _createSharedProcessingState(filePaths, baseDir, exclusionOptions, options = {}) {
+    const absoluteFilePaths = filePaths.map((filePath) =>
+      path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(baseDir, filePath)
+    );
+    const gitignoreCache =
+      exclusionOptions.respectGitignore !== false
+        ? await batchCheckGitignore(absoluteFilePaths, baseDir, { verbose: options.verbose })
+        : new Map();
 
-    // ============================================================================
-    // PHASE 1: BATCH GITIGNORE CHECK
-    // ============================================================================
-    let gitignoreCache = new Map();
-    if (exclusionOptions.respectGitignore !== false) {
-      verboseLog({}, chalk.cyan(`Performing batch gitignore check for ${filePaths.length} files...`));
-      const gitStartTime = Date.now();
-      const absoluteFilePaths = filePaths.map((fp) => (path.isAbsolute(fp) ? path.resolve(fp) : path.resolve(baseDir, fp)));
-      gitignoreCache = await batchCheckGitignore(absoluteFilePaths, baseDir, { verbose });
-      const gitDuration = ((Date.now() - gitStartTime) / 1000).toFixed(2);
-      verboseLog({}, chalk.green(`✓ Batch gitignore check completed in ${gitDuration}s`));
-    }
-
-    // ============================================================================
-    // PHASE 2: GET EXISTING EMBEDDINGS (for early filtering)
-    // ============================================================================
-    // Query existing embeddings BEFORE reading any files
     const fileTable = await this.databaseManager.getTable(this.fileEmbeddingsTable);
-    let existingFilesMap = new Map();
+    const documentChunkTable = await this.databaseManager.getTable(this.documentChunkTable);
+    const existingFilesMap = new Map();
+    const existingDocChunksMap = new Map();
+    const escapedBaseDir = escapeSqlString(baseDir);
 
-    try {
-      const existingRecords = await fileTable
-        .query()
-        .where(`project_path = '${baseDir.replace(/'/g, "''")}'`)
-        .toArray();
-
-      for (const record of existingRecords) {
-        if (!existingFilesMap.has(record.path)) {
-          existingFilesMap.set(record.path, []);
+    if (fileTable) {
+      try {
+        const existingRecords = await fileTable.query().where(`project_path = '${escapedBaseDir}'`).toArray();
+        for (const record of existingRecords) {
+          if (!existingFilesMap.has(record.path)) {
+            existingFilesMap.set(record.path, []);
+          }
+          existingFilesMap.get(record.path).push(record);
         }
-        existingFilesMap.get(record.path).push(record);
+        verboseLog(options, chalk.cyan(`Found ${existingRecords.length} existing file embeddings for comparison`));
+      } catch (queryError) {
+        console.warn(chalk.yellow(`Warning: Could not query existing embeddings: ${queryError.message}`));
       }
-
-      verboseLog({}, chalk.cyan(`Found ${existingRecords.length} existing embeddings for comparison`));
-    } catch (queryError) {
-      console.warn(chalk.yellow(`Warning: Could not query existing embeddings: ${queryError.message}`));
     }
 
-    // ============================================================================
-    // PHASE 3: FAST PRE-FILTERING (without reading file contents)
-    // ============================================================================
-    // Filter files based on basic checks and file timestamps before reading content
-    const candidateFiles = [];
+    if (documentChunkTable) {
+      try {
+        const existingChunks = await documentChunkTable.query().where(`project_path = '${escapedBaseDir}'`).toArray();
+        for (const chunk of existingChunks) {
+          if (!existingDocChunksMap.has(chunk.original_document_path)) {
+            existingDocChunksMap.set(chunk.original_document_path, []);
+          }
+          existingDocChunksMap.get(chunk.original_document_path).push(chunk);
+        }
+        verboseLog(options, chalk.cyan(`Found ${existingChunks.length} existing document chunks for comparison`));
+      } catch (queryError) {
+        console.warn(chalk.yellow(`Warning: Could not query existing document chunks: ${queryError.message}`));
+      }
+    }
+
+    return {
+      baseDir,
+      fileTable,
+      documentChunkTable,
+      gitignoreCache,
+      existingFilesMap,
+      existingDocChunksMap,
+      liveFilePaths: new Set(),
+      liveDocumentPaths: new Set(),
+    };
+  }
+
+  async _prepareCandidateFiles(filePaths, exclusionOptions, sharedState, results, onProgress) {
+    const candidates = [];
 
     for (const filePath of filePaths) {
-      const absoluteFilePath = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(baseDir, filePath);
-      const consistentRelativePath = path.relative(baseDir, absoluteFilePath);
+      const absoluteFilePath = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(sharedState.baseDir, filePath);
+      const relativePath = path.relative(sharedState.baseDir, absoluteFilePath);
 
       try {
-        // Get file stats (size, mtime, etc.)
         const stats = fs.statSync(absoluteFilePath);
+        const language = detectLanguageFromExtension(path.extname(absoluteFilePath));
 
-        // Check if file should be processed (using cached gitignore results)
         if (
           !utilsShouldProcessFile(absoluteFilePath, '', {
             ...exclusionOptions,
-            baseDir: baseDir,
-            relativePathToCheck: consistentRelativePath,
-            gitignoreCache, // Pass the pre-computed cache
-            fileStats: stats, // Pass stats to avoid re-reading
+            baseDir: sharedState.baseDir,
+            relativePathToCheck: relativePath,
+            gitignoreCache: sharedState.gitignoreCache,
+            fileStats: stats,
           })
         ) {
           results.excluded++;
@@ -426,31 +471,14 @@ export class FileProcessor {
           continue;
         }
 
-        // Early skip based on modification time if file exists in database
-        const existingRecords = existingFilesMap.get(consistentRelativePath) || [];
-        let potentiallyUnchanged = false;
-
-        if (existingRecords.length > 0) {
-          // Check if any existing record has the same modification time
-          for (const existing of existingRecords) {
-            const existingMtime = new Date(existing.last_modified).getTime();
-            const currentMtime = stats.mtime.getTime();
-
-            // If modification times match (within 1 second to account for filesystem precision)
-            if (Math.abs(existingMtime - currentMtime) < 1000) {
-              potentiallyUnchanged = true;
-              break;
-            }
-          }
-        }
-
-        candidateFiles.push({
+        candidates.push({
           filePath: absoluteFilePath,
           originalInputPath: filePath,
-          relativePath: consistentRelativePath,
+          relativePath,
           stats,
-          potentiallyUnchanged,
-          existingRecords,
+          language,
+          isDocumentation: isDocumentationFile(absoluteFilePath, language),
+          existingRecords: sharedState.existingFilesMap.get(relativePath) || [],
         });
       } catch {
         results.failed++;
@@ -461,113 +489,87 @@ export class FileProcessor {
       }
     }
 
-    verboseLog({}, chalk.cyan(`Pre-filtered to ${candidateFiles.length} candidate files (excluded ${results.excluded})`));
+    return candidates;
+  }
 
-    // ============================================================================
-    // PHASE 4: READ FILES AND CONTENT HASH CHECK
-    // ============================================================================
-    // Now read file contents only for candidates that passed initial filtering
-    const filesToProcess = [];
-    const contentsForBatch = [];
+  async _processFileEmbeddings(candidates, sharedState, options = {}) {
+    const { batchSize = FILE_EMBEDDING_BATCH_SIZE, maxLines = 1000, onProgress, results, verbose = false } = options;
 
-    for (const fileData of candidateFiles) {
-      try {
-        // Read file content
-        let content = await fs.promises.readFile(fileData.filePath, 'utf8');
+    for (let start = 0; start < candidates.length; start += batchSize) {
+      const batch = candidates.slice(start, start + batchSize);
+      const filesToActuallyProcess = [];
+      const contentsToActuallyProcess = [];
+      const recordsToDelete = new Map();
 
-        // Check if empty
-        if (content.trim().length === 0) {
-          results.skipped++;
-          this.progressTracker.update('skipped');
-          if (typeof onProgress === 'function') onProgress('skipped', fileData.originalInputPath);
-          this.processedFiles.set(fileData.originalInputPath, 'skipped_empty');
-          continue;
-        }
+      for (const candidate of batch) {
+        try {
+          const rawContent = await fs.promises.readFile(candidate.filePath, 'utf8');
+          candidate.fullContent = rawContent;
 
-        // Truncate content to maximum specified lines for code files only
-        const isDocFile = isDocumentationFile(fileData.filePath);
-        if (!isDocFile) {
-          const lines = content.split('\n');
-          if (lines.length > maxLines) {
-            content = lines.slice(0, maxLines).join('\n') + '\n... (truncated from ' + lines.length + ' lines)';
-            debug(`Truncated code file ${fileData.relativePath} from ${lines.length} lines to ${maxLines} lines`);
-          }
-        }
-
-        // Add content to file data
-        fileData.content = content;
-        filesToProcess.push(fileData);
-        contentsForBatch.push(content);
-      } catch {
-        results.failed++;
-        results.failedFiles.push(fileData.originalInputPath);
-        this.progressTracker.update('failed');
-        if (typeof onProgress === 'function') onProgress('failed', fileData.originalInputPath);
-        this.processedFiles.set(fileData.originalInputPath, 'failed_read');
-      }
-    }
-
-    // ============================================================================
-    // PHASE 5: CONTENT HASH CHECK AND DEDUPLICATION
-    // ============================================================================
-    // Check each file against existing embeddings using content hash
-    const filesToActuallyProcess = [];
-    const contentsToActuallyProcess = [];
-    const recordsToDelete = [];
-
-    for (let i = 0; i < filesToProcess.length; i++) {
-      const fileData = filesToProcess[i];
-      const contentHash = createHash('md5').update(fileData.content).digest('hex').substring(0, 8);
-
-      const existingRecords = fileData.existingRecords || [];
-      let needsUpdate = true;
-
-      if (existingRecords.length > 0) {
-        // Check if any existing record matches our current file state
-        for (const existing of existingRecords) {
-          if (existing.content_hash === contentHash) {
-            // File content hasn't changed - skip processing (CI-friendly)
-            // Note: We rely on content_hash rather than last_modified because
-            // GitHub Actions checkout changes file timestamps even for unchanged files
-            needsUpdate = false;
+          if (rawContent.trim().length === 0) {
             results.skipped++;
             this.progressTracker.update('skipped');
-            if (typeof onProgress === 'function') onProgress('skipped', fileData.originalInputPath);
-            this.processedFiles.set(fileData.originalInputPath, 'skipped_unchanged');
-            debug(`Skipping unchanged file: ${fileData.relativePath} (hash: ${contentHash})`);
-            break;
-          } else if (existing.path === fileData.relativePath) {
-            // Same file path but different content - mark old version for deletion
-            recordsToDelete.push(existing);
+            if (typeof onProgress === 'function') onProgress('skipped', candidate.originalInputPath);
+            this.processedFiles.set(candidate.originalInputPath, 'skipped_empty');
+            continue;
           }
+
+          let embeddingContent = rawContent;
+          if (!candidate.isDocumentation) {
+            const lines = rawContent.split('\n');
+            if (lines.length > maxLines) {
+              embeddingContent = lines.slice(0, maxLines).join('\n') + `\n... (truncated from ${lines.length} lines)`;
+              debug(`Truncated code file ${candidate.relativePath} from ${lines.length} lines to ${maxLines} lines`);
+            }
+          }
+
+          candidate.embeddingContent = embeddingContent;
+          candidate.contentHash = createShortHash(embeddingContent);
+          sharedState.liveFilePaths.add(candidate.relativePath);
+
+          const unchangedRecord = candidate.existingRecords.find((record) => record.content_hash === candidate.contentHash);
+          if (unchangedRecord) {
+            results.skipped++;
+            this.progressTracker.update('skipped');
+            if (typeof onProgress === 'function') onProgress('skipped', candidate.originalInputPath);
+            this.processedFiles.set(candidate.originalInputPath, 'skipped_unchanged');
+            debug(`Skipping unchanged file: ${candidate.relativePath} (hash: ${candidate.contentHash})`);
+            continue;
+          }
+
+          for (const existingRecord of candidate.existingRecords) {
+            recordsToDelete.set(existingRecord.id, existingRecord);
+          }
+
+          filesToActuallyProcess.push(candidate);
+          contentsToActuallyProcess.push(candidate.embeddingContent);
+        } catch {
+          candidate.readError = true;
+          results.failed++;
+          results.failedFiles.push(candidate.originalInputPath);
+          this.progressTracker.update('failed');
+          if (typeof onProgress === 'function') onProgress('failed', candidate.originalInputPath);
+          this.processedFiles.set(candidate.originalInputPath, 'failed_read');
         }
       }
 
-      if (needsUpdate) {
-        // File needs processing (new or changed)
-        filesToActuallyProcess.push(fileData);
-        contentsToActuallyProcess.push(fileData.content);
-      }
-    }
-
-    // Batch delete old versions if any
-    if (recordsToDelete.length > 0) {
-      for (const recordToDelete of recordsToDelete) {
+      for (const recordToDelete of recordsToDelete.values()) {
         try {
-          await fileTable.delete(`id = '${recordToDelete.id.replace(/'/g, "''")}'`);
+          await sharedState.fileTable.delete(`id = '${escapeSqlString(recordToDelete.id)}'`);
           debug(`Deleted old version: ${recordToDelete.path} (old hash: ${recordToDelete.content_hash})`);
         } catch (deleteError) {
           console.warn(chalk.yellow(`Warning: Could not delete old version of ${recordToDelete.path}: ${deleteError.message}`));
         }
       }
-    }
 
-    // Generate embeddings only for files that need processing
-    if (filesToActuallyProcess.length > 0) {
+      if (filesToActuallyProcess.length === 0) {
+        continue;
+      }
+
       verboseLog(
-        {},
+        { verbose },
         chalk.cyan(
-          `Processing ${filesToActuallyProcess.length} new/changed files (skipped ${filesToProcess.length - filesToActuallyProcess.length} unchanged)`
+          `Processing ${filesToActuallyProcess.length} new/changed files in batch (${Math.min(start + batch.length, candidates.length)}/${candidates.length})`
         )
       );
 
@@ -576,42 +578,37 @@ export class FileProcessor {
         const recordsToAdd = [];
 
         for (let i = 0; i < embeddings.length; i++) {
-          const fileData = filesToActuallyProcess[i];
+          const candidate = filesToActuallyProcess[i];
           const embeddingVector = embeddings[i];
 
-          if (embeddingVector) {
-            const contentHash = createHash('md5').update(fileData.content).digest('hex').substring(0, 8);
-            const fileId = `${fileData.relativePath}#${contentHash}`;
-
-            const record = {
-              vector: embeddingVector,
-              id: fileId,
-              content: fileData.content,
-              type: 'file',
-              name: path.basename(fileData.filePath),
-              path: fileData.relativePath,
-              project_path: baseDir,
-              language: detectLanguageFromExtension(path.extname(fileData.filePath)),
-              content_hash: contentHash,
-              last_modified: fileData.stats.mtime.toISOString(),
-            };
-            recordsToAdd.push(record);
-          } else {
+          if (!embeddingVector) {
             results.failed++;
-            results.failedFiles.push(fileData.originalInputPath);
+            results.failedFiles.push(candidate.originalInputPath);
             this.progressTracker.update('failed');
-            if (typeof onProgress === 'function') onProgress('failed', fileData.originalInputPath);
-            this.processedFiles.set(fileData.originalInputPath, 'failed_embedding');
+            if (typeof onProgress === 'function') onProgress('failed', candidate.originalInputPath);
+            this.processedFiles.set(candidate.originalInputPath, 'failed_embedding');
+            continue;
           }
+
+          recordsToAdd.push({
+            vector: embeddingVector,
+            id: `${candidate.relativePath}#${candidate.contentHash}`,
+            content: candidate.embeddingContent,
+            type: 'file',
+            name: path.basename(candidate.filePath),
+            path: candidate.relativePath,
+            project_path: sharedState.baseDir,
+            language: candidate.language,
+            content_hash: candidate.contentHash,
+            last_modified: candidate.stats.mtime.toISOString(),
+          });
         }
 
-        // Add new/updated records to database
         if (recordsToAdd.length > 0) {
-          await fileTable.add(recordsToAdd);
+          await sharedState.fileTable.add(recordsToAdd);
 
-          // Optimize table to sync indices with data and prevent TakeExec panics
           try {
-            await fileTable.optimize();
+            await sharedState.fileTable.optimize();
           } catch (optimizeError) {
             if (optimizeError.message && optimizeError.message.includes('legacy format')) {
               console.warn(
@@ -624,30 +621,25 @@ export class FileProcessor {
             }
           }
 
-          recordsToAdd.forEach((record, index) => {
-            const fileData = filesToActuallyProcess[index];
-            if (embeddings[index]) {
-              results.processed++;
-              results.files.push(fileData.originalInputPath);
-              this.progressTracker.update('processed');
-              if (typeof onProgress === 'function') onProgress('processed', fileData.originalInputPath);
-              this.processedFiles.set(fileData.originalInputPath, 'processed');
-            }
-          });
+          for (const candidate of filesToActuallyProcess) {
+            results.processed++;
+            results.files.push(candidate.originalInputPath);
+            this.progressTracker.update('processed');
+            if (typeof onProgress === 'function') onProgress('processed', candidate.originalInputPath);
+            this.processedFiles.set(candidate.originalInputPath, 'processed');
+          }
         }
       } catch (error) {
         console.error(chalk.red(`Error processing batch: ${error.message}`));
-        filesToProcess.forEach((fileData) => {
+        for (const candidate of filesToActuallyProcess) {
           results.failed++;
-          results.failedFiles.push(fileData.originalInputPath);
+          results.failedFiles.push(candidate.originalInputPath);
           this.progressTracker.update('failed');
-          if (typeof onProgress === 'function') onProgress('failed', fileData.originalInputPath);
-          this.processedFiles.set(fileData.originalInputPath, 'failed_batch');
-        });
+          if (typeof onProgress === 'function') onProgress('failed', candidate.originalInputPath);
+          this.processedFiles.set(candidate.originalInputPath, 'failed_batch');
+        }
       }
     }
-
-    return results;
   }
 
   /**
@@ -658,34 +650,11 @@ export class FileProcessor {
    * @returns {Promise<void>}
    * @private
    */
-  async _processDocumentChunks(filePaths, baseDir) {
-    verboseLog({}, chalk.cyan('--- Starting Phase 2: Document Chunk Embeddings ---'));
-    const documentChunkTable = await this.databaseManager.getTable(this.documentChunkTable);
-    if (!documentChunkTable) {
+  async _processDocumentChunks(candidates, sharedState, verbose = false) {
+    verboseLog({ verbose }, chalk.cyan('--- Starting Phase 2: Document Chunk Embeddings ---'));
+    if (!sharedState.documentChunkTable) {
       console.warn(chalk.yellow(`Skipping Phase 2: Document Chunk Embeddings because table ${this.documentChunkTable} was not found.`));
       return;
-    }
-
-    // Efficient batch check: Get all existing document chunks for this project
-    let existingDocChunksMap = new Map();
-    try {
-      const existingChunks = await documentChunkTable
-        .query()
-        .where(`project_path = '${baseDir.replace(/'/g, "''")}'`)
-        .toArray();
-
-      // Build a map for fast lookup: original_document_path -> [chunks]
-      for (const chunk of existingChunks) {
-        if (!existingDocChunksMap.has(chunk.original_document_path)) {
-          existingDocChunksMap.set(chunk.original_document_path, []);
-        }
-        existingDocChunksMap.get(chunk.original_document_path).push(chunk);
-      }
-
-      verboseLog({}, chalk.cyan(`Found ${existingChunks.length} existing document chunks for comparison`));
-    } catch (queryError) {
-      console.warn(chalk.yellow(`Warning: Could not query existing document chunks, will process all docs: ${queryError.message}`));
-      existingDocChunksMap = new Map();
     }
 
     const allDocChunksToEmbed = [];
@@ -693,80 +662,69 @@ export class FileProcessor {
     const processedDocPathsForDeletion = new Set();
     let skippedDocCount = 0;
 
-    for (const filePath of filePaths) {
-      const absoluteFilePath = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(baseDir, filePath);
-      const consistentRelativePath = path.relative(baseDir, absoluteFilePath);
-      const language = detectLanguageFromExtension(path.extname(absoluteFilePath));
+    for (const candidate of candidates) {
+      if (!candidate.isDocumentation || candidate.readError) {
+        continue;
+      }
 
-      if (isDocumentationFile(absoluteFilePath, language)) {
-        try {
-          const stats = fs.statSync(absoluteFilePath);
-          if (stats.size > 5 * 1024 * 1024) {
-            // 5MB limit for docs
-            continue;
-          }
-
-          const content = await fs.promises.readFile(absoluteFilePath, 'utf8');
-          if (content.trim().length === 0) {
-            continue;
-          }
-
-          // Check if document has changed by comparing chunk content hashes
-          const existingChunks = existingDocChunksMap.get(consistentRelativePath) || [];
-
-          // Extract chunks to compare with existing ones
-          const { chunks: currentChunks, documentH1 } = extractMarkdownChunks(absoluteFilePath, content, consistentRelativePath);
-          let hasUnchangedDocument = false;
-
-          if (existingChunks.length > 0 && currentChunks.length === existingChunks.length) {
-            // Create a signature of the document by combining all chunk content hashes
-            const currentChunkHashes = currentChunks
-              .map((chunk) => createHash('md5').update(chunk.content).digest('hex').substring(0, 8))
-              .sort()
-              .join('|');
-
-            const existingChunkHashes = existingChunks
-              .map((chunk) => chunk.content_hash)
-              .sort()
-              .join('|');
-
-            hasUnchangedDocument = currentChunkHashes === existingChunkHashes;
-          }
-
-          if (hasUnchangedDocument) {
-            // Document hasn't changed - skip processing
-            skippedDocCount++;
-            debug(`Skipping unchanged document: ${consistentRelativePath} (${currentChunks.length} chunks match)`);
-            continue;
-          }
-
-          // Document has changed or is new - process it
-          if (!processedDocPathsForDeletion.has(consistentRelativePath)) {
-            processedDocPathsForDeletion.add(consistentRelativePath);
-          }
-
-          if (currentChunks.length > 0) {
-            currentChunks.forEach((chunk) => {
-              const chunkWithTitle = {
-                ...chunk,
-                documentTitle: documentH1 || path.basename(absoluteFilePath, path.extname(absoluteFilePath)),
-                fileStats: stats,
-              };
-              allDocChunksToEmbed.push(chunkWithTitle);
-            });
-          }
-        } catch (docError) {
-          console.warn(chalk.yellow(`Error processing document ${consistentRelativePath} for chunking: ${docError.message}`));
+      try {
+        if (candidate.stats.size > 5 * 1024 * 1024) {
+          continue;
         }
+
+        if (!candidate.fullContent || candidate.fullContent.trim().length === 0) {
+          continue;
+        }
+
+        const existingChunks = sharedState.existingDocChunksMap.get(candidate.relativePath) || [];
+        const { chunks: currentChunks, documentH1 } = extractMarkdownChunks(
+          candidate.filePath,
+          candidate.fullContent,
+          candidate.relativePath
+        );
+
+        const currentSignature = currentChunks
+          .map(
+            (chunk) =>
+              `${buildDocumentChunkId(candidate.relativePath, chunk.heading, chunk.start_line_in_doc)}:${createShortHash(chunk.content)}`
+          )
+          .sort()
+          .join('|');
+        const existingSignature = buildExistingDocumentSignature(existingChunks);
+
+        if (existingChunks.length > 0 && currentSignature === existingSignature) {
+          sharedState.liveDocumentPaths.add(candidate.relativePath);
+          skippedDocCount++;
+          debug(`Skipping unchanged document: ${candidate.relativePath} (${currentChunks.length} chunks match)`);
+          continue;
+        }
+
+        if (currentChunks.length === 0) {
+          continue;
+        }
+
+        sharedState.liveDocumentPaths.add(candidate.relativePath);
+        processedDocPathsForDeletion.add(candidate.relativePath);
+
+        for (const chunk of currentChunks) {
+          allDocChunksToEmbed.push({
+            ...chunk,
+            documentTitle: documentH1 || path.basename(candidate.filePath, path.extname(candidate.filePath)),
+            fileStats: candidate.stats,
+            original_document_path: candidate.relativePath,
+          });
+        }
+      } catch (docError) {
+        console.warn(chalk.yellow(`Error processing document ${candidate.relativePath} for chunking: ${docError.message}`));
       }
     }
 
     if (skippedDocCount > 0) {
-      verboseLog({}, chalk.cyan(`Skipped ${skippedDocCount} unchanged documentation files`));
+      verboseLog({ verbose }, chalk.cyan(`Skipped ${skippedDocCount} unchanged documentation files`));
     }
 
     if (allDocChunksToEmbed.length > 0) {
-      verboseLog({}, chalk.blue(`Extracted ${allDocChunksToEmbed.length} total document chunks to process for embeddings.`));
+      verboseLog({ verbose }, chalk.blue(`Extracted ${allDocChunksToEmbed.length} total document chunks to process for embeddings.`));
       const chunkContentsForBatching = allDocChunksToEmbed.map((chunk) => chunk.content);
       const chunkEmbeddings = await this.modelManager.calculateEmbeddingBatch(chunkContentsForBatching);
 
@@ -775,14 +733,14 @@ export class FileProcessor {
         const chunkEmbeddingVector = chunkEmbeddings[i];
 
         if (chunkEmbeddingVector) {
-          const chunkContentHash = createHash('md5').update(chunkData.content).digest('hex').substring(0, 8);
-          const chunkId = `${chunkData.original_document_path}#${slugify(chunkData.heading || 'section')}_${chunkData.start_line_in_doc}`;
+          const chunkContentHash = createShortHash(chunkData.content);
+          const chunkId = buildDocumentChunkId(chunkData.original_document_path, chunkData.heading, chunkData.start_line_in_doc);
 
           const record = {
             id: chunkId,
             content: chunkData.content,
             original_document_path: chunkData.original_document_path,
-            project_path: baseDir,
+            project_path: sharedState.baseDir,
             heading_text: chunkData.heading || '',
             document_title: chunkData.documentTitle,
             language: chunkData.language || 'markdown',
@@ -799,7 +757,9 @@ export class FileProcessor {
     if (processedDocPathsForDeletion.size > 0) {
       for (const docPathToDelete of processedDocPathsForDeletion) {
         try {
-          await documentChunkTable.delete(`original_document_path = '${docPathToDelete.replace(/'/g, "''")}'`);
+          await sharedState.documentChunkTable.delete(
+            `project_path = '${escapeSqlString(sharedState.baseDir)}' AND original_document_path = '${escapeSqlString(docPathToDelete)}'`
+          );
         } catch (deleteError) {
           console.warn(chalk.yellow(`Error deleting chunks for document ${docPathToDelete}: ${deleteError.message}`));
         }
@@ -808,11 +768,11 @@ export class FileProcessor {
 
     if (allDocChunkRecordsToAdd.length > 0) {
       try {
-        await documentChunkTable.add(allDocChunkRecordsToAdd);
+        await sharedState.documentChunkTable.add(allDocChunkRecordsToAdd);
 
         // Optimize table to sync indices with data and prevent TakeExec panics
         try {
-          await documentChunkTable.optimize();
+          await sharedState.documentChunkTable.optimize();
         } catch (optimizeError) {
           if (optimizeError.message && optimizeError.message.includes('legacy format')) {
             console.warn(chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
@@ -822,7 +782,7 @@ export class FileProcessor {
         }
 
         verboseLog(
-          {},
+          { verbose },
           chalk.green(`Successfully added ${allDocChunkRecordsToAdd.length} document chunk embeddings to ${this.documentChunkTable}.`)
         );
       } catch (addError) {
@@ -830,7 +790,19 @@ export class FileProcessor {
       }
     }
 
-    verboseLog({}, chalk.green('--- Finished Phase 2: Document Chunk Embeddings ---'));
+    verboseLog({ verbose }, chalk.green('--- Finished Phase 2: Document Chunk Embeddings ---'));
+  }
+
+  async _pruneStaleEmbeddings(sharedState, verbose = false) {
+    try {
+      const [prunedFiles, prunedDocs] = await Promise.all([
+        this.databaseManager.pruneProjectFileEmbeddings(sharedState.baseDir, sharedState.liveFilePaths),
+        this.databaseManager.pruneProjectDocumentChunks(sharedState.baseDir, sharedState.liveDocumentPaths),
+      ]);
+      verboseLog({ verbose }, chalk.cyan(`Pruned ${prunedFiles} stale file embeddings and ${prunedDocs} stale document chunk embeddings.`));
+    } catch (error) {
+      console.warn(chalk.yellow(`Warning: Failed to prune stale embeddings: ${error.message}`));
+    }
   }
 
   // ============================================================================

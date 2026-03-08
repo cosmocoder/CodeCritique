@@ -459,6 +459,14 @@ describe('ContentRetriever', () => {
       const results = await retriever.findRelevantDocs('query', { projectPath: '/project' });
       expect(results.length).toBe(0);
     });
+
+    it('should reject sibling project absolute paths for documentation', async () => {
+      mockTable.toArray.mockResolvedValue([
+        createMockDocResult({ project_path: null, original_document_path: '/project-old/docs/readme.md' }),
+      ]);
+      const results = await retriever.findRelevantDocs('query', { projectPath: '/project' });
+      expect(results).toHaveLength(0);
+    });
   });
 
   // ==========================================================================
@@ -498,6 +506,12 @@ describe('ContentRetriever', () => {
       expect(results.length).toBe(0);
     });
 
+    it('should reject sibling project absolute paths for code results', async () => {
+      mockTable.toArray.mockResolvedValue([createMockCodeResult({ project_path: null, path: '/project-old/src/file.js' })]);
+      const results = await retriever.findSimilarCode('query', { projectPath: '/project', similarityThreshold: 0 });
+      expect(results).toHaveLength(0);
+    });
+
     it('should handle schema check errors', async () => {
       mockTable.schema = null;
       mockTable.toArray.mockResolvedValue([createMockCodeResult()]);
@@ -511,20 +525,31 @@ describe('ContentRetriever', () => {
   // ==========================================================================
 
   describe('project structure inclusion', () => {
-    it('should fall back to generic project structure', async () => {
+    it('should include only project-scoped structure rows', async () => {
       mockTable.toArray.mockResolvedValue([createMockCodeResult()]);
-      mockTable.query.mockReturnValue({
+      const queryChain = {
         where: vi.fn().mockReturnThis(),
         limit: vi.fn().mockReturnThis(),
-        toArray: vi
-          .fn()
-          .mockResolvedValueOnce([])
-          .mockResolvedValueOnce([
-            { id: '__project_structure__', content: 'Generic structure', path: '.', vector: new Float32Array(384).fill(0.1) },
-          ]),
+        toArray: vi.fn().mockResolvedValue([
+          {
+            id: '__project_structure__#abc12345',
+            content: 'Project structure',
+            path: '.',
+            project_path: '/project',
+            type: 'directory-structure',
+            vector: new Float32Array(384).fill(0.1),
+          },
+        ]),
+      };
+      mockTable.query.mockReturnValue(queryChain);
+      const results = await retriever.findSimilarCode('query', {
+        includeProjectStructure: true,
+        similarityThreshold: 0,
+        projectPath: '/project',
       });
-      const results = await retriever.findSimilarCode('query', { includeProjectStructure: true, similarityThreshold: 0 });
       expect(results.some((r) => r.type === 'project-structure')).toBe(true);
+      expect(queryChain.where).toHaveBeenCalledWith(expect.stringContaining("type = 'directory-structure'"));
+      expect(queryChain.where).toHaveBeenCalledWith(expect.stringContaining("project_path = '/project'"));
     });
 
     it('should handle project structure inclusion errors', async () => {
@@ -537,6 +562,21 @@ describe('ContentRetriever', () => {
       const results = await retriever.findSimilarCode('query', { includeProjectStructure: true, similarityThreshold: 0 });
       expect(Array.isArray(results)).toBe(true);
       expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Project structure inclusion failed'));
+    });
+
+    it('should skip project structure rows from another project', async () => {
+      mockTable.toArray.mockResolvedValue([createMockCodeResult()]);
+      mockTable.query.mockReturnValue({
+        where: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([]),
+      });
+      const results = await retriever.findSimilarCode('query', {
+        includeProjectStructure: true,
+        similarityThreshold: 0,
+        projectPath: '/project',
+      });
+      expect(results.some((r) => r.type === 'project-structure')).toBe(false);
     });
 
     it('should skip structure when similarity is too low', async () => {

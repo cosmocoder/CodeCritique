@@ -51,3 +51,13 @@ export function addLineNumbers(content) {
   const padding = String(lines.length).length;
   return lines.map((line, i) => `${String(i + 1).padStart(padding)} | ${line}`).join('\n');
 }
+
+/**
+ * Escape single quotes for safe use in SQL string literals.
+ *
+ * @param {string} value - Value to escape
+ * @returns {string} Escaped value
+ */
+export function escapeSqlString(value) {
+  return String(value).replace(/'/g, "''");
+}

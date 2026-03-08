@@ -73,6 +73,8 @@ export function createMockDatabaseManager(mockTable = null) {
     // Embeddings operations
     clearAllEmbeddings: vi.fn().mockResolvedValue(true),
     clearProjectEmbeddings: vi.fn().mockResolvedValue(true),
+    pruneProjectFileEmbeddings: vi.fn().mockResolvedValue(0),
+    pruneProjectDocumentChunks: vi.fn().mockResolvedValue(0),
     // Project summary
     storeProjectSummary: vi.fn().mockResolvedValue(undefined),
     getProjectSummary: vi.fn().mockResolvedValue(null),

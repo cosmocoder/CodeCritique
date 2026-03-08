@@ -519,6 +519,7 @@ async function generateEmbeddings(options) {
 
     // Get files to process
     let filesToProcess = [];
+    const runMode = options.files && options.files.length > 0 ? 'partial' : 'full';
 
     if (options.files && options.files.length > 0) {
       console.log(chalk.cyan('Processing specified files/patterns...'));
@@ -585,6 +586,7 @@ async function generateEmbeddings(options) {
         baseDir: baseDir,
         batchSize: 100, // Set a reasonable batch size
         maxLines: parseInt(options.maxLines || '1000', 10),
+        runMode,
         onProgress: (status) => {
           // Update counters based on status
           if (status === 'processed') {
@@ -624,9 +626,6 @@ async function generateEmbeddings(options) {
         verbose: options.verbose,
         forceAnalysis: options.forceAnalysis,
       });
-
-      // Store project summary in embeddings system for later use
-      await embeddingsSystem.storeProjectSummary(projectDir, projectSummary);
 
       console.log(chalk.green('✅ Project analysis complete and stored'));
       verboseLog(options, chalk.gray(`   Project: ${projectSummary.projectName}`));

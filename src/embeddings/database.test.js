@@ -353,6 +353,49 @@ describe('DatabaseManager', () => {
       mockDb.tableNames.mockRejectedValue(new Error('DB error'));
       await expect(dbManager.clearProjectEmbeddings('/test/project/deep')).rejects.toThrow('DB error');
     });
+
+    it('should not delete same-basename structure rows from another project', async () => {
+      mockDb.tableNames.mockResolvedValue(['file_embeddings']);
+      setupQuery([
+        { id: '__project_structure__#current', project_path: '/test/project/deep' },
+        { id: '__project_structure__#other', project_path: '/other/project/deep' },
+      ]);
+      await dbManager.clearProjectEmbeddings('/test/project/deep');
+      expect(mockTable.delete).toHaveBeenCalledTimes(1);
+      expect(mockTable.delete).toHaveBeenCalledWith(expect.stringContaining('__project_structure__#current'));
+    });
+  });
+
+  describe('prune project embeddings', () => {
+    it('should prune stale file embeddings only for missing live paths', async () => {
+      mockDb.tableNames.mockResolvedValue(['file_embeddings']);
+      mockTable.query.mockReturnValue({
+        where: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([
+          { id: 'keep-file', path: 'src/keep.js', type: 'file', project_path: '/test/project/deep' },
+          { id: 'drop-file', path: 'src/drop.js', type: 'file', project_path: '/test/project/deep' },
+          { id: 'structure', path: '.', type: 'directory-structure', project_path: '/test/project/deep' },
+        ]),
+      });
+      const deleted = await dbManager.pruneProjectFileEmbeddings('/test/project/deep', new Set(['src/keep.js']));
+      expect(deleted).toBe(1);
+      expect(mockTable.delete).toHaveBeenCalledWith(expect.stringContaining('drop-file'));
+      expect(mockTable.delete).not.toHaveBeenCalledWith(expect.stringContaining('structure'));
+    });
+
+    it('should prune stale document chunks only for missing live docs', async () => {
+      mockDb.tableNames.mockResolvedValue(['document_chunk_embeddings']);
+      mockTable.query.mockReturnValue({
+        where: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([
+          { id: 'keep-doc', original_document_path: 'docs/keep.md', project_path: '/test/project/deep' },
+          { id: 'drop-doc', original_document_path: 'docs/drop.md', project_path: '/test/project/deep' },
+        ]),
+      });
+      const deleted = await dbManager.pruneProjectDocumentChunks('/test/project/deep', new Set(['docs/keep.md']));
+      expect(deleted).toBe(1);
+      expect(mockTable.delete).toHaveBeenCalledWith(expect.stringContaining('drop-doc'));
+    });
   });
 
   // ==========================================================================
