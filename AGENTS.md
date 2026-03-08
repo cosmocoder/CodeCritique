@@ -68,6 +68,16 @@ This document provides comprehensive guidance for AI coding agents working on th
 2. **Analyze PR History** (optional): Fetch PR comments from GitHub → extract patterns → store for context
 3. **Code Review**: Retrieve similar code examples + documentation → provide context to LLM → generate review
 
+### Incremental Embeddings Rules
+
+- Treat `content_hash` as the source of truth for embedding freshness. Do not rely on `mtime` to decide whether embeddings are current, especially in CI.
+- `embeddings:generate` has two modes:
+  - Full directory scans update changed files and prune stale embeddings for deleted files and documents.
+  - Partial `--files` runs update only the requested files and must not prune unrelated embeddings.
+- Project-structure embeddings are scoped by full `project_path`, not by directory basename.
+- Retrieval should only return project-scoped context and should validate that referenced files still exist before using stored content.
+- Project summaries should be refreshed when the embedding inventory changes, not only when previously tracked key files change.
+
 ---
 
 ## Directory Structure
@@ -114,6 +124,7 @@ src/
 │   ├── logging.js           # Logging utilities
 │   ├── markdown.js          # Markdown processing
 │   ├── mobilebert-tokenizer.js # Tokenization utilities
+│   ├── path-utils.js        # Project path boundary helpers
 │   ├── pr-chunking.js       # PR chunking for large diffs
 │   └── string-utils.js      # String manipulation utilities
 │

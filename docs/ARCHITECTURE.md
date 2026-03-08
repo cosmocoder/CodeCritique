@@ -33,6 +33,18 @@ Additionally, [Hugging Face Transformers.js](https://github.com/huggingface/tran
 
 [LanceDB](https://lancedb.com/) stores embeddings for fast similarity search. The vector database maintains an index of all embedded code examples, documentation, and review patterns, enabling efficient retrieval of relevant context. LanceDB's columnar storage format provides excellent performance for similarity searches across large codebases. It supports hybrid search combining vector similarity and full-text search with Reciprocal Rank Fusion (RRF) for optimal results.
 
+### Incremental Embedding Generation
+
+Embedding generation is incremental and project-scoped. The system stores file embeddings, documentation chunk embeddings, and project-structure embeddings with a `project_path` so multiple repositories can share the same local LanceDB instance without mixing context.
+
+Freshness is determined by `content_hash`, not by file modification time. This is important in CI environments where checkout operations can rewrite `mtime` values even when file contents are unchanged. During generation:
+
+- Full `embeddings:generate` directory scans update new or changed files and prune stale embeddings for deleted files and removed documentation.
+- Partial `embeddings:generate --files ...` runs update only the requested files and do not prune unrelated embeddings.
+- Project-structure embeddings are regenerated only when the structure content changes and are keyed by full project identity rather than directory basename.
+
+This design keeps review context current without forcing full regeneration on every run.
+
 ### Context Retrieval
 
 Finds relevant code examples, documentation, and historical patterns. When reviewing code, the system queries the vector database to retrieve:
@@ -41,6 +53,8 @@ Finds relevant code examples, documentation, and historical patterns. When revie
 - Relevant documentation that explains conventions or best practices
 - Historical review patterns from past pull requests that show how similar issues were addressed
 - Custom guidelines and rules specific to your project
+
+Retrieval is also defensive about freshness and project isolation. Results are filtered by `project_path` when available, validated against project path boundaries, and checked for file existence before stored content is used in review prompts. This prevents stale embeddings from deleted files and cross-project collisions from leaking into code review context.
 
 ### LLM Integration
 

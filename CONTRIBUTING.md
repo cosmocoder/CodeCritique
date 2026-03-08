@@ -103,6 +103,7 @@ src/
 ├── utils/                   # Utility functions
 │   ├── git.js               # Git operations
 │   ├── file-validation.js   # File validation
+│   ├── path-utils.js        # Project path boundary helpers
 │   └── ...
 └── test-utils/              # Test utilities and fixtures
 .github/

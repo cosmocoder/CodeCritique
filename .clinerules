@@ -46,6 +46,13 @@ CodeCritique is an AI-powered code review tool that:
 - Avoid raw `console.log(...)` in normal code paths
 - Document logging-related options such as `verbose` in JSDoc and pass them through to downstream helpers
 
+### Incremental Embeddings
+
+- Treat `content_hash` as the source of truth for embedding freshness. Do not rely on `mtime` for correctness, especially in CI.
+- Full `embeddings:generate` scans may prune stale file and document embeddings. Partial `--files` runs must not prune unrelated embeddings.
+- Project-structure embeddings and retrieval are scoped by full `project_path`, not directory basename.
+- Retrieval should only use project-scoped rows whose backing files still exist.
+
 ### Key Commands
 
 ```bash
