@@ -94,16 +94,62 @@ describe('rag-review', () => {
 
       expect(runAnalysis).toHaveBeenCalledWith('/test/file.js', { verbose: true, maxExamples: 10 });
     });
+
+    it('should wrap skipped files with file metadata', async () => {
+      runAnalysis.mockResolvedValue({
+        success: true,
+        skipped: true,
+        message: 'File skipped based on exclusion patterns',
+      });
+
+      const result = await reviewFile('/test/skipped.js');
+
+      expect(result.success).toBe(true);
+      expect(result.results).toEqual([
+        expect.objectContaining({
+          filePath: '/test/skipped.js',
+          success: true,
+          skipped: true,
+          message: 'File skipped based on exclusion patterns',
+        }),
+      ]);
+    });
   });
 
   describe('reviewFiles', () => {
     it('should review multiple files', async () => {
-      runAnalysis.mockResolvedValue({ success: true, results: [] });
+      runAnalysis
+        .mockResolvedValueOnce({
+          success: true,
+          filePath: '/test/file1.js',
+          language: 'javascript',
+          results: { issues: [] },
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          filePath: '/test/file2.js',
+          language: 'javascript',
+          results: { issues: [] },
+        });
 
       const result = await reviewFiles(['/test/file1.js', '/test/file2.js']);
 
       expect(result.success).toBe(true);
       expect(result.results.length).toBe(2);
+      expect(result.results[0]).toEqual(
+        expect.objectContaining({
+          filePath: '/test/file1.js',
+          success: true,
+          results: { issues: [] },
+        })
+      );
+      expect(result.results[1]).toEqual(
+        expect.objectContaining({
+          filePath: '/test/file2.js',
+          success: true,
+          results: { issues: [] },
+        })
+      );
     });
 
     it('should process files in batches based on concurrency', async () => {
@@ -116,8 +162,13 @@ describe('rag-review', () => {
 
     it('should count successes, skips, and errors', async () => {
       runAnalysis
-        .mockResolvedValueOnce({ success: true, results: [] })
-        .mockResolvedValueOnce({ success: true, skipped: true, results: [] })
+        .mockResolvedValueOnce({
+          success: true,
+          filePath: '/file1.js',
+          language: 'javascript',
+          results: { issues: [] },
+        })
+        .mockResolvedValueOnce({ success: true, skipped: true, message: 'Skipped' })
         .mockResolvedValueOnce({ success: false, error: 'Error' });
 
       const result = await reviewFiles(['/file1.js', '/file2.js', '/file3.js']);
