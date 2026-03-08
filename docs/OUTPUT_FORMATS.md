@@ -158,7 +158,7 @@ codecritique analyze --file src/app.ts --output json
 
 # Markdown format
 codecritique analyze --file src/app.ts --output markdown
-````
+```
 
 ### Saving Output to a File
 
@@ -168,10 +168,11 @@ You can redirect output to a file using shell redirection:
 codecritique analyze --files "src/**/*.ts" --output json > review.json
 ```
 
-Or use the `--output-file` option (for JSON format):
+Or use the `--output-file` option for `json` or `markdown` output:
 
 ```bash
 codecritique analyze --files "src/**/*.ts" --output json --output-file review.json
+codecritique analyze --files "src/**/*.ts" --output markdown --output-file review.md
 ```
 
 ---

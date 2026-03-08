@@ -1038,80 +1038,86 @@ function outputJson(reviewResults, options) {
  * Output results in Markdown format
  *
  * @param {Array<Object>} reviewResults - Array of individual file review results
- * @param {Object} cliOptions - Command line options
+ * @param {Object} options - Command line options
  */
-function outputMarkdown(reviewResults) {
-  console.log('# AI Code Review Results (RAG Approach)\n');
-
+function outputMarkdown(reviewResults, options) {
   const totalFiles = reviewResults.length;
   const filesWithIssues = reviewResults.filter((r) => r.success && !r.skipped && r.results?.issues?.length > 0).length;
   const totalIssues = reviewResults.reduce((sum, r) => sum + (r.results?.issues?.length || 0), 0);
   const skippedFiles = reviewResults.filter((r) => r.skipped).length;
   const errorFiles = reviewResults.filter((r) => !r.success).length;
 
-  console.log('## Summary\n');
-  console.log(`- **Files Analyzed:** ${totalFiles}`);
-  console.log(`- **Files with Issues:** ${filesWithIssues}`);
-  console.log(`- **Total Issues Found:** ${totalIssues}`);
-  if (skippedFiles > 0) console.log(`- **Files Skipped:** ${skippedFiles}`);
-  if (errorFiles > 0) console.log(`- **Errors:** ${errorFiles}`);
-  console.log('\n');
+  const lines = [
+    '# AI Code Review Results (RAG Approach)',
+    '',
+    '## Summary',
+    '',
+    `- **Files Analyzed:** ${totalFiles}`,
+    `- **Files with Issues:** ${filesWithIssues}`,
+    `- **Total Issues Found:** ${totalIssues}`,
+  ];
 
-  console.log('## Detailed Review per File\n');
+  if (skippedFiles > 0) lines.push(`- **Files Skipped:** ${skippedFiles}`);
+  if (errorFiles > 0) lines.push(`- **Errors:** ${errorFiles}`);
+
+  lines.push('', '## Detailed Review per File', '');
 
   reviewResults.forEach((fileResult) => {
-    console.log(`### ${fileResult.filePath}\n`);
+    lines.push(`### ${fileResult.filePath}`, '');
     if (!fileResult.success) {
-      console.log(`**Error:** ${fileResult.error}\n`);
+      lines.push(`**Error:** ${fileResult.error}`, '');
       return;
     }
     if (fileResult.skipped) {
-      console.log(`*Skipped (based on exclusion patterns or file type).*\n`);
+      lines.push('*Skipped (based on exclusion patterns or file type).*', '');
       return;
     }
     if (!fileResult.results || !fileResult.results.issues?.length) {
-      console.log(`*No actionable issues reported.*\n`);
+      lines.push('*No actionable issues reported.*', '');
       if (fileResult.results?.summary) {
-        console.log(`**Summary:** ${fileResult.results.summary}\n`);
+        lines.push(`**Summary:** ${fileResult.results.summary}`, '');
       }
       return;
     }
 
     const review = fileResult.results;
     if (review.summary) {
-      console.log(`**Summary:** ${review.summary}\n`);
+      lines.push(`**Summary:** ${review.summary}`, '');
     }
 
     if (review.issues && review.issues.length > 0) {
-      console.log(`**Issues Found (${review.issues.length}):**\n`);
+      lines.push(`**Issues Found (${review.issues.length}):**`, '');
       review.issues.forEach((issue) => {
         const severityEmoji = getSeverityEmoji(issue.severity);
-        console.log(
+        lines.push(
           `- **[${issue.severity.toUpperCase()}] ${severityEmoji} (Lines: ${issue.lineNumbers?.join(', ') || 'N/A'})**: ${
             issue.description
           }`
         );
         if (issue.suggestion) {
-          console.log(`\n  *Suggestion:* ${issue.suggestion}\n`);
+          lines.push('', `  *Suggestion:* ${issue.suggestion}`, '');
         }
         // Include code suggestion if available
         if (issue.codeSuggestion) {
           const { startLine, endLine, newCode } = issue.codeSuggestion;
           const lineRange = endLine ? `${startLine}-${endLine}` : `${startLine}`;
-          console.log(`\n  **Suggested change (lines ${lineRange}):**\n`);
-          console.log('  ```suggestion');
-          console.log(
-            newCode
-              .split('\n')
-              .map((line) => `  ${line}`)
-              .join('\n')
-          );
-          console.log('  ```\n');
+          lines.push('', `  **Suggested change (lines ${lineRange}):**`, '', '  ```suggestion');
+          lines.push(...newCode.split('\n').map((line) => `  ${line}`));
+          lines.push('  ```', '');
         }
       });
     }
-
   });
+
+  const markdownOutput = `${lines.join('\n')}\n`;
+
+  if (options?.outputFile) {
+    fs.writeFileSync(options.outputFile, markdownOutput, 'utf8');
+    console.log(chalk.green(`Markdown output saved to: ${options.outputFile}`));
+    return;
+  }
+
+  process.stdout.write(markdownOutput);
 }
 
 /**
