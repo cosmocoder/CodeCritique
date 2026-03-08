@@ -219,6 +219,66 @@ describe('rag-review', () => {
       expect(result.success).toBe(true);
     });
 
+    it('should preserve successful chunk results when one chunk fails', async () => {
+      shouldProcessFile.mockReturnValue(true);
+      getChangedLinesInfo.mockReturnValue({
+        hasChanges: true,
+        addedLines: [1, 2, 3],
+        removedLines: [],
+        fullDiff: '+ new code',
+      });
+
+      shouldChunkPR.mockReturnValue({ shouldChunk: true, estimatedTokens: 100000, recommendedChunks: 2 });
+      chunkPRFiles.mockReturnValue([
+        { files: [{ filePath: '/file1.js' }], totalTokens: 30000 },
+        { files: [{ filePath: '/file2.js' }], totalTokens: 30000 },
+      ]);
+
+      const allSettledSpy = vi.spyOn(Promise, 'allSettled').mockResolvedValue([
+        {
+          status: 'fulfilled',
+          value: {
+            success: true,
+            results: [{ filePath: '/file1.js', success: true }],
+          },
+        },
+        {
+          status: 'rejected',
+          reason: new Error('Chunk LLM failed'),
+        },
+      ]);
+
+      combineChunkResults.mockImplementation((chunkResults) => ({
+        success: true,
+        results: chunkResults.filter((chunk) => chunk.success).flatMap((chunk) => chunk.results || []),
+        chunkResults,
+      }));
+
+      runAnalysis.mockResolvedValueOnce({
+        success: true,
+        results: { fileSpecificIssues: {}, crossFileIssues: [], summary: 'OK' },
+      });
+
+      const result = await reviewPullRequest(['/file1.js', '/file2.js'], { verbose: true });
+
+      expect(combineChunkResults).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ chunkId: 1, success: true }),
+          expect.objectContaining({
+            chunkId: 2,
+            success: false,
+            error: 'Chunk LLM failed',
+            results: [],
+          }),
+        ]),
+        2
+      );
+      expect(allSettledSpy).toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      expect(result.results).toHaveLength(1);
+      expect(result.chunkResults).toHaveLength(2);
+    });
+
     it('should gather unified context for PR files', async () => {
       // Setup analysis to return valid holistic result
       runAnalysis.mockResolvedValue({

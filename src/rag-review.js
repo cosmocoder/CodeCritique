@@ -520,9 +520,28 @@ async function reviewLargePRInChunks(prFiles, options) {
 
   // Step 3: Process chunks in parallel
   console.log(chalk.blue('🔄 Processing chunks in parallel...'));
-  const chunkResults = await Promise.all(
+  const settledChunkResults = await Promise.allSettled(
     chunks.map((chunk, index) => reviewPRChunk(chunk, sharedContext, options, index + 1, chunks.length))
   );
+
+  const chunkResults = settledChunkResults.map((result, index) => {
+    if (result.status === 'fulfilled') {
+      return {
+        chunkId: index + 1,
+        ...result.value,
+      };
+    }
+
+    const errorMessage = result.reason instanceof Error ? result.reason.message : String(result.reason);
+    console.warn(chalk.yellow(`Chunk ${index + 1}/${chunks.length} failed: ${errorMessage}`));
+
+    return {
+      chunkId: index + 1,
+      success: false,
+      error: errorMessage,
+      results: [],
+    };
+  });
 
   // Step 4: Combine results
   console.log(chalk.blue('🔗 Combining chunk results...'));
