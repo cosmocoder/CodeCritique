@@ -23,7 +23,7 @@ import { calculateCosineSimilarity, calculatePathSimilarity } from './embeddings
 import { inferContextFromDocumentContent } from './utils/context-inference.js';
 import { isGenericDocument, getGenericDocumentContext } from './utils/document-detection.js';
 import { isDocumentationFile } from './utils/file-validation.js';
-import { debug } from './utils/logging.js';
+import { debug, verboseLog } from './utils/logging.js';
 
 const FILE_EMBEDDINGS_TABLE = TABLE_NAMES.FILE_EMBEDDINGS;
 const DOCUMENT_CHUNK_TABLE = TABLE_NAMES.DOCUMENT_CHUNK;
@@ -79,7 +79,8 @@ export class ContentRetriever {
         return [];
       }
 
-      console.log(
+      verboseLog(
+        options,
         chalk.cyan(`Native hybrid documentation search - limit: ${limit}, threshold: ${similarityThreshold}, reranking: ${useReranking}`)
       );
 
@@ -91,7 +92,7 @@ export class ContentRetriever {
         return [];
       }
 
-      console.log(chalk.cyan('Performing native hybrid search for documentation...'));
+      verboseLog(options, chalk.cyan('Performing native hybrid search for documentation...'));
       let query = table.search(queryText).nearestToText(queryText);
 
       const resolvedProjectPath = path.resolve(projectPath);
@@ -106,7 +107,7 @@ export class ContentRetriever {
       }
 
       const results = await query.limit(Math.max(limit * 3, 20)).toArray();
-      console.log(chalk.green(`Native hybrid search returned ${results.length} documentation results`));
+      verboseLog(options, chalk.green(`Native hybrid search returned ${results.length} documentation results`));
 
       // OPTIMIZATION: Enhanced batch file existence checks with parallel processing
       const docsToCheck = [];
@@ -168,7 +169,7 @@ export class ContentRetriever {
       // Filter results based on project match using the map
       const projectFilteredResults = results.filter((result, index) => docProjectMatchMap.get(index) === true);
 
-      console.log(chalk.blue(`Filtered to ${projectFilteredResults.length} documentation results from current project`));
+      verboseLog(options, chalk.blue(`Filtered to ${projectFilteredResults.length} documentation results from current project`));
       let finalResults = projectFilteredResults.map((result) => {
         let similarity;
         if (result._distance !== undefined) {
@@ -197,7 +198,7 @@ export class ContentRetriever {
 
       let queryEmbedding = null;
       if (useReranking && queryContextForReranking && finalResults.length >= 3) {
-        console.log(chalk.cyan('Applying sophisticated contextual reranking to documentation...'));
+        verboseLog(options, chalk.cyan('Applying sophisticated contextual reranking to documentation...'));
         const WEIGHT_INITIAL_SIM = 0.3;
         const WEIGHT_H1_CHUNK_RERANK = 0.15;
         const HEAVY_BOOST_SAME_AREA = 0.4;
@@ -416,7 +417,7 @@ export class ContentRetriever {
         finalResults = finalResults.slice(0, limit);
       }
 
-      console.log(chalk.green(`Returning ${finalResults.length} documentation results`));
+      verboseLog(options, chalk.green(`Returning ${finalResults.length} documentation results`));
 
       return finalResults;
     } catch (error) {
@@ -443,7 +444,10 @@ export class ContentRetriever {
       precomputedQueryEmbedding = null,
     } = options;
 
-    console.log(chalk.cyan(`Native hybrid code search - limit: ${limit}, threshold: ${similarityThreshold}, isTestFile: ${isTestFile}`));
+    verboseLog(
+      options,
+      chalk.cyan(`Native hybrid code search - limit: ${limit}, threshold: ${similarityThreshold}, isTestFile: ${isTestFile}`)
+    );
 
     try {
       if (!queryText?.trim()) {
@@ -460,7 +464,7 @@ export class ContentRetriever {
       }
 
       // Native hybrid search with automatic vector + FTS + RRF
-      console.log(chalk.cyan('Performing native hybrid search for code...'));
+      verboseLog(options, chalk.cyan('Performing native hybrid search for code...'));
       let query = table.search(queryText).nearestToText(queryText);
 
       // Add filtering conditions
@@ -472,13 +476,13 @@ export class ContentRetriever {
         if (isTestFile) {
           // Only include test files
           conditions.push(`(path LIKE '%.test.%' OR path LIKE '%.spec.%' OR path LIKE '%_test.py' OR path LIKE 'test_%.py')`);
-          console.log(chalk.blue(`Filtering to include only test files.`));
+          verboseLog(options, chalk.blue(`Filtering to include only test files.`));
         } else {
           // Exclude test files
           conditions.push(
             `(path NOT LIKE '%.test.%' AND path NOT LIKE '%.spec.%' AND path NOT LIKE '%_test.py' AND path NOT LIKE 'test_%.py')`
           );
-          console.log(chalk.blue(`Filtering to exclude test files.`));
+          verboseLog(options, chalk.blue(`Filtering to exclude test files.`));
         }
       }
 
@@ -526,7 +530,7 @@ export class ContentRetriever {
 
       const results = await query.limit(Math.max(limit * 3, 20)).toArray();
 
-      console.log(chalk.green(`Native hybrid search returned ${results.length} results`));
+      verboseLog(options, chalk.green(`Native hybrid search returned ${results.length} results`));
 
       // OPTIMIZATION: Batch file existence checks for better performance
       const resultsToCheck = [];
@@ -595,7 +599,7 @@ export class ContentRetriever {
       // Filter results based on project match using the map
       const projectFilteredResults = results.filter((result, index) => projectMatchMap.get(index) === true);
 
-      console.log(chalk.blue(`Filtered to ${projectFilteredResults.length} results from current project`));
+      verboseLog(options, chalk.blue(`Filtered to ${projectFilteredResults.length} results from current project`));
 
       // Map results to expected format
       let finalResults = projectFilteredResults.map((result) => {
@@ -683,7 +687,7 @@ export class ContentRetriever {
         finalResults = finalResults.slice(0, limit);
       }
 
-      console.log(chalk.green(`Returning ${finalResults.length} optimized hybrid search results`));
+      verboseLog(options, chalk.green(`Returning ${finalResults.length} optimized hybrid search results`));
       return finalResults;
     } catch (error) {
       console.error(chalk.red(`Error in optimized findSimilarCode: ${error.message}`), error);
@@ -712,7 +716,7 @@ export class ContentRetriever {
     this.h1EmbeddingCache.clear();
     this.documentContextCache.clear();
     this.documentContextPromiseCache.clear();
-    console.log(chalk.green('ContentRetriever caches cleared'));
+    verboseLog({}, chalk.green('ContentRetriever caches cleared'));
   }
 
   /**
@@ -739,7 +743,7 @@ export class ContentRetriever {
         parallelRerankingTime: 0,
       };
 
-      console.log(chalk.green('ContentRetriever cleanup complete'));
+      verboseLog({}, chalk.green('ContentRetriever cleanup complete'));
     } finally {
       this.cleaningUp = false;
     }

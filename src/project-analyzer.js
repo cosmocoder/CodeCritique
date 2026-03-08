@@ -13,6 +13,7 @@ import { getDefaultEmbeddingsSystem } from './embeddings/factory.js';
 import * as llm from './llm.js';
 import { FILE_SELECTION_SYSTEM_PROMPT, PROJECT_SUMMARY_SYSTEM_PROMPT } from './prompt-cache.js';
 import { isDocumentationFile, isTestFile } from './utils/file-validation.js';
+import { verboseLog } from './utils/logging.js';
 
 // Consolidated file classification configuration
 const FILE_PATTERNS = {
@@ -198,9 +199,7 @@ export class ProjectAnalyzer {
     const { verbose = false, forceAnalysis = false } = options;
 
     try {
-      if (verbose) {
-        console.log(chalk.cyan('🔍 Starting project architecture analysis...'));
-      }
+      verboseLog(verbose, chalk.cyan('🔍 Starting project architecture analysis...'));
 
       // Initialize LLM client
       if (!this.llm) {
@@ -212,16 +211,13 @@ export class ProjectAnalyzer {
       if (existingSummary && !forceAnalysis) {
         const currentHash = await this.calculateKeyFilesHash(existingSummary.keyFiles);
         if (existingSummary.keyFilesHash === currentHash) {
-          if (verbose) {
-            console.log(chalk.green('✅ Project analysis up-to-date (no key file changes detected)'));
-          }
+          verboseLog(verbose, chalk.green('✅ Project analysis up-to-date (no key file changes detected)'));
           return existingSummary;
         }
-        if (verbose) {
-          console.log(chalk.yellow('🔄 Key files changed, regenerating analysis...'));
-        }
-      } else if (verbose) {
-        console.log(
+        verboseLog(verbose, chalk.yellow('🔄 Key files changed, regenerating analysis...'));
+      } else {
+        verboseLog(
+          verbose,
           chalk.cyan(
             forceAnalysis
               ? '🔄 Force analysis requested - regenerating from scratch...'
@@ -235,10 +231,8 @@ export class ProjectAnalyzer {
         ? await this.validateAndUpdateKeyFiles(existingSummary.keyFiles, projectPath)
         : await this.discoverKeyFilesWithLLM(projectPath);
 
-      if (verbose) {
-        console.log(chalk.gray(`   Found ${keyFiles.length} key architectural files`));
-        console.log(chalk.cyan('🧠 Generating LLM-based project analysis...'));
-      }
+      verboseLog(verbose, chalk.gray(`   Found ${keyFiles.length} key architectural files`));
+      verboseLog(verbose, chalk.cyan('🧠 Generating LLM-based project analysis...'));
 
       // Generate summary
       const projectSummary = await this.generateProjectSummary(keyFiles, projectPath);
@@ -254,12 +248,10 @@ export class ProjectAnalyzer {
       this.keyFiles = keyFiles;
       this.lastAnalysisHash = currentHash;
 
-      if (verbose) {
-        console.log(chalk.green('✅ Project analysis complete'));
-        console.log(chalk.gray(`   Technologies: ${(projectSummary.technologies || []).join(', ')}`));
-        console.log(chalk.gray(`   Key patterns: ${(projectSummary.keyPatterns || []).length} identified`));
-        console.log(chalk.gray(`   Key files tracked: ${keyFiles.length}`));
-      }
+      verboseLog(verbose, chalk.green('✅ Project analysis complete'));
+      verboseLog(verbose, chalk.gray(`   Technologies: ${(projectSummary.technologies || []).join(', ')}`));
+      verboseLog(verbose, chalk.gray(`   Key patterns: ${(projectSummary.keyPatterns || []).length} identified`));
+      verboseLog(verbose, chalk.gray(`   Key files tracked: ${keyFiles.length}`));
 
       return projectSummary;
     } catch (error) {
@@ -300,7 +292,7 @@ export class ProjectAnalyzer {
     try {
       const embeddingsSystem = getDefaultEmbeddingsSystem();
       await embeddingsSystem.storeProjectSummary(projectPath, projectSummary);
-      console.log(chalk.green('✅ Project analysis stored in database'));
+      verboseLog({}, chalk.green('✅ Project analysis stored in database'));
     } catch (error) {
       console.error(chalk.yellow('Warning: Could not store analysis:'), error.message);
     }
@@ -328,7 +320,7 @@ export class ProjectAnalyzer {
 
     // If we lost more than 30% of key files, trigger fresh discovery
     if (validatedFiles.length < existingKeyFiles.length * 0.7) {
-      console.log(chalk.yellow('⚠️ Many key files missing, performing fresh discovery...'));
+      verboseLog({}, chalk.yellow('⚠️ Many key files missing, performing fresh discovery...'));
       return await this.discoverKeyFilesWithLLM(projectPath);
     }
 
@@ -339,10 +331,10 @@ export class ProjectAnalyzer {
    * Discover key architectural files using LanceDB hybrid search
    */
   async discoverKeyFilesWithLLM(projectPath) {
-    console.log(chalk.cyan('🔍 Mining codebase embeddings with LanceDB hybrid search...'));
+    verboseLog({}, chalk.cyan('🔍 Mining codebase embeddings with LanceDB hybrid search...'));
 
     const keyFilesByCategory = await this.mineKeyFilesFromEmbeddings(projectPath);
-    console.log(chalk.cyan(`🧠 LLM analyzing ${keyFilesByCategory.length} candidates from embedding search...`));
+    verboseLog({}, chalk.cyan(`🧠 LLM analyzing ${keyFilesByCategory.length} candidates from embedding search...`));
 
     const keyFiles = await this.selectFinalKeyFiles(keyFilesByCategory, projectPath);
     return keyFiles;
@@ -362,7 +354,7 @@ export class ProjectAnalyzer {
       await table.optimize();
     } catch (optimizeError) {
       if (optimizeError.message && optimizeError.message.includes('legacy format')) {
-        console.log(chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
+        console.warn(chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
       } else {
         console.warn(chalk.yellow(`Warning: Failed to optimize file embeddings table: ${optimizeError.message}`));
       }
@@ -371,7 +363,7 @@ export class ProjectAnalyzer {
     const keyFiles = new Map();
 
     try {
-      console.log(chalk.gray(`   📊 Using LanceDB hybrid search for project: ${projectPath}`));
+      verboseLog({}, chalk.gray(`   📊 Using LanceDB hybrid search for project: ${projectPath}`));
 
       // Unified query function
       const queryFiles = async (config) => {
@@ -414,17 +406,17 @@ export class ProjectAnalyzer {
 
           return await query.limit(config.limit || 30).toArray();
         } catch (error) {
-          console.log(chalk.yellow(`     ⚠️ Query failed for ${config.category}: ${error.message}`));
+          verboseLog({}, chalk.yellow(`     ⚠️ Query failed for ${config.category}: ${error.message}`));
           return [];
         }
       };
 
       // Execute all searches
       for (const config of DB_SEARCH_CONFIGS) {
-        console.log(chalk.gray(`   🔍 Searching for ${config.category} files...`));
+        verboseLog({}, chalk.gray(`   🔍 Searching for ${config.category} files...`));
 
         const results = await queryFiles(config);
-        console.log(chalk.gray(`   📦 Found ${results.length} ${config.category} file candidates`));
+        verboseLog({}, chalk.gray(`   📦 Found ${results.length} ${config.category} file candidates`));
 
         results.forEach((result) => {
           if (this.matchesFileType(result.path, result.name, config.matcher)) {
@@ -438,7 +430,7 @@ export class ProjectAnalyzer {
     }
 
     const results = Array.from(keyFiles.values());
-    console.log(chalk.cyan(`🗃️ Found ${results.length} key files from embeddings database`));
+    verboseLog({}, chalk.cyan(`🗃️ Found ${results.length} key files from embeddings database`));
     return results;
   }
 
@@ -475,11 +467,11 @@ export class ProjectAnalyzer {
    */
   async selectFinalKeyFiles(candidates, projectPath) {
     if (candidates.length === 0) {
-      console.log(chalk.yellow('⚠️ No candidates found from embeddings search'));
+      verboseLog({}, chalk.yellow('⚠️ No candidates found from embeddings search'));
       return [];
     }
 
-    console.log(chalk.cyan(`🤖 LLM analyzing ${candidates.length} candidates...`));
+    verboseLog({}, chalk.cyan(`🤖 LLM analyzing ${candidates.length} candidates...`));
 
     const candidatesSummary = candidates
       .map((file, index) => {
@@ -520,7 +512,7 @@ Select files following the criteria in the system instructions.`;
         jsonSchema: fileSelectionSchema,
       });
 
-      console.log(chalk.gray('   📄 LLM Response preview:'), response.content.substring(0, 200));
+      verboseLog({}, chalk.gray('   📄 LLM Response preview:'), response.content.substring(0, 200));
 
       const selectedPaths = response.json.selectedFiles;
 
@@ -546,14 +538,14 @@ Select files following the criteria in the system instructions.`;
           })
           .filter(Boolean);
 
-        console.log(chalk.cyan(`🎯 LLM selected ${keyFiles.length} final key files`));
+        verboseLog({}, chalk.cyan(`🎯 LLM selected ${keyFiles.length} final key files`));
         return keyFiles;
       } else {
         throw new Error(`Failed to extract valid JSON array from LLM response`);
       }
     } catch (error) {
       console.error(chalk.red('Error in LLM selection:'), error.message);
-      console.log(chalk.yellow('   🔄 Falling back to automatic selection...'));
+      verboseLog({}, chalk.yellow('   🔄 Falling back to automatic selection...'));
       return this.fallbackFileSelection(candidates, projectPath);
     }
   }
@@ -588,7 +580,7 @@ Select files following the criteria in the system instructions.`;
       }
     }
 
-    console.log(chalk.yellow(`⚠️ Used fallback selection: ${fallbackFiles.length} files`));
+    verboseLog({}, chalk.yellow(`⚠️ Used fallback selection: ${fallbackFiles.length} files`));
     return fallbackFiles;
   }
 
@@ -793,7 +785,7 @@ Follow the analysis guidelines from the system instructions to identify custom i
     } catch (error) {
       console.error(chalk.red('Error generating project summary:'), error.message);
       const fallback = this.createFallbackSummary(projectPath, keyFiles);
-      console.log(chalk.yellow('Using fallback summary with technologies:'), fallback.technologies);
+      verboseLog({}, chalk.yellow('Using fallback summary with technologies:'), fallback.technologies);
       return fallback;
     }
   }
@@ -857,7 +849,8 @@ Follow the analysis guidelines from the system instructions to identify custom i
       };
     }
 
-    console.log(
+    verboseLog(
+      {},
       chalk.cyan(
         `✅ Project summary validated - Technologies: ${validatedSummary.technologies.length}, Frameworks: ${validatedSummary.mainFrameworks.length}`
       )

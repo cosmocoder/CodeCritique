@@ -15,39 +15,41 @@ import path from 'path';
 import chalk from 'chalk';
 import { getDefaultEmbeddingsSystem } from './embeddings/factory.js';
 import { calculateCosineSimilarity } from './embeddings/similarity-calculator.js';
+import { verboseLog } from './utils/logging.js';
 
 /**
  * Load feedback data from artifacts directory
  *
  * @param {string} feedbackPath - Path to feedback artifacts directory
  * @param {Object} options - Loading options
+ * @param {boolean} [options.verbose=false] - Enable verbose progress logging
  * @returns {Promise<Object>} Loaded feedback data
  */
 export async function loadFeedbackData(feedbackPath, options = {}) {
   const { verbose = false } = options;
 
   if (!feedbackPath) {
-    if (verbose) console.log(chalk.gray('No feedback path provided'));
+    verboseLog(verbose, chalk.gray('No feedback path provided'));
     return {};
   }
 
   try {
     if (!fs.existsSync(feedbackPath)) {
-      if (verbose) console.log(chalk.gray(`Feedback directory not found: ${feedbackPath}`));
+      verboseLog(verbose, chalk.gray(`Feedback directory not found: ${feedbackPath}`));
       return {};
     }
 
-    if (verbose) console.log(chalk.cyan(`📁 Loading feedback from: ${feedbackPath}`));
+    verboseLog(verbose, chalk.cyan(`📁 Loading feedback from: ${feedbackPath}`));
 
     // Look for feedback files in the directory
     const feedbackFiles = fs.readdirSync(feedbackPath).filter((file) => file.startsWith('feedback-') && file.endsWith('.json'));
 
     if (feedbackFiles.length === 0) {
-      if (verbose) console.log(chalk.gray('No feedback files found'));
+      verboseLog(verbose, chalk.gray('No feedback files found'));
       return {};
     }
 
-    if (verbose) console.log(chalk.cyan(`📥 Found ${feedbackFiles.length} feedback file(s)`));
+    verboseLog(verbose, chalk.cyan(`📥 Found ${feedbackFiles.length} feedback file(s)`));
 
     // Load and merge all feedback files
     const allFeedback = {};
@@ -64,25 +66,21 @@ export async function loadFeedbackData(feedbackPath, options = {}) {
           Object.assign(allFeedback, feedbackData.feedback);
           const itemCount = Object.keys(feedbackData.feedback).length;
           totalItems += itemCount;
-          if (verbose) {
-            console.log(chalk.cyan(`📋 Loaded feedback from ${file}: ${itemCount} items`));
-          }
+          verboseLog(verbose, chalk.cyan(`📋 Loaded feedback from ${file}: ${itemCount} items`));
         }
       } catch (parseError) {
-        console.log(chalk.yellow(`⚠️ Error parsing feedback file ${file}: ${parseError.message}`));
+        console.warn(chalk.yellow(`⚠️ Error parsing feedback file ${file}: ${parseError.message}`));
       }
     }
 
     if (totalItems > 0) {
-      if (verbose) {
-        console.log(chalk.green(`✅ Successfully loaded ${totalItems} feedback items total`));
-      }
+      verboseLog(verbose, chalk.green(`✅ Successfully loaded ${totalItems} feedback items total`));
       return allFeedback;
     }
 
     return {};
   } catch (error) {
-    console.log(chalk.red(`❌ Error loading feedback data: ${error.message}`));
+    console.error(chalk.red(`❌ Error loading feedback data: ${error.message}`));
     return {};
   }
 }
@@ -113,9 +111,9 @@ export async function initializeSemanticSimilarity() {
     await embeddingsSystem.initialize();
     semanticSimilarityInitialized = true;
     semanticSimilarityAvailable = true;
-    console.log(chalk.green('[FeedbackLoader] Semantic similarity initialized using embeddings system'));
+    verboseLog({}, chalk.green('[FeedbackLoader] Semantic similarity initialized using embeddings system'));
   } catch (error) {
-    console.log(chalk.yellow(`[FeedbackLoader] Semantic similarity initialization failed: ${error.message}`));
+    console.warn(chalk.yellow(`[FeedbackLoader] Semantic similarity initialization failed: ${error.message}`));
     semanticSimilarityAvailable = false;
   }
 }
@@ -157,7 +155,7 @@ async function calculateSemanticSimilarity(text1, text2) {
     // Cosine similarity ranges from -1 to 1, normalize to 0-1
     return (similarity + 1) / 2;
   } catch (error) {
-    console.log(chalk.yellow(`[FeedbackLoader] Semantic similarity calculation failed: ${error.message}`));
+    console.warn(chalk.yellow(`[FeedbackLoader] Semantic similarity calculation failed: ${error.message}`));
     return null;
   }
 }
@@ -173,9 +171,9 @@ async function calculateSemanticSimilarity(text1, text2) {
  * @param {string} issueDescription - Description of the current issue
  * @param {Object} feedbackData - Loaded feedback data
  * @param {Object} options - Filtering options
- * @param {number} options.similarityThreshold - Threshold for considering issues similar (default: 0.7)
- * @param {boolean} options.verbose - Enable verbose logging
- * @param {boolean} options.useSemanticSimilarity - Use semantic similarity when available (default: true)
+ * @param {number} [options.similarityThreshold=0.7] - Threshold for considering issues similar
+ * @param {boolean} [options.verbose=false] - Enable verbose progress logging
+ * @param {boolean} [options.useSemanticSimilarity=true] - Use semantic similarity when available
  * @returns {Promise<boolean>} True if issue should be skipped
  */
 export async function shouldSkipSimilarIssue(issueDescription, feedbackData, options = {}) {
@@ -205,9 +203,7 @@ export async function shouldSkipSimilarIssue(issueDescription, feedbackData, opt
   // Determine if we should use semantic similarity
   const canUseSemanticSimilarity = useSemanticSimilarity && isSemanticSimilarityAvailable();
 
-  if (verbose && canUseSemanticSimilarity) {
-    console.log(chalk.cyan('🔍 Using semantic similarity for issue comparison'));
-  }
+  verboseLog(verbose && canUseSemanticSimilarity, chalk.cyan('🔍 Using semantic similarity for issue comparison'));
 
   // Check similarity with dismissed issues
   for (const dismissed of dismissedIssues) {
@@ -233,11 +229,12 @@ export async function shouldSkipSimilarIssue(issueDescription, feedbackData, opt
     }
 
     if (similarity > similarityThreshold) {
-      if (verbose) {
-        console.log(chalk.yellow(`⏭️ Skipping similar dismissed issue (${(similarity * 100).toFixed(1)}% ${similarityMethod} similarity)`));
-        console.log(chalk.gray(`   Current: ${issueDescription.substring(0, 80)}...`));
-        console.log(chalk.gray(`   Previous: ${dismissed.originalIssue.substring(0, 80)}...`));
-      }
+      verboseLog(
+        verbose,
+        chalk.yellow(`⏭️ Skipping similar dismissed issue (${(similarity * 100).toFixed(1)}% ${similarityMethod} similarity)`)
+      );
+      verboseLog(verbose, chalk.gray(`   Current: ${issueDescription.substring(0, 80)}...`));
+      verboseLog(verbose, chalk.gray(`   Previous: ${dismissed.originalIssue.substring(0, 80)}...`));
       return true;
     }
   }
@@ -252,7 +249,7 @@ export async function shouldSkipSimilarIssue(issueDescription, feedbackData, opt
  * @param {string} text1 - First text
  * @param {string} text2 - Second text
  * @param {Object} options - Options
- * @param {boolean} options.useSemanticSimilarity - Use semantic similarity when available (default: true)
+ * @param {boolean} [options.useSemanticSimilarity=true] - Use semantic similarity when available
  * @returns {Promise<{similarity: number, method: string}>} Similarity result with method used
  */
 export async function calculateIssueSimilarity(text1, text2, options = {}) {
@@ -327,6 +324,8 @@ export function calculateWordSimilarity(text1, text2) {
  *
  * @param {Object} feedbackData - Loaded feedback data
  * @param {Object} options - Extraction options
+ * @param {number} [options.maxPatterns=10] - Maximum number of dismissed patterns to include
+ * @param {boolean} [options.verbose=false] - Enable verbose progress logging
  * @returns {Array} Array of dismissed issue patterns
  */
 export function extractDismissedPatterns(feedbackData, options = {}) {
@@ -355,9 +354,10 @@ export function extractDismissedPatterns(feedbackData, options = {}) {
     }))
     .slice(0, maxPatterns);
 
-  if (verbose && dismissedIssues.length > 0) {
-    console.log(chalk.cyan(`📋 Extracted ${dismissedIssues.length} dismissed issue patterns for LLM context`));
-  }
+  verboseLog(
+    verbose && dismissedIssues.length > 0,
+    chalk.cyan(`📋 Extracted ${dismissedIssues.length} dismissed issue patterns for LLM context`)
+  );
 
   return dismissedIssues;
 }

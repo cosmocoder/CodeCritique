@@ -19,7 +19,7 @@ import path from 'node:path';
 import chalk from 'chalk';
 import { isDocumentationFile, shouldProcessFile as utilsShouldProcessFile, batchCheckGitignore } from '../utils/file-validation.js';
 import { detectLanguageFromExtension } from '../utils/language-detection.js';
-import { debug } from '../utils/logging.js';
+import { debug, verboseLog } from '../utils/logging.js';
 import { extractMarkdownChunks } from '../utils/markdown.js';
 import { slugify } from '../utils/string-utils.js';
 import { TABLE_NAMES, LANCEDB_DIR_NAME, FASTEMBED_CACHE_DIR_NAME } from './constants.js';
@@ -148,7 +148,7 @@ export class FileProcessor {
    * @returns {Promise<boolean>} True if successful, false otherwise
    */
   async generateDirectoryStructureEmbedding(options = {}) {
-    console.log(chalk.cyan('[generateDirEmb] Starting...')); // Log entry
+    verboseLog(options, chalk.cyan('[generateDirEmb] Starting...')); // Log entry
 
     if (!this.modelManager) {
       throw createFileProcessingError('ModelManager is required for directory structure embedding');
@@ -217,7 +217,7 @@ export class FileProcessor {
       debug('[generateDirEmb] Attempting table.add...');
       try {
         await table.add([record]);
-        console.log(chalk.green('[generateDirEmb] Successfully added directory structure embedding.'));
+        verboseLog(options, chalk.green('[generateDirEmb] Successfully added directory structure embedding.'));
         return true; // Indicate success
       } catch (addError) {
         console.error(chalk.red(`[generateDirEmb] !!! Error during table.add: ${addError.message}`), addError.stack);
@@ -265,10 +265,10 @@ export class FileProcessor {
       return { processed: 0, failed: filePaths.length, skipped: 0, excluded: 0, files: [], failedFiles: [...filePaths], excludedFiles: [] };
     }
 
-    console.log(chalk.blue('Ensuring database tables exist before batch processing...'));
+    verboseLog(options, chalk.blue('Ensuring database tables exist before batch processing...'));
     try {
       await this.databaseManager.getDB();
-      console.log(chalk.green('Database table check complete.'));
+      verboseLog(options, chalk.green('Database table check complete.'));
     } catch (dbError) {
       console.error(chalk.red(`Failed to initialize database or tables: ${dbError.message}. Aborting batch process.`));
       return { processed: 0, failed: filePaths.length, skipped: 0, excluded: 0, files: [], failedFiles: [...filePaths], excludedFiles: [] };
@@ -278,7 +278,7 @@ export class FileProcessor {
     const exclusionOptions = { excludePatterns, respectGitignore, baseDir: resolvedCanonicalBaseDir };
     this.processedFiles.clear();
     this.progressTracker.reset(filePaths.length);
-    console.log(chalk.blue(`Starting batch processing of ${filePaths.length} files...`));
+    verboseLog(options, chalk.blue(`Starting batch processing of ${filePaths.length} files...`));
 
     // Generate directory structure embedding first
     try {
@@ -303,12 +303,19 @@ export class FileProcessor {
     }
 
     // Process files in batches
-    console.log(chalk.cyan('--- Starting Phase 1: File Embeddings ---'));
+    verboseLog(options, chalk.cyan('--- Starting Phase 1: File Embeddings ---'));
     const BATCH_SIZE = 50; // Process files in smaller batches for better performance
 
     for (let i = 0; i < filePaths.length; i += BATCH_SIZE) {
       const batch = filePaths.slice(i, i + BATCH_SIZE);
-      const batchResults = await this._processBatch(batch, resolvedCanonicalBaseDir, exclusionOptions, onProgress, maxLines);
+      const batchResults = await this._processBatch(
+        batch,
+        resolvedCanonicalBaseDir,
+        exclusionOptions,
+        onProgress,
+        maxLines,
+        options.verbose
+      );
 
       // Merge results
       results.processed += batchResults.processed;
@@ -323,7 +330,7 @@ export class FileProcessor {
     // Process document chunks
     await this._processDocumentChunks(filePaths, resolvedCanonicalBaseDir, excludePatterns);
 
-    console.log(chalk.green(`Batch processing complete!`));
+    verboseLog(options, chalk.green(`Batch processing complete!`));
 
     // Update progress tracker counts for internal tracking
     this.progressTracker.processedCount = results.processed;
@@ -346,7 +353,7 @@ export class FileProcessor {
    * @returns {Promise<Object>} Batch processing results
    * @private
    */
-  async _processBatch(filePaths, baseDir, exclusionOptions, onProgress, maxLines = 1000) {
+  async _processBatch(filePaths, baseDir, exclusionOptions, onProgress, maxLines = 1000, verbose = false) {
     const results = { processed: 0, failed: 0, skipped: 0, excluded: 0, files: [], failedFiles: [], excludedFiles: [] };
 
     // ============================================================================
@@ -354,12 +361,12 @@ export class FileProcessor {
     // ============================================================================
     let gitignoreCache = new Map();
     if (exclusionOptions.respectGitignore !== false) {
-      console.log(chalk.cyan(`Performing batch gitignore check for ${filePaths.length} files...`));
+      verboseLog({}, chalk.cyan(`Performing batch gitignore check for ${filePaths.length} files...`));
       const gitStartTime = Date.now();
       const absoluteFilePaths = filePaths.map((fp) => (path.isAbsolute(fp) ? path.resolve(fp) : path.resolve(baseDir, fp)));
-      gitignoreCache = await batchCheckGitignore(absoluteFilePaths, baseDir);
+      gitignoreCache = await batchCheckGitignore(absoluteFilePaths, baseDir, { verbose });
       const gitDuration = ((Date.now() - gitStartTime) / 1000).toFixed(2);
-      console.log(chalk.green(`✓ Batch gitignore check completed in ${gitDuration}s`));
+      verboseLog({}, chalk.green(`✓ Batch gitignore check completed in ${gitDuration}s`));
     }
 
     // ============================================================================
@@ -382,7 +389,7 @@ export class FileProcessor {
         existingFilesMap.get(record.path).push(record);
       }
 
-      console.log(chalk.cyan(`Found ${existingRecords.length} existing embeddings for comparison`));
+      verboseLog({}, chalk.cyan(`Found ${existingRecords.length} existing embeddings for comparison`));
     } catch (queryError) {
       console.warn(chalk.yellow(`Warning: Could not query existing embeddings: ${queryError.message}`));
     }
@@ -454,7 +461,7 @@ export class FileProcessor {
       }
     }
 
-    console.log(chalk.cyan(`Pre-filtered to ${candidateFiles.length} candidate files (excluded ${results.excluded})`));
+    verboseLog({}, chalk.cyan(`Pre-filtered to ${candidateFiles.length} candidate files (excluded ${results.excluded})`));
 
     // ============================================================================
     // PHASE 4: READ FILES AND CONTENT HASH CHECK
@@ -557,7 +564,8 @@ export class FileProcessor {
 
     // Generate embeddings only for files that need processing
     if (filesToActuallyProcess.length > 0) {
-      console.log(
+      verboseLog(
+        {},
         chalk.cyan(
           `Processing ${filesToActuallyProcess.length} new/changed files (skipped ${filesToProcess.length - filesToActuallyProcess.length} unchanged)`
         )
@@ -606,7 +614,7 @@ export class FileProcessor {
             await fileTable.optimize();
           } catch (optimizeError) {
             if (optimizeError.message && optimizeError.message.includes('legacy format')) {
-              console.log(
+              console.warn(
                 chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`)
               );
             } else {
@@ -651,7 +659,7 @@ export class FileProcessor {
    * @private
    */
   async _processDocumentChunks(filePaths, baseDir) {
-    console.log(chalk.cyan('--- Starting Phase 2: Document Chunk Embeddings ---'));
+    verboseLog({}, chalk.cyan('--- Starting Phase 2: Document Chunk Embeddings ---'));
     const documentChunkTable = await this.databaseManager.getTable(this.documentChunkTable);
     if (!documentChunkTable) {
       console.warn(chalk.yellow(`Skipping Phase 2: Document Chunk Embeddings because table ${this.documentChunkTable} was not found.`));
@@ -674,7 +682,7 @@ export class FileProcessor {
         existingDocChunksMap.get(chunk.original_document_path).push(chunk);
       }
 
-      console.log(chalk.cyan(`Found ${existingChunks.length} existing document chunks for comparison`));
+      verboseLog({}, chalk.cyan(`Found ${existingChunks.length} existing document chunks for comparison`));
     } catch (queryError) {
       console.warn(chalk.yellow(`Warning: Could not query existing document chunks, will process all docs: ${queryError.message}`));
       existingDocChunksMap = new Map();
@@ -754,11 +762,11 @@ export class FileProcessor {
     }
 
     if (skippedDocCount > 0) {
-      console.log(chalk.cyan(`Skipped ${skippedDocCount} unchanged documentation files`));
+      verboseLog({}, chalk.cyan(`Skipped ${skippedDocCount} unchanged documentation files`));
     }
 
     if (allDocChunksToEmbed.length > 0) {
-      console.log(chalk.blue(`Extracted ${allDocChunksToEmbed.length} total document chunks to process for embeddings.`));
+      verboseLog({}, chalk.blue(`Extracted ${allDocChunksToEmbed.length} total document chunks to process for embeddings.`));
       const chunkContentsForBatching = allDocChunksToEmbed.map((chunk) => chunk.content);
       const chunkEmbeddings = await this.modelManager.calculateEmbeddingBatch(chunkContentsForBatching);
 
@@ -807,13 +815,14 @@ export class FileProcessor {
           await documentChunkTable.optimize();
         } catch (optimizeError) {
           if (optimizeError.message && optimizeError.message.includes('legacy format')) {
-            console.log(chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
+            console.warn(chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
           } else {
             console.warn(chalk.yellow(`Warning: Failed to optimize document chunk table after adding records: ${optimizeError.message}`));
           }
         }
 
-        console.log(
+        verboseLog(
+          {},
           chalk.green(`Successfully added ${allDocChunkRecordsToAdd.length} document chunk embeddings to ${this.documentChunkTable}.`)
         );
       } catch (addError) {
@@ -821,7 +830,7 @@ export class FileProcessor {
       }
     }
 
-    console.log(chalk.green('--- Finished Phase 2: Document Chunk Embeddings ---'));
+    verboseLog({}, chalk.green('--- Finished Phase 2: Document Chunk Embeddings ---'));
   }
 
   // ============================================================================
@@ -841,7 +850,7 @@ export class FileProcessor {
     try {
       this.processedFiles.clear();
       this.progressTracker.reset(0);
-      console.log(chalk.green('[FileProcessor] Resources cleaned up.'));
+      verboseLog({}, chalk.green('[FileProcessor] Resources cleaned up.'));
     } catch (error) {
       console.error(chalk.red(`[FileProcessor] Error during cleanup: ${error.message}`));
     } finally {

@@ -23,6 +23,7 @@
 import chalk from 'chalk';
 import { ContentRetriever } from '../content-retrieval.js';
 import { CustomDocumentProcessor } from '../custom-documents.js';
+import { verboseLog } from '../utils/logging.js';
 import { CacheManager } from './cache-manager.js';
 import { EMBEDDING_DIMENSIONS, MODEL_NAME_STRING, MAX_RETRIES, LANCEDB_PATH, FASTEMBED_CACHE_DIR } from './constants.js';
 import { DatabaseManager } from './database.js';
@@ -104,7 +105,7 @@ class EmbeddingsSystem {
       customDocumentProcessor: this.customDocumentProcessor,
     };
 
-    console.log(chalk.green('[EmbeddingsSystem] System created with dependency injection'));
+    verboseLog({}, chalk.green('[EmbeddingsSystem] System created with dependency injection'));
   }
 
   // ============================================================================
@@ -131,7 +132,7 @@ class EmbeddingsSystem {
       await this.initializationPromise;
       this.initialized = true;
       this.initializing = false;
-      console.log(chalk.green('[EmbeddingsSystem] System initialized successfully'));
+      verboseLog({}, chalk.green('[EmbeddingsSystem] System initialized successfully'));
     } catch (error) {
       this.initializing = false;
       this.initializationPromise = null;
@@ -144,7 +145,7 @@ class EmbeddingsSystem {
    * @private
    */
   async _performInitialization() {
-    console.log(chalk.blue('[EmbeddingsSystem] Initializing embeddings system...'));
+    verboseLog({}, chalk.blue('[EmbeddingsSystem] Initializing embeddings system...'));
 
     try {
       // Initialize database and tables
@@ -153,7 +154,7 @@ class EmbeddingsSystem {
       // Initialize the model
       await this.modelManager.initialize();
 
-      console.log(chalk.green('[EmbeddingsSystem] All components initialized successfully'));
+      verboseLog({}, chalk.green('[EmbeddingsSystem] All components initialized successfully'));
     } catch (error) {
       console.error(chalk.red(`[EmbeddingsSystem] Initialization failed: ${error.message}`));
       throw new EmbeddingError(`System initialization failed: ${error.message}`, 'SYSTEM_INITIALIZATION_FAILED', error);
@@ -388,7 +389,7 @@ class EmbeddingsSystem {
     this.cleaningUp = true;
 
     try {
-      console.log(chalk.yellow('[EmbeddingsSystem] Cleaning up system resources...'));
+      verboseLog({}, chalk.yellow('[EmbeddingsSystem] Cleaning up system resources...'));
 
       // Cleanup all components
       await Promise.all([
@@ -405,7 +406,7 @@ class EmbeddingsSystem {
       this.initializing = false;
       this.initializationPromise = null;
 
-      console.log(chalk.green('[EmbeddingsSystem] System cleanup completed'));
+      verboseLog({}, chalk.green('[EmbeddingsSystem] System cleanup completed'));
     } catch (error) {
       console.error(chalk.red(`[EmbeddingsSystem] Error during cleanup: ${error.message}`));
       throw error;

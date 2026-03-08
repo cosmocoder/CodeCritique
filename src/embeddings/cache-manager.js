@@ -19,6 +19,7 @@
  */
 
 import chalk from 'chalk';
+import { verboseLog } from '../utils/logging.js';
 import { MAX_EMBEDDING_CACHE_SIZE } from './constants.js';
 
 // ============================================================================
@@ -234,7 +235,8 @@ export class CacheManager {
     this.stats.misses = 0;
     this.stats.evictions = 0;
 
-    console.log(
+    verboseLog(
+      {},
       chalk.yellow(
         `[CACHE] Cleared all caches - Document contexts: ${docCacheSize}, Promise: ${promiseCacheSize}, H1 embeddings: ${h1CacheSize}, Embeddings: ${embeddingCacheSize}, Custom docs: ${customDocCacheSize}`
       )
@@ -250,7 +252,7 @@ export class CacheManager {
     if (cacheMap) {
       const size = cacheMap.size;
       cacheMap.clear();
-      console.log(chalk.yellow(`[CACHE] Cleared ${cacheType} cache - ${size} items`));
+      verboseLog({}, chalk.yellow(`[CACHE] Cleared ${cacheType} cache - ${size} items`));
     } else {
       console.warn(chalk.yellow(`[CACHE] Unknown cache type: ${cacheType}`));
     }
@@ -315,7 +317,7 @@ export class CacheManager {
 
     try {
       this.clearAllCaches();
-      console.log(chalk.green('[CACHE] Cache cleanup completed'));
+      verboseLog({}, chalk.green('[CACHE] Cache cleanup completed'));
     } finally {
       this.cleaningUp = false;
     }

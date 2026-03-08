@@ -322,7 +322,8 @@ describe('rag-review', () => {
             results: [],
           }),
         ]),
-        2
+        2,
+        expect.objectContaining({ verbose: true })
       );
       expect(allSettledSpy).toHaveBeenCalled();
       expect(result.success).toBe(true);

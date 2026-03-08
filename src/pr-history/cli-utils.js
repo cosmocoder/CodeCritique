@@ -9,6 +9,7 @@ import { execSync } from 'child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import chalk from 'chalk';
+import { verboseLog } from '../utils/logging.js';
 
 /**
  * Detect GitHub repository from git remote origin
@@ -130,9 +131,7 @@ export function validateGitHubToken(options) {
  * @param {boolean} verbose - Whether to show verbose output
  */
 export function displayProgress(progress, verbose) {
-  if (verbose) {
-    console.log(chalk.blue(`[${progress.stage}] ${progress.message} (${progress.current}/${progress.total})`));
-  }
+  verboseLog(verbose, chalk.blue(`[${progress.stage}] ${progress.message} (${progress.current}/${progress.total})`));
 }
 
 /**

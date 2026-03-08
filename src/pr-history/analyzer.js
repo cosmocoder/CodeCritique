@@ -6,6 +6,7 @@
  */
 
 import chalk from 'chalk';
+import { verboseLog } from '../utils/logging.js';
 import { PRCommentProcessor } from './comment-processor.js';
 import { clearPRComments, getPRCommentsStats, getProcessedPRDateRange, shouldSkipPR, storePRCommentsBatch } from './database.js';
 import { GitHubAPIClient } from './github-client.js';
@@ -125,6 +126,14 @@ export class PRHistoryAnalyzer {
    * Analyze PR comment history for a repository
    * @param {string} repository - Repository in format "owner/repo"
    * @param {Object} options - Analysis options
+   * @param {string|null} [options.since=null] - Lower bound ISO date for PR selection
+   * @param {string|null} [options.until=null] - Upper bound ISO date for PR selection
+   * @param {number|null} [options.limit=null] - Maximum number of PRs to analyze
+   * @param {boolean} [options.resume=false] - Resume from saved analysis progress
+   * @param {boolean} [options.clearExisting=false] - Clear existing stored PR comments before analysis
+   * @param {Function|null} [options.onProgress=null] - Optional progress callback
+   * @param {string} [options.projectPath=process.cwd()] - Project path used for project-isolated storage
+   * @param {boolean} [options.verbose=false] - Enable verbose progress logging
    * @returns {Promise<Object>} Analysis results
    */
   async analyzeRepository(repository, options = {}) {
@@ -136,6 +145,7 @@ export class PRHistoryAnalyzer {
       clearExisting = false,
       onProgress = null,
       projectPath = process.cwd(),
+      verbose = false,
     } = options;
 
     // Initialize progress tracking
@@ -145,14 +155,14 @@ export class PRHistoryAnalyzer {
     if (resume) {
       const loaded = await this.progress.load();
       if (loaded && this.progress.progress.status === 'completed') {
-        console.log(chalk.green(`Analysis for ${repository} already completed.`));
+        verboseLog(verbose, chalk.green(`Analysis for ${repository} already completed.`));
         return await this.getAnalysisResults(repository, projectPath);
       }
     }
 
     // Clear existing data if requested
     if (clearExisting) {
-      console.log(chalk.yellow(`Clearing existing PR comments for ${repository}...`));
+      verboseLog(verbose, chalk.yellow(`Clearing existing PR comments for ${repository}...`));
       await clearPRComments(repository, projectPath);
     }
 
@@ -160,30 +170,30 @@ export class PRHistoryAnalyzer {
       this.progress.setStatus('in_progress');
       await this.progress.save();
 
-      console.log(chalk.blue(`Starting PR comment analysis for ${repository}`));
-      console.log(chalk.blue(`Options: concurrency=${this.options.concurrency}, batchSize=${this.options.batchSize}`));
+      verboseLog(verbose, chalk.blue(`Starting PR comment analysis for ${repository}`));
+      verboseLog(verbose, chalk.blue(`Options: concurrency=${this.options.concurrency}, batchSize=${this.options.batchSize}`));
 
       // Step 1: Fetch all merged PRs
-      const prs = await this.fetchAllPRs(repository, { since, until, limit, resume, onProgress, projectPath });
+      const prs = await this.fetchAllPRs(repository, { since, until, limit, resume, onProgress, projectPath, verbose });
 
       if (prs.length === 0) {
-        console.log(chalk.yellow(`No merged PRs found for ${repository}`));
+        verboseLog(verbose, chalk.yellow(`No merged PRs found for ${repository}`));
         this.progress.setStatus('completed');
         await this.progress.save();
         return { repository, total_prs: 0, total_comments: 0, patterns: [] };
       }
 
-      console.log(chalk.green(`Found ${prs.length} merged PRs to analyze`));
+      verboseLog(verbose, chalk.green(`Found ${prs.length} merged PRs to analyze`));
       this.progress.updatePRs(prs.length, 0);
 
       // Step 2: Process PR comments
-      const processedComments = await this.processPRComments(prs, { onProgress, projectPath });
+      const processedComments = await this.processPRComments(prs, { onProgress, projectPath, verbose });
 
       // Step 3: Store in database
       if (processedComments.length > 0) {
-        console.log(chalk.blue(`Storing ${processedComments.length} processed comments in database...`));
+        verboseLog(verbose, chalk.blue(`Storing ${processedComments.length} processed comments in database...`));
         const storedCount = await storePRCommentsBatch(processedComments, projectPath);
-        console.log(chalk.green(`Successfully stored ${storedCount} PR comments`));
+        verboseLog(verbose, chalk.green(`Successfully stored ${storedCount} PR comments`));
       }
 
       // Step 4: Generate final results
@@ -192,8 +202,8 @@ export class PRHistoryAnalyzer {
       this.progress.setStatus('completed');
       await this.progress.save();
 
-      console.log(chalk.green(`Analysis completed for ${repository}`));
-      console.log(chalk.green(`Processed ${results.total_prs} PRs with ${results.total_comments} comments`));
+      verboseLog(verbose, chalk.green(`Analysis completed for ${repository}`));
+      verboseLog(verbose, chalk.green(`Processed ${results.total_prs} PRs with ${results.total_comments} comments`));
 
       return results;
     } catch (error) {
@@ -210,13 +220,20 @@ export class PRHistoryAnalyzer {
    * @private
    * @param {string} repository - Repository in format "owner/repo"
    * @param {Object} options - Fetch options
+   * @param {string|null} [options.since=null] - Lower bound ISO date for PR selection
+   * @param {string|null} [options.until=null] - Upper bound ISO date for PR selection
+   * @param {number|null} [options.limit=null] - Maximum number of PRs to fetch
+   * @param {boolean} [options.resume=false] - Resume from the last saved fetched page
+   * @param {Function|null} [options.onProgress=null] - Optional progress callback
+   * @param {string} [options.projectPath=process.cwd()] - Project path used for incremental fetch context
+   * @param {boolean} [options.verbose=false] - Enable verbose progress logging
    * @returns {Promise<Array>} Array of PRs
    */
   async fetchAllPRs(repository, options = {}) {
-    const { since, until, limit, resume, onProgress, projectPath = process.cwd() } = options;
+    const { since, until, limit, resume, onProgress, projectPath = process.cwd(), verbose = false } = options;
     const [owner, repo] = repository.split('/');
 
-    console.log(chalk.blue(`Fetching merged PRs for ${repository}...`));
+    verboseLog(verbose, chalk.blue(`Fetching merged PRs for ${repository}...`));
 
     try {
       const startPage = resume ? this.progress.progress.last_processed_page + 1 : 1;
@@ -259,27 +276,30 @@ export class PRHistoryAnalyzer {
    * @private
    * @param {Array} prs - Array of PR objects
    * @param {Object} options - Processing options
+   * @param {Function|null} [options.onProgress=null] - Optional progress callback
+   * @param {string} [options.projectPath=process.cwd()] - Project path used for database filtering
+   * @param {boolean} [options.verbose=false] - Enable verbose progress logging
    * @returns {Promise<Array>} Array of processed comments
    */
   async processPRComments(prs, options = {}) {
-    const { onProgress, projectPath = process.cwd() } = options;
+    const { onProgress, projectPath = process.cwd(), verbose = false } = options;
     const allProcessedComments = [];
     let totalComments = 0;
     let processedComments = 0;
     let failedComments = 0;
 
-    console.log(chalk.blue(`Processing comments for ${prs.length} PRs...`));
-    console.log(chalk.cyan(`This may take several minutes for large repositories...`));
+    verboseLog(verbose, chalk.blue(`Processing comments for ${prs.length} PRs...`));
+    verboseLog(verbose, chalk.cyan(`This may take several minutes for large repositories...`));
 
     // Get processed PR date range to skip already processed PRs
-    console.log(chalk.blue(`Checking for already processed PRs...`));
+    verboseLog(verbose, chalk.blue(`Checking for already processed PRs...`));
     const { oldestPR, newestPR } = await getProcessedPRDateRange(this.progress.repository, projectPath);
 
     let skippedPRs = 0;
     let prsToProcess = prs;
 
     if (oldestPR && newestPR) {
-      console.log(chalk.blue(`Found processed PR range: ${oldestPR} to ${newestPR}`));
+      verboseLog(verbose, chalk.blue(`Found processed PR range: ${oldestPR} to ${newestPR}`));
       prsToProcess = prs.filter((pr) => {
         const shouldSkip = shouldSkipPR(pr, oldestPR, newestPR);
         if (shouldSkip) {
@@ -287,25 +307,25 @@ export class PRHistoryAnalyzer {
         }
         return !shouldSkip;
       });
-      console.log(chalk.green(`Skipping ${skippedPRs} already processed PRs, processing ${prsToProcess.length} new PRs`));
+      verboseLog(verbose, chalk.green(`Skipping ${skippedPRs} already processed PRs, processing ${prsToProcess.length} new PRs`));
     } else {
-      console.log(chalk.blue(`No previously processed PRs found, processing all ${prs.length} PRs`));
+      verboseLog(verbose, chalk.blue(`No previously processed PRs found, processing all ${prs.length} PRs`));
     }
 
     if (prsToProcess.length === 0) {
-      console.log(chalk.yellow(`All PRs have already been processed!`));
+      verboseLog(verbose, chalk.yellow(`All PRs have already been processed!`));
       return allProcessedComments;
     }
 
     // First pass: count total comments for better progress tracking
-    console.log(chalk.blue(`Counting total comments across ${prsToProcess.length} PRs to process...`));
+    verboseLog(verbose, chalk.blue(`Counting total comments across ${prsToProcess.length} PRs to process...`));
     let estimatedComments = 0;
     for (let i = 0; i < Math.min(prsToProcess.length, 10); i++) {
       estimatedComments += (prsToProcess[i].comments || 0) + (prsToProcess[i].review_comments || 0);
     }
     const avgCommentsPerPR = estimatedComments / Math.min(prsToProcess.length, 10);
     const totalEstimatedComments = Math.floor(avgCommentsPerPR * prsToProcess.length);
-    console.log(chalk.blue(`Estimated ${totalEstimatedComments} total comments to process`));
+    verboseLog(verbose, chalk.blue(`Estimated ${totalEstimatedComments} total comments to process`));
 
     // Process PRs in batches
     for (let i = 0; i < prsToProcess.length; i += this.options.batchSize) {
@@ -313,7 +333,8 @@ export class PRHistoryAnalyzer {
       const batchNumber = Math.floor(i / this.options.batchSize) + 1;
       const totalBatches = Math.ceil(prsToProcess.length / this.options.batchSize);
 
-      console.log(
+      verboseLog(
+        verbose,
         chalk.blue(
           `Processing PR batch ${batchNumber}/${totalBatches} (PRs ${i + 1}-${Math.min(i + this.options.batchSize, prsToProcess.length)})`
         )
@@ -362,7 +383,8 @@ export class PRHistoryAnalyzer {
       }
 
       const batchDuration = (Date.now() - batchStartTime) / 1000;
-      console.log(
+      verboseLog(
+        verbose,
         chalk.blue(`Batch ${batchNumber}/${totalBatches} completed: ${batchCommentCount} comments in ${batchDuration.toFixed(1)}s`)
       );
       // Calculate progress percentage, handling case where totalEstimatedComments is 0
@@ -373,7 +395,7 @@ export class PRHistoryAnalyzer {
           ? `Progress: ${processedComments}/${totalEstimatedComments} comments processed (${progressPercentage}%)`
           : `Progress: ${processedComments} comments processed`;
 
-      console.log(chalk.blue(progressText));
+      verboseLog(verbose, chalk.blue(progressText));
 
       this.progress.updateComments(totalComments, processedComments, failedComments);
       await this.progress.save();
@@ -384,12 +406,12 @@ export class PRHistoryAnalyzer {
       }
     }
 
-    console.log(chalk.green(`Processed ${processedComments}/${totalComments} comments from ${prsToProcess.length} PRs`));
+    verboseLog(verbose, chalk.green(`Processed ${processedComments}/${totalComments} comments from ${prsToProcess.length} PRs`));
     if (skippedPRs > 0) {
-      console.log(chalk.blue(`Skipped ${skippedPRs} already processed PRs`));
+      verboseLog(verbose, chalk.blue(`Skipped ${skippedPRs} already processed PRs`));
     }
     if (failedComments > 0) {
-      console.log(chalk.yellow(`Failed to process ${failedComments} comments`));
+      verboseLog(verbose, chalk.yellow(`Failed to process ${failedComments} comments`));
     }
 
     return allProcessedComments;

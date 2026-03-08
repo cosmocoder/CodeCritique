@@ -1,11 +1,14 @@
 import chalk from 'chalk';
+import { verboseLog } from './logging.js';
 
 /**
  * Determines if a PR should be chunked based on estimated token usage
  * @param {Array} prFiles - Array of PR files with diffContent and content
+ * @param {Object} options - Logging options
+ * @param {boolean} [options.verbose=false] - Enable verbose token breakdown logging
  * @returns {Object} Decision object with shouldChunk flag and estimates
  */
-export function shouldChunkPR(prFiles) {
+export function shouldChunkPR(prFiles, options = {}) {
   // IMPORTANT: The holistic PR prompt includes BOTH full file content AND diff content
   // for each file, plus context (code examples, guidelines, PR comments, custom docs)
 
@@ -35,7 +38,8 @@ export function shouldChunkPR(prFiles) {
 
   const shouldChunk = totalEstimatedTokens > MAX_SINGLE_REVIEW_TOKENS || prFiles.length > 30;
 
-  console.log(
+  verboseLog(
+    options,
     chalk.gray(
       `  Token breakdown: ${diffTokens} diff + ${fullContentTokens} full content + ${CONTEXT_OVERHEAD_TOKENS} context overhead = ${totalEstimatedTokens} total`
     )
@@ -166,9 +170,11 @@ function getDirectoryDepth(filePath) {
  * Combines results from multiple chunk reviews into a single result
  * @param {Array} chunkResults - Array of chunk review results
  * @param {number} totalFiles - Total number of files in the PR
+ * @param {Object} options - Logging options
+ * @param {boolean} [options.verbose=false] - Enable verbose chunk combination logging
  * @returns {Object} Combined result object
  */
-export function combineChunkResults(chunkResults, totalFiles) {
+export function combineChunkResults(chunkResults, totalFiles, options = {}) {
   const combinedResult = {
     success: true,
     results: [],
@@ -202,7 +208,7 @@ export function combineChunkResults(chunkResults, totalFiles) {
   // Detect and merge cross-chunk issues
   combinedResult.crossChunkIssues = detectCrossChunkIssues(chunkResults);
 
-  console.log(chalk.green(`✅ Combined results from ${chunkResults.length} chunks: ${combinedResult.results.length} file reviews`));
+  verboseLog(options, chalk.green(`✅ Combined results from ${chunkResults.length} chunks: ${combinedResult.results.length} file reviews`));
 
   return combinedResult;
 }

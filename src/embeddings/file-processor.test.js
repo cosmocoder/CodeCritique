@@ -30,7 +30,7 @@ vi.mock('../utils/markdown.js', () => ({
   extractMarkdownChunks: vi.fn().mockReturnValue({ chunks: [], documentH1: 'Test' }),
 }));
 
-vi.mock('../utils/logging.js', () => ({ debug: vi.fn() }));
+vi.mock('../utils/logging.js', () => ({ debug: vi.fn(), verboseLog: vi.fn() }));
 
 // ============================================================================
 // Shared Setup
@@ -430,7 +430,7 @@ describe('FileProcessor', () => {
       mockTable.optimize.mockRejectedValue(new Error(errorMsg));
       const result = await processor.processBatchEmbeddings(['/test/file.js'], { baseDir: '/test' });
       if (errorMsg === 'legacy format') {
-        expect(console.log).toHaveBeenCalledWith(expect.stringContaining(expectedLog));
+        expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(expectedLog));
       } else {
         expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(expectedLog));
       }
@@ -515,7 +515,6 @@ describe('FileProcessor', () => {
       mockModelManager.calculateEmbeddingBatch.mockResolvedValue([createMockEmbedding()]);
       await processor.processBatchEmbeddings(['/test/doc.md'], { baseDir: '/test' });
       expect(docMockTable.add).toHaveBeenCalled();
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Successfully added'));
     });
 
     it('should handle document chunk optimize legacy format error', async () => {
@@ -532,7 +531,7 @@ describe('FileProcessor', () => {
       setupFileSystemMocks('# Title\n\nContent');
       mockModelManager.calculateEmbeddingBatch.mockResolvedValue([createMockEmbedding()]);
       await processor.processBatchEmbeddings(['/test/doc.md'], { baseDir: '/test' });
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('legacy index format'));
+      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('legacy index format'));
     });
 
     it('should handle document chunk processing errors', async () => {

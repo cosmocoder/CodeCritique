@@ -272,7 +272,6 @@ describe('ProjectAnalyzer', () => {
       await analyzer.storeAnalysis(mockProjectPath, summary);
 
       expect(mockEmbeddingsSystem.storeProjectSummary).toHaveBeenCalledWith(mockProjectPath, summary);
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Project analysis stored'));
     });
 
     it('should handle storage errors gracefully', async () => {
@@ -319,7 +318,7 @@ describe('ProjectAnalyzer', () => {
       await analyzer.validateAndUpdateKeyFiles(existingFiles, mockProjectPath);
 
       // With 1 of 3 files found (33%), it should trigger fresh discovery
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Many key files missing'));
+      expect(mockEmbeddingsSystem.initialize).toHaveBeenCalled();
     });
 
     it('should filter out missing files and keep existing ones', async () => {
@@ -366,7 +365,7 @@ describe('ProjectAnalyzer', () => {
       await analyzer.validateAndUpdateKeyFiles(existingFiles, mockProjectPath);
 
       // Should trigger discoverKeyFilesWithLLM
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Many key files missing'));
+      expect(mockEmbeddingsSystem.initialize).toHaveBeenCalled();
     });
   });
 
@@ -410,7 +409,7 @@ describe('ProjectAnalyzer', () => {
       const result = await analyzer.mineKeyFilesFromEmbeddings(mockProjectPath);
 
       expect(result).toEqual([]);
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Skipping optimization'));
+      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('legacy index format'));
     });
 
     it('should return empty array on query error', async () => {
@@ -496,7 +495,6 @@ describe('ProjectAnalyzer', () => {
       await analyzer.selectFinalKeyFiles(candidates, mockProjectPath);
 
       expect(console.error).toHaveBeenCalled();
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Falling back to automatic selection'));
     });
 
     it('should fallback if LLM returns invalid response', async () => {

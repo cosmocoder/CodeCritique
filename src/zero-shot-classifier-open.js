@@ -10,6 +10,7 @@ import * as linguistLanguages from 'linguist-languages';
 import { LRUCache } from 'lru-cache';
 import stopwords from 'stopwords-iso/stopwords-iso.json' with { type: 'json' };
 import techKeywords from './technology-keywords.json' with { type: 'json' };
+import { verboseLog } from './utils/logging.js';
 import { truncateToTokenLimit } from './utils/mobilebert-tokenizer.js';
 
 // Configure Transformers.js environment
@@ -124,14 +125,14 @@ class OpenZeroShotClassifier {
 
   async _doInitialize() {
     try {
-      console.log('Initializing open-ended zero-shot classifier...');
+      verboseLog({}, 'Initializing open-ended zero-shot classifier...');
 
       this.classifier = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', {
         quantized: true,
       });
 
       this.isInitialized = true;
-      console.log('✓ Open-ended zero-shot classifier initialized successfully');
+      verboseLog({}, '✓ Open-ended zero-shot classifier initialized successfully');
     } catch (error) {
       console.error('Error initializing classifier:', error);
       this.isInitialized = false;

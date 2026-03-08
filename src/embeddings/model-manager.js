@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import chalk from 'chalk';
 import dotenv from 'dotenv';
 import { EmbeddingModel, FlagEmbedding } from 'fastembed';
-import { debug } from '../utils/logging.js';
+import { debug, verboseLog } from '../utils/logging.js';
 import { EMBEDDING_DIMENSIONS, MODEL_NAME_STRING, MAX_RETRIES } from './constants.js';
 import { FASTEMBED_CACHE_DIR } from './constants.js';
 import { createModelInitializationError, createEmbeddingGenerationError } from './errors.js';
@@ -48,7 +48,7 @@ export class ModelManager {
     this.modelInitializationPromise = null;
     this.cleaningUp = false;
 
-    console.log(chalk.magenta(`[ModelManager] Using MODEL = ${this.modelNameString}, DIMENSIONS = ${this.embeddingDimensions}`));
+    verboseLog({}, chalk.magenta(`[ModelManager] Using MODEL = ${this.modelNameString}, DIMENSIONS = ${this.embeddingDimensions}`));
   }
 
   // ============================================================================
@@ -76,13 +76,13 @@ export class ModelManager {
 
       // Only print logs if we haven't initialized before
       if (!this.modelInitialized) {
-        console.log(chalk.blue(`Attempting to initialize fastembed model. Identifier: ${this.modelNameString}`));
-        console.log(chalk.blue(`FastEmbed Cache Directory: ${this.cacheDir}`));
+        verboseLog({}, chalk.blue(`Attempting to initialize fastembed model. Identifier: ${this.modelNameString}`));
+        verboseLog({}, chalk.blue(`FastEmbed Cache Directory: ${this.cacheDir}`));
       }
 
       try {
         if (!fs.existsSync(this.cacheDir)) {
-          console.log(chalk.yellow(`Creating fastembed cache directory: ${this.cacheDir}`));
+          verboseLog({}, chalk.yellow(`Creating fastembed cache directory: ${this.cacheDir}`));
           fs.mkdirSync(this.cacheDir, { recursive: true });
         }
 
@@ -96,7 +96,7 @@ export class ModelManager {
 
             // Only print success message if we haven't initialized before
             if (!this.modelInitialized) {
-              console.log(chalk.green('FastEmbed model initialized successfully.'));
+              verboseLog({}, chalk.green('FastEmbed model initialized successfully.'));
               this.modelInitialized = true;
             }
             break; // Exit loop on success
@@ -327,7 +327,7 @@ export class ModelManager {
         this.cacheManager.clearCache('embedding');
       }
 
-      console.log(chalk.green('[ModelManager] Model resources cleaned up.'));
+      verboseLog({}, chalk.green('[ModelManager] Model resources cleaned up.'));
     } catch (error) {
       console.error(chalk.red(`[ModelManager] Error during cleanup: ${error.message}`));
     } finally {

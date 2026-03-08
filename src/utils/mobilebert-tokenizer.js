@@ -7,6 +7,7 @@
 
 import { AutoTokenizer } from '@huggingface/transformers';
 import chalk from 'chalk';
+import { verboseLog } from './logging.js';
 
 // Shared tokenizer instance and initialization state
 let tokenizer = null;
@@ -45,9 +46,9 @@ async function getTokenizer() {
  */
 async function _initializeTokenizer() {
   try {
-    console.log(chalk.blue('Initializing MobileBERT tokenizer...'));
+    verboseLog({}, chalk.blue('Initializing MobileBERT tokenizer...'));
     const tok = await AutoTokenizer.from_pretrained('Xenova/mobilebert-uncased-mnli');
-    console.log(chalk.green('✓ MobileBERT tokenizer initialized successfully'));
+    verboseLog({}, chalk.green('✓ MobileBERT tokenizer initialized successfully'));
     return tok;
   } catch (error) {
     console.warn(chalk.yellow('⚠ Failed to initialize tokenizer, falling back to character estimation'), error.message);
@@ -132,7 +133,7 @@ export async function cleanupTokenizer() {
         await tokenizer.dispose();
       }
       tokenizer = null;
-      console.log(chalk.green('✓ MobileBERT tokenizer resources cleaned up'));
+      verboseLog({}, chalk.green('✓ MobileBERT tokenizer resources cleaned up'));
     } catch (error) {
       console.warn(chalk.yellow('⚠ Error cleaning up tokenizer:'), error.message);
       tokenizer = null;

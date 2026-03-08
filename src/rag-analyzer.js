@@ -26,7 +26,7 @@ import { inferContextFromCodeContent, inferContextFromDocumentContent } from './
 import { isGenericDocument, getGenericDocumentContext } from './utils/document-detection.js';
 import { isTestFile, shouldProcessFile } from './utils/file-validation.js';
 import { detectFileType, detectLanguageFromExtension } from './utils/language-detection.js';
-import { debug } from './utils/logging.js';
+import { debug, verboseLog } from './utils/logging.js';
 import { addLineNumbers } from './utils/string-utils.js';
 
 // Constants for content processing
@@ -56,7 +56,7 @@ async function ensureSemanticSimilarityInitialized() {
     await initializeSemanticSimilarity();
     semanticSimilarityInitialized = true;
   } catch (error) {
-    console.log(chalk.yellow(`⚠️ Could not initialize semantic similarity: ${error.message}`));
+    console.warn(chalk.yellow(`⚠️ Could not initialize semantic similarity: ${error.message}`));
     // Continue without semantic similarity - word-based fallback will be used
   }
 }
@@ -216,7 +216,7 @@ ${ex.content}
  * @param {string} projectPath - Project path
  * @returns {Promise<Object|null>} Project summary or null
  */
-async function getProjectSummary(projectPath) {
+async function getProjectSummary(projectPath, options = {}) {
   const resolvedPath = path.resolve(projectPath);
 
   try {
@@ -224,7 +224,7 @@ async function getProjectSummary(projectPath) {
     const summary = await embeddingsSystem.getProjectSummary(resolvedPath);
 
     if (summary) {
-      console.log(chalk.cyan(`📋 Retrieved project summary for: ${path.basename(resolvedPath)}`));
+      verboseLog(options, chalk.cyan(`📋 Retrieved project summary for: ${path.basename(resolvedPath)}`));
     }
 
     return summary;
@@ -430,16 +430,16 @@ async function runAnalysis(filePath, options = {}) {
   try {
     // Check if this is a holistic PR review
     if (options.isHolisticPRReview && filePath === 'PR_HOLISTIC_REVIEW') {
-      console.log(chalk.blue(`Performing holistic PR review for ${options.prFiles?.length || 0} files`));
+      verboseLog(options, chalk.blue(`Performing holistic PR review for ${options.prFiles?.length || 0} files`));
       return await performHolisticPRAnalysis(options);
     }
 
-    console.log(chalk.blue(`Analyzing file: ${filePath}`));
+    verboseLog(options, chalk.blue(`Analyzing file: ${filePath}`));
 
     // Load feedback data if feedback tracking is enabled
     let feedbackData = {};
     if (options.trackFeedback && options.feedbackPath) {
-      console.log(chalk.cyan('--- Loading Feedback Data ---'));
+      verboseLog(options, chalk.cyan('--- Loading Feedback Data ---'));
       feedbackData = await loadFeedbackData(options.feedbackPath, { verbose: options.verbose });
     }
 
@@ -455,16 +455,16 @@ async function runAnalysis(filePath, options = {}) {
       content = options.diffContent;
       // For PR reviews, always read the full file content for context awareness
       fullFileContent = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : null;
-      console.log(chalk.blue(`Analyzing diff only for ${path.basename(filePath)}`));
+      verboseLog(options, chalk.blue(`Analyzing diff only for ${path.basename(filePath)}`));
     } else {
       content = fs.readFileSync(filePath, 'utf8');
       fullFileContent = content;
-      console.log(chalk.blue(`Analyzing full file ${path.basename(filePath)}`));
+      verboseLog(options, chalk.blue(`Analyzing full file ${path.basename(filePath)}`));
     }
 
     // Check if file should be processed
     if (!shouldProcessFile(filePath, content)) {
-      console.log(chalk.yellow(`Skipping file based on exclusion patterns: ${filePath}`));
+      verboseLog(options, chalk.yellow(`Skipping file based on exclusion patterns: ${filePath}`));
       return {
         success: true,
         skipped: true,
@@ -473,7 +473,7 @@ async function runAnalysis(filePath, options = {}) {
     }
 
     // --- Stage 1: CONTEXT RETRIEVAL ---
-    console.log(chalk.blue('--- Stage 1: Context Retrieval ---'));
+    verboseLog(options, chalk.blue('--- Stage 1: Context Retrieval ---'));
     const {
       language,
       isTestFile,
@@ -485,49 +485,49 @@ async function runAnalysis(filePath, options = {}) {
     } = await getContextForFile(filePath, content, options);
 
     // --- Stage 1.5: PROJECT ARCHITECTURE CONTEXT ---
-    console.log(chalk.blue('--- Stage 1.5: Retrieving Project Architecture Context ---'));
+    verboseLog(options, chalk.blue('--- Stage 1.5: Retrieving Project Architecture Context ---'));
     const projectPath = options.projectPath || process.cwd();
-    const projectSummary = await getProjectSummary(projectPath);
+    const projectSummary = await getProjectSummary(projectPath, options);
 
     // --- Stage 2: PREPARE CONTEXT FOR LLM ---
-    console.log(chalk.blue('--- Stage 2: Preparing Context for LLM ---'));
+    verboseLog(options, chalk.blue('--- Stage 2: Preparing Context for LLM ---'));
 
     // Format the lists that will be passed
     const formattedCodeExamples = formatContextItems(finalCodeExamples, 'code');
     const formattedGuidelines = formatContextItems(finalGuidelineSnippets, 'guideline');
 
     // --- Log the context being sent to the LLM --- >
-    console.log(chalk.magenta('--- Guidelines Sent to LLM ---'));
+    verboseLog(options, chalk.magenta('--- Guidelines Sent to LLM ---'));
     if (formattedGuidelines.length > 0) {
       formattedGuidelines.forEach((g, i) => {
-        console.log(chalk.magenta(`  [${i + 1}] Path: ${g.path} ${g.headingText ? `(Heading: "${g.headingText}")` : ''}`));
-        console.log(chalk.gray(`      Content: ${g.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
+        verboseLog(options, chalk.magenta(`  [${i + 1}] Path: ${g.path} ${g.headingText ? `(Heading: "${g.headingText}")` : ''}`));
+        verboseLog(options, chalk.gray(`      Content: ${g.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
       });
     } else {
-      console.log(chalk.magenta('  (None)'));
+      verboseLog(options, chalk.magenta('  (None)'));
     }
 
-    console.log(chalk.magenta('--- Code Examples Sent to LLM ---'));
+    verboseLog(options, chalk.magenta('--- Code Examples Sent to LLM ---'));
     if (finalCodeExamples.length > 0) {
       finalCodeExamples.forEach((ex, i) => {
-        console.log(chalk.magenta(`  [${i + 1}] Path: ${ex.path} (Similarity: ${ex.similarity?.toFixed(3) || 'N/A'})`));
-        console.log(chalk.gray(`      Content: ${ex.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
+        verboseLog(options, chalk.magenta(`  [${i + 1}] Path: ${ex.path} (Similarity: ${ex.similarity?.toFixed(3) || 'N/A'})`));
+        verboseLog(options, chalk.gray(`      Content: ${ex.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
       });
     } else {
-      console.log(chalk.magenta('  (None)'));
+      verboseLog(options, chalk.magenta('  (None)'));
     }
 
-    console.log(chalk.magenta('--- Custom Document Chunks Sent to LLM ---'));
+    verboseLog(options, chalk.magenta('--- Custom Document Chunks Sent to LLM ---'));
     if (relevantCustomDocChunks && relevantCustomDocChunks.length > 0) {
       relevantCustomDocChunks.forEach((chunk, i) => {
-        console.log(chalk.magenta(`  [${i + 1}] Document: "${chunk.document_title}" (Chunk ${chunk.chunk_index + 1})`));
-        console.log(chalk.magenta(`      Similarity: ${chunk.similarity?.toFixed(3) || 'N/A'}`));
-        console.log(chalk.gray(`      Content: ${chunk.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
+        verboseLog(options, chalk.magenta(`  [${i + 1}] Document: "${chunk.document_title}" (Chunk ${chunk.chunk_index + 1})`));
+        verboseLog(options, chalk.magenta(`      Similarity: ${chunk.similarity?.toFixed(3) || 'N/A'}`));
+        verboseLog(options, chalk.gray(`      Content: ${chunk.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
       });
     } else {
-      console.log(chalk.magenta('  (None)'));
+      verboseLog(options, chalk.magenta('  (None)'));
     }
-    console.log(chalk.magenta('---------------------------------'));
+    verboseLog(options, chalk.magenta('---------------------------------'));
     // --- End Logging --->
 
     // Prepare context for LLM with the potentially reduced lists
@@ -553,7 +553,7 @@ async function runAnalysis(filePath, options = {}) {
     // Post-process results to filter dismissed issues
     let filteredResults = lowSeverityFiltered;
     if (options.trackFeedback && feedbackData && Object.keys(feedbackData).length > 0) {
-      console.log(chalk.cyan('--- Filtering Results Based on Feedback ---'));
+      verboseLog(options, chalk.cyan('--- Filtering Results Based on Feedback ---'));
       filteredResults = await filterAnalysisResults(lowSeverityFiltered, feedbackData, {
         similarityThreshold: options.feedbackThreshold || 0.7,
         verbose: options.verbose,
@@ -759,11 +759,10 @@ async function callLLMForAnalysis(context, options = {}) {
       cacheTtl: options.cacheTtl || '5m', // Pass cache TTL option (default: 5m, no extra cost)
     });
 
-    console.log(chalk.blue('Received LLM response, attempting to parse...'));
-
-    console.log(chalk.gray(`Response type: ${typeof llmResponse}`));
-    console.log(chalk.gray(`Response has json: ${!!llmResponse?.json}`));
-    console.log(chalk.gray(`Response content length: ${llmResponse?.content?.length || 0} characters`));
+    verboseLog(options, chalk.blue('Received LLM response, attempting to parse...'));
+    verboseLog(options, chalk.gray(`Response type: ${typeof llmResponse}`));
+    verboseLog(options, chalk.gray(`Response has json: ${!!llmResponse?.json}`));
+    verboseLog(options, chalk.gray(`Response content length: ${llmResponse?.content?.length || 0} characters`));
 
     // Parse the raw LLM response
     const analysisResponse = parseAnalysisResponse(llmResponse);
@@ -780,7 +779,7 @@ async function callLLMForAnalysis(context, options = {}) {
       };
     }
 
-    console.log(chalk.green('Successfully parsed LLM response with expected structure'));
+    verboseLog(options, chalk.green('Successfully parsed LLM response with expected structure'));
     return analysisResponse;
   } catch (error) {
     console.error(chalk.red(`Error calling LLM for analysis: ${error.message}`));
@@ -933,10 +932,10 @@ async function sendPromptToLLM(promptConfig, llmOptions) {
     };
 
     // Debug: Log prompt structure
-    console.log(chalk.gray(`  Prompt config has systemPrompt: ${!!promptConfig.systemPrompt}`));
-    console.log(chalk.gray(`  Prompt config has userPrompt: ${!!promptConfig.userPrompt}`));
-    console.log(chalk.gray(`  System prompt length: ${promptConfig.systemPrompt?.length || 0} chars`));
-    console.log(chalk.gray(`  User prompt length: ${promptConfig.userPrompt?.length || 0} chars`));
+    verboseLog(llmOptions, chalk.gray(`  Prompt config has systemPrompt: ${!!promptConfig.systemPrompt}`));
+    verboseLog(llmOptions, chalk.gray(`  Prompt config has userPrompt: ${!!promptConfig.userPrompt}`));
+    verboseLog(llmOptions, chalk.gray(`  System prompt length: ${promptConfig.systemPrompt?.length || 0} chars`));
+    verboseLog(llmOptions, chalk.gray(`  User prompt length: ${promptConfig.userPrompt?.length || 0} chars`));
 
     // Send prompt with system (cached) and user (dynamic) content
     const response = await llm.sendPromptToClaude(promptConfig.userPrompt, {
@@ -984,17 +983,17 @@ function generateAnalysisPrompt(context) {
   const { context: contextSections } = context;
   let prHistorySection = '';
 
-  console.log(chalk.blue(`🔍 Checking for PR comments in prompt generation...`));
-  console.log(chalk.gray(`Context sections available: ${contextSections ? contextSections.length : 0}`));
+  verboseLog(context.options, chalk.blue(`🔍 Checking for PR comments in prompt generation...`));
+  verboseLog(context.options, chalk.gray(`Context sections available: ${contextSections ? contextSections.length : 0}`));
 
   if (contextSections && contextSections.length > 0) {
     contextSections.forEach((section, idx) => {
-      console.log(chalk.gray(`  Section ${idx + 1}: ${section.title} (${section.items?.length || 0} items)`));
+      verboseLog(context.options, chalk.gray(`  Section ${idx + 1}: ${section.title} (${section.items?.length || 0} items)`));
     });
 
     const prComments = contextSections.find((section) => section.title === 'Historical Review Comments');
     if (prComments && prComments.items.length > 0) {
-      console.log(chalk.green(`✅ Adding ${prComments.items.length} PR comments to LLM prompt`));
+      verboseLog(context.options, chalk.green(`✅ Adding ${prComments.items.length} PR comments to LLM prompt`));
       prHistorySection += `
 
 CONTEXT C: HISTORICAL REVIEW COMMENTS
@@ -1013,12 +1012,12 @@ Similar code patterns and issues identified by human reviewers in past PRs
       prHistorySection += `Use these historical patterns to identify DEFINITE issues in the current code. `;
       prHistorySection += `Only report issues that EXACTLY match historical patterns with SPECIFIC code fixes.\n\n`;
 
-      console.log(chalk.blue(`PR History section preview: ${prHistorySection.substring(0, 200)}...`));
+      verboseLog(context.options, chalk.blue(`PR History section preview: ${prHistorySection.substring(0, 200)}...`));
     } else {
-      console.log(chalk.yellow(`❌ No PR comments section found in context`));
+      verboseLog(context.options, chalk.yellow(`❌ No PR comments section found in context`));
     }
   } else {
-    console.log(chalk.yellow(`❌ No context sections available for PR comments`));
+    verboseLog(context.options, chalk.yellow(`❌ No context sections available for PR comments`));
   }
 
   // Detect if this is a diff review
@@ -1471,7 +1470,7 @@ async function getPRCommentContext(filePath, options = {}) {
     let contentForSearch = '';
 
     if (precomputedQueryEmbedding) {
-      console.log(chalk.blue(`🔍 Using pre-computed query embedding for PR comment search`));
+      verboseLog(options, chalk.blue(`🔍 Using pre-computed query embedding for PR comment search`));
       // We still need the file content for the search function, but not for embedding
       try {
         fileContent = fs.readFileSync(filePath, 'utf8');
@@ -1513,39 +1512,39 @@ async function getPRCommentContext(filePath, options = {}) {
     // Use semantic search to find similar PR comments
     let relevantComments = [];
 
-    console.log(chalk.blue(`🔍 Searching for PR comments with:`));
-
-    console.log(chalk.gray(`  Project Path: ${projectPath}`));
-    console.log(chalk.gray(`  File: ${fileName}`));
-    console.log(chalk.gray(`  Similarity Threshold: ${similarityThreshold}`));
-    console.log(chalk.gray(`  Content Length: ${contentForSearch.length} chars`));
-    console.log(chalk.gray(`  Using Pre-computed Embedding: ${precomputedQueryEmbedding ? 'Yes' : 'No'}`));
+    verboseLog(options, chalk.blue(`🔍 Searching for PR comments with:`));
+    verboseLog(options, chalk.gray(`  Project Path: ${projectPath}`));
+    verboseLog(options, chalk.gray(`  File: ${fileName}`));
+    verboseLog(options, chalk.gray(`  Similarity Threshold: ${similarityThreshold}`));
+    verboseLog(options, chalk.gray(`  Content Length: ${contentForSearch.length} chars`));
+    verboseLog(options, chalk.gray(`  Using Pre-computed Embedding: ${precomputedQueryEmbedding ? 'Yes' : 'No'}`));
 
     try {
-      console.log(chalk.blue(`🔍 Attempting hybrid search with chunking...`));
+      verboseLog(options, chalk.blue(`🔍 Attempting hybrid search with chunking...`));
       relevantComments = await findRelevantPRComments(contentForSearch, {
         projectPath,
         limit: maxComments,
         isTestFile: isTest, // Pass test file context for filtering
         precomputedQueryEmbedding: precomputedQueryEmbedding, // Pass pre-computed embedding if available
       });
-      console.log(chalk.green(`✅ Hybrid search returned ${relevantComments.length} comments`));
+      verboseLog(options, chalk.green(`✅ Hybrid search returned ${relevantComments.length} comments`));
       if (relevantComments.length > 0) {
-        console.log(chalk.blue(`Top comment similarities:`));
+        verboseLog(options, chalk.blue(`Top comment similarities:`));
         relevantComments.slice(0, 3).forEach((comment, idx) => {
-          console.log(
+          verboseLog(
+            options,
             chalk.gray(`  ${idx + 1}. Score: ${comment.similarity_score?.toFixed(3)} - ${comment.comment_text?.substring(0, 80)}...`)
           );
         });
       }
     } catch (dbError) {
-      console.log(chalk.yellow(`⚠️ Hybrid search failed: ${dbError.message}`));
+      console.warn(chalk.yellow(`⚠️ Hybrid search failed: ${dbError.message}`));
       debug(`[getPRCommentContext] Hybrid search failed: ${dbError.message}`);
       // No fallback needed - if hybrid search fails, we just return empty results
       relevantComments = [];
     }
 
-    console.log('Total relevant comments number:', relevantComments.length);
+    verboseLog(options, 'Total relevant comments number:', relevantComments.length);
 
     // Extract patterns and insights
     const patterns = extractCommentPatterns(relevantComments);
@@ -1674,12 +1673,12 @@ async function performHolisticPRAnalysis(options) {
   try {
     const { prFiles, unifiedContext, customDocs } = options;
 
-    console.log(chalk.blue(`🔍 Performing holistic analysis of ${prFiles.length} files with unified context...`));
+    verboseLog(options, chalk.blue(`🔍 Performing holistic analysis of ${prFiles.length} files with unified context...`));
 
     // Retrieve project architecture summary
-    console.log(chalk.blue('--- Retrieving Project Architecture Context for Holistic PR Review ---'));
+    verboseLog(options, chalk.blue('--- Retrieving Project Architecture Context for Holistic PR Review ---'));
     const projectPath = options.projectPath || process.cwd();
-    const projectSummary = await getProjectSummary(projectPath);
+    const projectSummary = await getProjectSummary(projectPath, options);
 
     // Create a synthetic file context for holistic analysis
     const holisticContext = {
@@ -1727,56 +1726,58 @@ async function performHolisticPRAnalysis(options) {
     };
 
     // Add verbose debug logging similar to individual file reviews
-    console.log(chalk.magenta('--- Holistic PR Review: Guidelines Sent to LLM ---'));
+    verboseLog(options, chalk.magenta('--- Holistic PR Review: Guidelines Sent to LLM ---'));
     if (unifiedContext.guidelines.length > 0) {
       unifiedContext.guidelines.slice(0, 10).forEach((g, i) => {
-        console.log(
+        verboseLog(
+          options,
           chalk.magenta(
             `  [${i + 1}] Path: ${g.path} ${g.headingText || g.heading_text ? `(Heading: "${g.headingText || g.heading_text}")` : ''}`
           )
         );
-        console.log(chalk.gray(`      Content: ${g.content.substring(0, 100).replace(/\n/g, ' ')}...`));
+        verboseLog(options, chalk.gray(`      Content: ${g.content.substring(0, 100).replace(/\n/g, ' ')}...`));
       });
     } else {
-      console.log(chalk.magenta('  (None)'));
+      verboseLog(options, chalk.magenta('  (None)'));
     }
 
-    console.log(chalk.magenta('--- Holistic PR Review: Code Examples Sent to LLM ---'));
+    verboseLog(options, chalk.magenta('--- Holistic PR Review: Code Examples Sent to LLM ---'));
     if (unifiedContext.codeExamples.length > 0) {
       unifiedContext.codeExamples.slice(0, 10).forEach((ex, i) => {
-        console.log(chalk.magenta(`  [${i + 1}] Path: ${ex.path} (Similarity: ${ex.similarity?.toFixed(3) || 'N/A'})`));
-        console.log(chalk.gray(`      Content: ${ex.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
+        verboseLog(options, chalk.magenta(`  [${i + 1}] Path: ${ex.path} (Similarity: ${ex.similarity?.toFixed(3) || 'N/A'})`));
+        verboseLog(options, chalk.gray(`      Content: ${ex.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
       });
     } else {
-      console.log(chalk.magenta('  (None)'));
+      verboseLog(options, chalk.magenta('  (None)'));
     }
 
-    console.log(chalk.magenta('--- Holistic PR Review: Top Historic Comments Sent to LLM ---'));
+    verboseLog(options, chalk.magenta('--- Holistic PR Review: Top Historic Comments Sent to LLM ---'));
     if (unifiedContext.prComments.length > 0) {
       unifiedContext.prComments.slice(0, 5).forEach((comment, i) => {
-        console.log(
+        verboseLog(
+          options,
           chalk.magenta(
             `  [${i + 1}] PR #${comment.prNumber} by ${comment.author} (Relevance: ${(comment.relevanceScore * 100).toFixed(1)}%)`
           )
         );
-        console.log(chalk.gray(`      File: ${comment.filePath}`));
-        console.log(chalk.gray(`      Comment: ${comment.body.substring(0, 100).replace(/\n/g, ' ')}...`));
+        verboseLog(options, chalk.gray(`      File: ${comment.filePath}`));
+        verboseLog(options, chalk.gray(`      Comment: ${comment.body.substring(0, 100).replace(/\n/g, ' ')}...`));
       });
     } else {
-      console.log(chalk.magenta('  (None)'));
+      verboseLog(options, chalk.magenta('  (None)'));
     }
 
-    console.log(chalk.magenta('--- Holistic PR Review: Custom Document Chunks Sent to LLM ---'));
+    verboseLog(options, chalk.magenta('--- Holistic PR Review: Custom Document Chunks Sent to LLM ---'));
     if (unifiedContext.customDocChunks && unifiedContext.customDocChunks.length > 0) {
       unifiedContext.customDocChunks.forEach((chunk, i) => {
-        console.log(chalk.magenta(`  [${i + 1}] Document: "${chunk.document_title}" (Chunk ${chunk.chunk_index + 1})`));
-        console.log(chalk.gray(`      Similarity: ${chunk.similarity?.toFixed(3) || 'N/A'}`));
-        console.log(chalk.gray(`      Content: ${chunk.content.substring(0, 100).replace(/\n/g, ' ')}...`));
+        verboseLog(options, chalk.magenta(`  [${i + 1}] Document: "${chunk.document_title}" (Chunk ${chunk.chunk_index + 1})`));
+        verboseLog(options, chalk.gray(`      Similarity: ${chunk.similarity?.toFixed(3) || 'N/A'}`));
+        verboseLog(options, chalk.gray(`      Content: ${chunk.content.substring(0, 100).replace(/\n/g, ' ')}...`));
       });
     } else {
-      console.log(chalk.magenta('  (None)'));
+      verboseLog(options, chalk.magenta('  (None)'));
     }
-    console.log(chalk.magenta('--- Sending Holistic PR Analysis Prompt to LLM ---'));
+    verboseLog(options, chalk.magenta('--- Sending Holistic PR Analysis Prompt to LLM ---'));
 
     // Call the centralized analysis function
     const parsedResponse = await callLLMForAnalysis(holisticContext, {
@@ -1785,11 +1786,11 @@ async function performHolisticPRAnalysis(options) {
     });
 
     // Debug logging
-    console.log(chalk.blue(`🐛 Holistic analysis parsed response:`));
-    console.log(chalk.gray(`Summary: ${parsedResponse.summary?.substring(0, 100)}...`));
-    console.log(chalk.gray(`Cross-file issues: ${parsedResponse.crossFileIssues?.length || 0}`));
-    console.log(chalk.gray(`File-specific issues keys: ${Object.keys(parsedResponse.fileSpecificIssues || {}).join(', ')}`));
-    console.log(chalk.gray(`Recommendations: ${parsedResponse.recommendations?.length || 0}`));
+    verboseLog(options, chalk.blue(`🐛 Holistic analysis parsed response:`));
+    verboseLog(options, chalk.gray(`Summary: ${parsedResponse.summary?.substring(0, 100)}...`));
+    verboseLog(options, chalk.gray(`Cross-file issues: ${parsedResponse.crossFileIssues?.length || 0}`));
+    verboseLog(options, chalk.gray(`File-specific issues keys: ${Object.keys(parsedResponse.fileSpecificIssues || {}).join(', ')}`));
+    verboseLog(options, chalk.gray(`Recommendations: ${parsedResponse.recommendations?.length || 0}`));
 
     // Filter out low severity issues (formatting/style concerns handled by linters)
     // Note: The LLM prompt instructs not to generate low severity issues, but this filter
@@ -1881,12 +1882,15 @@ async function getContextForFile(filePath, content, options = {}) {
     guidelineQueryEmbedding = await embeddingsSystem.calculateQueryEmbedding(guidelineQuery);
   }
 
-  console.log(chalk.blue('� Starting parallel context retrieval...'));
+  verboseLog(options, chalk.blue('� Starting parallel context retrieval...'));
   // Helper function to process custom documents in parallel (with caching)
   const processCustomDocuments = async () => {
     // Check if preprocessed chunks are available (from PR-level processing)
     if (options.preprocessedCustomDocChunks && options.preprocessedCustomDocChunks.length > 0) {
-      console.log(chalk.blue(`📄 Using preprocessed custom document chunks (${options.preprocessedCustomDocChunks.length} available)`));
+      verboseLog(
+        options,
+        chalk.blue(`📄 Using preprocessed custom document chunks (${options.preprocessedCustomDocChunks.length} available)`)
+      );
 
       // Use the guideline query for finding relevant custom document chunks
       const relevantChunks = await embeddingsSystem.findRelevantCustomDocChunks(guidelineQuery, options.preprocessedCustomDocChunks, {
@@ -1898,15 +1902,15 @@ async function getContextForFile(filePath, content, options = {}) {
         queryFilePath: filePath,
       });
 
-      console.log(chalk.green(`📄 Found ${relevantChunks.length} relevant custom document chunks`));
+      verboseLog(options, chalk.green(`📄 Found ${relevantChunks.length} relevant custom document chunks`));
 
       // Log which chunks made the cut
       if (relevantChunks.length > 0) {
-        console.log(chalk.cyan('📋 Custom Document Chunks Selected:'));
+        verboseLog(options, chalk.cyan('📋 Custom Document Chunks Selected:'));
         relevantChunks.forEach((chunk, i) => {
-          console.log(chalk.cyan(`  [${i + 1}] "${chunk.document_title}" (Chunk ${chunk.chunk_index + 1})`));
-          console.log(chalk.gray(`      Similarity: ${chunk.similarity?.toFixed(3) || 'N/A'}`));
-          console.log(chalk.gray(`      Content: ${chunk.content.substring(0, 80).replace(/\n/g, ' ')}...`));
+          verboseLog(options, chalk.cyan(`  [${i + 1}] "${chunk.document_title}" (Chunk ${chunk.chunk_index + 1})`));
+          verboseLog(options, chalk.gray(`      Similarity: ${chunk.similarity?.toFixed(3) || 'N/A'}`));
+          verboseLog(options, chalk.gray(`      Content: ${chunk.content.substring(0, 80).replace(/\n/g, ' ')}...`));
         });
       }
 
@@ -1919,17 +1923,17 @@ async function getContextForFile(filePath, content, options = {}) {
     }
 
     try {
-      console.log(chalk.blue('📄 Processing custom documents for context...'));
+      verboseLog(options, chalk.blue('📄 Processing custom documents for context...'));
 
       // Check if custom documents are already processed for this project
       let processedChunks = await checkExistingCustomDocumentChunks(projectPath);
 
       if (!processedChunks || processedChunks.length === 0) {
-        console.log(chalk.cyan('📄 Custom documents not yet processed for this project, processing now...'));
+        verboseLog(options, chalk.cyan('📄 Custom documents not yet processed for this project, processing now...'));
         // Process custom documents into chunks (only if not already processed)
         processedChunks = await embeddingsSystem.processCustomDocumentsInMemory(options.customDocs, projectPath);
       } else {
-        console.log(chalk.green(`📄 Reusing ${processedChunks.length} already processed custom document chunks`));
+        verboseLog(options, chalk.green(`📄 Reusing ${processedChunks.length} already processed custom document chunks`));
       }
 
       if (processedChunks.length > 0) {
@@ -1943,15 +1947,15 @@ async function getContextForFile(filePath, content, options = {}) {
           queryFilePath: filePath,
         });
 
-        console.log(chalk.green(`📄 Found ${relevantChunks.length} relevant custom document chunks`));
+        verboseLog(options, chalk.green(`📄 Found ${relevantChunks.length} relevant custom document chunks`));
 
         // Log which chunks made the cut
         if (relevantChunks.length > 0) {
-          console.log(chalk.cyan('📋 Custom Document Chunks Selected:'));
+          verboseLog(options, chalk.cyan('📋 Custom Document Chunks Selected:'));
           relevantChunks.forEach((chunk, i) => {
-            console.log(chalk.cyan(`  [${i + 1}] "${chunk.document_title}" (Chunk ${chunk.chunk_index + 1})`));
-            console.log(chalk.gray(`      Similarity: ${chunk.similarity?.toFixed(3) || 'N/A'}`));
-            console.log(chalk.gray(`      Content: ${chunk.content.substring(0, 80).replace(/\n/g, ' ')}...`));
+            verboseLog(options, chalk.cyan(`  [${i + 1}] "${chunk.document_title}" (Chunk ${chunk.chunk_index + 1})`));
+            verboseLog(options, chalk.gray(`      Similarity: ${chunk.similarity?.toFixed(3) || 'N/A'}`));
+            verboseLog(options, chalk.gray(`      Content: ${chunk.content.substring(0, 80).replace(/\n/g, ' ')}...`));
           });
         }
 
@@ -1970,7 +1974,7 @@ async function getContextForFile(filePath, content, options = {}) {
       // Use the statically imported function
       return await embeddingsSystem.getExistingCustomDocumentChunks(projectPath);
     } catch {
-      console.log(chalk.gray('No existing custom document chunks found, will process from scratch'));
+      verboseLog(options, chalk.gray('No existing custom document chunks found, will process from scratch'));
       return [];
     }
   };
@@ -2030,7 +2034,7 @@ async function getContextForFile(filePath, content, options = {}) {
 
   const prCommentContext = prContextResult?.comments || [];
   const prContextAvailable = prCommentContext.length > 0;
-  console.log(chalk.green(`✅ Found ${prCommentContext.length} relevant PR comments`));
+  verboseLog(options, chalk.green(`✅ Found ${prCommentContext.length} relevant PR comments`));
 
   const documentChunks = Array.isArray(guidelineCandidates) ? guidelineCandidates.filter((c) => c.type === 'documentation-chunk') : [];
   const chunksByDocument = new Map();
@@ -2192,21 +2196,21 @@ async function gatherUnifiedContextForPR(prFiles, options = {}) {
   let globalCustomDocChunks = [];
   if (options.customDocs && options.customDocs.length > 0) {
     const projectPath = options.projectPath || process.cwd();
-    console.log(chalk.blue('📄 Processing custom documents once for entire PR...'));
+    verboseLog(options, chalk.blue('📄 Processing custom documents once for entire PR...'));
 
     try {
       // Check if custom documents are already processed for this project
       let processedChunks = await embeddingsSystem.getExistingCustomDocumentChunks(projectPath);
 
       if (!processedChunks || processedChunks.length === 0) {
-        console.log(chalk.cyan('📄 Custom documents not yet processed for this project, processing now...'));
+        verboseLog(options, chalk.cyan('📄 Custom documents not yet processed for this project, processing now...'));
         processedChunks = await embeddingsSystem.processCustomDocumentsInMemory(options.customDocs, projectPath);
       } else {
-        console.log(chalk.green(`📄 Reusing ${processedChunks.length} already processed custom document chunks`));
+        verboseLog(options, chalk.green(`📄 Reusing ${processedChunks.length} already processed custom document chunks`));
       }
 
       globalCustomDocChunks = processedChunks;
-      console.log(chalk.green(`📄 Custom documents processed: ${globalCustomDocChunks.length} chunks available for PR analysis`));
+      verboseLog(options, chalk.green(`📄 Custom documents processed: ${globalCustomDocChunks.length} chunks available for PR analysis`));
     } catch (error) {
       console.error(chalk.red(`Error processing custom documents for PR: ${error.message}`));
     }
@@ -2306,6 +2310,7 @@ async function gatherUnifiedContextForPR(prFiles, options = {}) {
  *
  * @param {Object} analysisResults - Analysis results from LLM
  * @param {Object} options - Filtering options
+ * @param {boolean} [options.verbose=false] - Enable verbose logging for filtered issues
  * @returns {Object} Filtered analysis results without low severity issues
  */
 function filterLowSeverityIssues(analysisResults, options = {}) {
@@ -2323,9 +2328,7 @@ function filterLowSeverityIssues(analysisResults, options = {}) {
     analysisResults.issues = analysisResults.issues.filter((issue) => {
       const severity = (issue.severity || '').toLowerCase();
       if (severity === 'low') {
-        if (verbose) {
-          console.log(chalk.yellow(`   Filtering low severity issue: "${(issue.description || '').substring(0, 50)}..."`));
-        }
+        verboseLog(verbose, chalk.yellow(`   Filtering low severity issue: "${(issue.description || '').substring(0, 50)}..."`));
         return false;
       }
       return true;
@@ -2339,11 +2342,10 @@ function filterLowSeverityIssues(analysisResults, options = {}) {
     analysisResults.crossFileIssues = analysisResults.crossFileIssues.filter((issue) => {
       const severity = (issue.severity || '').toLowerCase();
       if (severity === 'low') {
-        if (verbose) {
-          console.log(
-            chalk.yellow(`   Filtering low severity cross-file issue: "${(issue.message || issue.description || '').substring(0, 50)}..."`)
-          );
-        }
+        verboseLog(
+          verbose,
+          chalk.yellow(`   Filtering low severity cross-file issue: "${(issue.message || issue.description || '').substring(0, 50)}..."`)
+        );
         return false;
       }
       return true;
@@ -2360,11 +2362,10 @@ function filterLowSeverityIssues(analysisResults, options = {}) {
         analysisResults.fileSpecificIssues[filePath] = issues.filter((issue) => {
           const severity = (issue.severity || '').toLowerCase();
           if (severity === 'low') {
-            if (verbose) {
-              console.log(
-                chalk.yellow(`   Filtering low severity issue in ${filePath}: "${(issue.description || '').substring(0, 50)}..."`)
-              );
-            }
+            verboseLog(
+              verbose,
+              chalk.yellow(`   Filtering low severity issue in ${filePath}: "${(issue.description || '').substring(0, 50)}..."`)
+            );
             return false;
           }
           return true;
@@ -2374,9 +2375,10 @@ function filterLowSeverityIssues(analysisResults, options = {}) {
     }
   }
 
-  if (filteredCount > 0) {
-    console.log(chalk.cyan(`🔇 Filtered ${filteredCount} low severity issue(s) (formatting/style concerns handled by linters)`));
-  }
+  verboseLog(
+    verbose && filteredCount > 0,
+    chalk.cyan(`🔇 Filtered ${filteredCount} low severity issue(s) (formatting/style concerns handled by linters)`)
+  );
 
   return analysisResults;
 }
@@ -2387,6 +2389,8 @@ function filterLowSeverityIssues(analysisResults, options = {}) {
  * @param {Object} analysisResults - Raw analysis results from LLM
  * @param {Object} feedbackData - Loaded feedback data
  * @param {Object} options - Filtering options
+ * @param {number} [options.similarityThreshold=0.7] - Threshold for considering issues similar to dismissed feedback
+ * @param {boolean} [options.verbose=false] - Enable verbose similarity and filtering logs
  * @returns {Promise<Object>} Filtered analysis results
  */
 async function filterAnalysisResults(analysisResults, feedbackData, options = {}) {
@@ -2402,12 +2406,11 @@ async function filterAnalysisResults(analysisResults, feedbackData, options = {}
   await ensureSemanticSimilarityInitialized();
 
   // Log whether semantic similarity is available
-  if (verbose) {
-    const usingSemanticSimilarity = isSemanticSimilarityAvailable();
-    console.log(
-      chalk.cyan(`🔍 Filtering issues using ${usingSemanticSimilarity ? 'semantic + word-based similarity' : 'word-based similarity only'}`)
-    );
-  }
+  const usingSemanticSimilarity = isSemanticSimilarityAvailable();
+  verboseLog(
+    verbose,
+    chalk.cyan(`🔍 Filtering issues using ${usingSemanticSimilarity ? 'semantic + word-based similarity' : 'word-based similarity only'}`)
+  );
 
   // Filter issues based on feedback (now async due to semantic similarity)
   const filterResults = await Promise.all(
@@ -2418,9 +2421,7 @@ async function filterAnalysisResults(analysisResults, feedbackData, options = {}
         verbose,
       });
 
-      if (shouldSkip && verbose) {
-        console.log(chalk.yellow(`   Filtered issue ${index + 1}: "${issueDescription.substring(0, 50)}..."`));
-      }
+      verboseLog(shouldSkip && verbose, chalk.yellow(`   Filtered issue ${index + 1}: "${issueDescription.substring(0, 50)}..."`));
 
       return { issue, shouldSkip };
     })
@@ -2430,9 +2431,10 @@ async function filterAnalysisResults(analysisResults, feedbackData, options = {}
 
   const filteredCount = originalCount - filteredIssues.length;
 
-  if (verbose && filteredCount > 0) {
-    console.log(chalk.green(`✅ Filtered ${filteredCount} dismissed issues, ${filteredIssues.length} remaining`));
-  }
+  verboseLog(
+    verbose && filteredCount > 0,
+    chalk.green(`✅ Filtered ${filteredCount} dismissed issues, ${filteredIssues.length} remaining`)
+  );
 
   return {
     ...analysisResults,
