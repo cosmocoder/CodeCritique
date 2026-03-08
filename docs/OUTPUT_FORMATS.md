@@ -44,9 +44,6 @@ Issues:
       interface ButtonProps { onClick?: () => void; disabled?: boolean; }
       const Button = (props: ButtonProps) => {
 
-Positives:
-  - Good use of semantic HTML elements
-  - Proper accessibility attributes
 ```
 
 ## JSON Format
@@ -91,8 +88,7 @@ The JSON format provides structured output perfect for programmatic processing, 
               "newCode": "interface ButtonProps { onClick?: () => void; disabled?: boolean; }\nconst Button = (props: ButtonProps) => {"
             }
           }
-        ],
-        "positives": ["Good use of semantic HTML elements", "Proper accessibility attributes"]
+        ]
       }
     }
   ]
@@ -149,14 +145,6 @@ The markdown format is documentation-friendly and ideal for generating reports, 
   ```
 ````
 
-**Positives Found (2):**
-
-- Good use of semantic HTML elements
-
-- Proper accessibility attributes
-
-````
-
 ## Usage
 
 Specify the output format using the `--output` (or `-o`) option:
@@ -170,7 +158,7 @@ codecritique analyze --file src/app.ts --output json
 
 # Markdown format
 codecritique analyze --file src/app.ts --output markdown
-````
+```
 
 ### Saving Output to a File
 
@@ -180,10 +168,11 @@ You can redirect output to a file using shell redirection:
 codecritique analyze --files "src/**/*.ts" --output json > review.json
 ```
 
-Or use the `--output-file` option (for JSON format):
+Or use the `--output-file` option for `json` or `markdown` output:
 
 ```bash
 codecritique analyze --files "src/**/*.ts" --output json --output-file review.json
+codecritique analyze --files "src/**/*.ts" --output markdown --output-file review.md
 ```
 
 ---

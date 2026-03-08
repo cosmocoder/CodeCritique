@@ -30,6 +30,22 @@ async function reviewFile(filePath, options = {}) {
 
     // If analysis successful, return the result
     if (analyzeResult.success) {
+      if (analyzeResult.skipped) {
+        return {
+          success: true,
+          results: [
+            {
+              filePath: analyzeResult.filePath || filePath,
+              language: analyzeResult.language,
+              success: true,
+              skipped: true,
+              message: analyzeResult.message,
+              results: analyzeResult.results,
+            },
+          ],
+        };
+      }
+
       // Convert object results to array format expected by the output functions
       if (analyzeResult.results && !Array.isArray(analyzeResult.results)) {
         console.log(chalk.blue('Converting results object to array format'));
@@ -101,7 +117,15 @@ async function reviewFiles(filePaths, options = {}) {
       const batchPromises = batch.map((filePath) => reviewFile(filePath, options));
       const batchResults = await Promise.all(batchPromises);
 
-      results.push(...batchResults);
+      const flattenedBatchResults = batchResults.flatMap((batchResult) => {
+        if (batchResult?.success && Array.isArray(batchResult.results)) {
+          return batchResult.results;
+        }
+
+        return batchResult ? [batchResult] : [];
+      });
+
+      results.push(...flattenedBatchResults);
     }
 
     // Filter out potential null results if any step could return null/undefined (though analyzeFile should always return an object)
@@ -520,9 +544,28 @@ async function reviewLargePRInChunks(prFiles, options) {
 
   // Step 3: Process chunks in parallel
   console.log(chalk.blue('🔄 Processing chunks in parallel...'));
-  const chunkResults = await Promise.all(
+  const settledChunkResults = await Promise.allSettled(
     chunks.map((chunk, index) => reviewPRChunk(chunk, sharedContext, options, index + 1, chunks.length))
   );
+
+  const chunkResults = settledChunkResults.map((result, index) => {
+    if (result.status === 'fulfilled') {
+      return {
+        chunkId: index + 1,
+        ...result.value,
+      };
+    }
+
+    const errorMessage = result.reason instanceof Error ? result.reason.message : String(result.reason);
+    console.warn(chalk.yellow(`Chunk ${index + 1}/${chunks.length} failed: ${errorMessage}`));
+
+    return {
+      chunkId: index + 1,
+      success: false,
+      error: errorMessage,
+      results: [],
+    };
+  });
 
   // Step 4: Combine results
   console.log(chalk.blue('🔗 Combining chunk results...'));
