@@ -1015,7 +1015,7 @@ function outputJson(reviewResults, options) {
         filePath: r.filePath,
         success: true,
         language: r.language,
-        review: r.results, // Contains summary, issues (with optional codeSuggestion), positives from LLM
+        review: r.results, // Contains summary and actionable issues (with optional codeSuggestion)
         // Optionally include similar examples if needed
         // similarExamplesUsed: r.similarExamples
       };
@@ -1069,8 +1069,8 @@ function outputMarkdown(reviewResults) {
       console.log(`*Skipped (based on exclusion patterns or file type).*\n`);
       return;
     }
-    if (!fileResult.results || (!fileResult.results.issues?.length && !fileResult.results.positives?.length)) {
-      console.log(`*No significant findings or issues reported.*\n`);
+    if (!fileResult.results || !fileResult.results.issues?.length) {
+      console.log(`*No actionable issues reported.*\n`);
       if (fileResult.results?.summary) {
         console.log(`**Summary:** ${fileResult.results.summary}\n`);
       }
@@ -1111,12 +1111,6 @@ function outputMarkdown(reviewResults) {
       });
     }
 
-    if (review.positives && review.positives.length > 0) {
-      console.log(`**Positives Found (${review.positives.length}):**\n`);
-      review.positives.forEach((positive) => {
-        console.log(`  - ${positive}\n`);
-      });
-    }
   });
 }
 
@@ -1154,7 +1148,7 @@ function outputText(reviewResults, cliOptions) {
       }
       return;
     }
-    if (!fileResult.results || (!fileResult.results.issues?.length && !fileResult.results.positives?.length)) {
+    if (!fileResult.results || !fileResult.results.issues?.length) {
       if (cliOptions.verbose) {
         console.log(chalk.green(`\nNo findings for: ${fileResult.filePath}`));
         if (fileResult.results?.summary) {
@@ -1194,13 +1188,6 @@ function outputText(reviewResults, cliOptions) {
       });
     }
 
-    if (review.positives && review.positives.length > 0) {
-      console.log(chalk.bold.green('\nPositives:'));
-      review.positives.forEach((positive) => {
-        console.log(`  - ${positive}`);
-      });
-      console.log('');
-    }
     console.log(chalk.gray(`========================================${'='.repeat(fileResult.filePath.length)}`));
   });
 }

@@ -44,9 +44,6 @@ Issues:
       interface ButtonProps { onClick?: () => void; disabled?: boolean; }
       const Button = (props: ButtonProps) => {
 
-Positives:
-  - Good use of semantic HTML elements
-  - Proper accessibility attributes
 ```
 
 ## JSON Format
@@ -91,8 +88,7 @@ The JSON format provides structured output perfect for programmatic processing, 
               "newCode": "interface ButtonProps { onClick?: () => void; disabled?: boolean; }\nconst Button = (props: ButtonProps) => {"
             }
           }
-        ],
-        "positives": ["Good use of semantic HTML elements", "Proper accessibility attributes"]
+        ]
       }
     }
   ]
@@ -147,14 +143,6 @@ The markdown format is documentation-friendly and ideal for generating reports, 
   interface ButtonProps { onClick?: () => void; disabled?: boolean; }
   const Button = (props: ButtonProps) => {
   ```
-````
-
-**Positives Found (2):**
-
-- Good use of semantic HTML elements
-
-- Proper accessibility attributes
-
 ````
 
 ## Usage

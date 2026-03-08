@@ -461,7 +461,6 @@ export function myUtility(input) {
         newCode: string
       }
     }],
-    positives: string[]
   },
   skipped: boolean,
   error: string | undefined
