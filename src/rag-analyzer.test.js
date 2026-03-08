@@ -910,6 +910,15 @@ describe('rag-analyzer', () => {
       expect(context).toHaveProperty('codeExamples');
     });
 
+    it('should degrade gracefully when retrieval returns no context for active files', async () => {
+      mockEmbeddingsSystem.findSimilarCode.mockResolvedValue([]);
+      mockEmbeddingsSystem.findRelevantDocs.mockResolvedValue([]);
+      const prFiles = [{ filePath: '/src/file.js', content: 'code', language: 'javascript' }];
+      const context = await gatherUnifiedContextForPR(prFiles, { projectPath: '/project' });
+      expect(context.codeExamples).toEqual([]);
+      expect(context.guidelines).toEqual([]);
+    });
+
     it('should find custom document chunks', async () => {
       mockEmbeddingsSystem.getExistingCustomDocumentChunks.mockResolvedValue([{ content: 'Custom doc', document_title: 'Guidelines' }]);
       const prFiles = [{ filePath: '/src/file.js', content: 'code', language: 'javascript' }];

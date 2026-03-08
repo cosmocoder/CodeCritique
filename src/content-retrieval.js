@@ -24,6 +24,8 @@ import { inferContextFromDocumentContent } from './utils/context-inference.js';
 import { isGenericDocument, getGenericDocumentContext } from './utils/document-detection.js';
 import { isDocumentationFile } from './utils/file-validation.js';
 import { debug, verboseLog } from './utils/logging.js';
+import { isPathWithinProject } from './utils/path-utils.js';
+import { escapeSqlString } from './utils/string-utils.js';
 
 const FILE_EMBEDDINGS_TABLE = TABLE_NAMES.FILE_EMBEDDINGS;
 const DOCUMENT_CHUNK_TABLE = TABLE_NAMES.DOCUMENT_CHUNK;
@@ -52,6 +54,58 @@ export class ContentRetriever {
 
     // Cleanup guard
     this.cleaningUp = false;
+  }
+
+  resolveProjectResultPath(filePath, resolvedProjectPath) {
+    if (!filePath) {
+      return null;
+    }
+
+    const absolutePath = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(resolvedProjectPath, filePath);
+    return isPathWithinProject(absolutePath, resolvedProjectPath) ? absolutePath : null;
+  }
+
+  async filterResultsForProject(results, resolvedProjectPath, getPath) {
+    const resultsToCheck = [];
+    const projectMatchMap = new Map();
+
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      const resultPath = getPath(result);
+
+      if (result.project_path && result.project_path !== resolvedProjectPath) {
+        projectMatchMap.set(i, false);
+        continue;
+      }
+
+      const absolutePath = this.resolveProjectResultPath(resultPath, resolvedProjectPath);
+      if (!absolutePath) {
+        projectMatchMap.set(i, false);
+        continue;
+      }
+
+      resultsToCheck.push({ index: i, absolutePath, resultPath });
+    }
+
+    if (resultsToCheck.length > 0) {
+      const existenceResults = await Promise.all(
+        resultsToCheck.map(async ({ index, absolutePath, resultPath }) => {
+          try {
+            await fs.promises.access(absolutePath, fs.constants.F_OK);
+            return { index, exists: true };
+          } catch {
+            debug(`Filtering out non-existent project file: ${resultPath}`);
+            return { index, exists: false };
+          }
+        })
+      );
+
+      for (const { index, exists } of existenceResults) {
+        projectMatchMap.set(index, exists);
+      }
+    }
+
+    return results.filter((result, index) => projectMatchMap.get(index) === true);
   }
 
   /**
@@ -99,7 +153,7 @@ export class ContentRetriever {
       try {
         const tableSchema = await table.schema;
         if (tableSchema?.fields?.some((field) => field.name === 'project_path')) {
-          query = query.where(`project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`);
+          query = query.where(`project_path = '${escapeSqlString(resolvedProjectPath)}'`);
           debug(`Filtering documentation by project_path: ${resolvedProjectPath}`);
         }
       } catch (schemaError) {
@@ -109,65 +163,11 @@ export class ContentRetriever {
       const results = await query.limit(Math.max(limit * 3, 20)).toArray();
       verboseLog(options, chalk.green(`Native hybrid search returned ${results.length} documentation results`));
 
-      // OPTIMIZATION: Enhanced batch file existence checks with parallel processing
-      const docsToCheck = [];
-      const docProjectMatchMap = new Map();
-
-      // First pass: collect files that need existence checking
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i];
-
-        if (result.project_path) {
-          docProjectMatchMap.set(i, result.project_path === resolvedProjectPath);
-          continue;
-        }
-
-        if (!result.original_document_path) {
-          docProjectMatchMap.set(i, false);
-          continue;
-        }
-
-        const filePath = result.original_document_path;
-        try {
-          if (path.isAbsolute(filePath)) {
-            docProjectMatchMap.set(i, filePath.startsWith(resolvedProjectPath));
-            continue;
-          }
-
-          const absolutePath = path.resolve(resolvedProjectPath, filePath);
-          if (absolutePath.startsWith(resolvedProjectPath)) {
-            // Mark for batch existence check
-            docsToCheck.push({ result, index: i, absolutePath, filePath });
-          } else {
-            docProjectMatchMap.set(i, false);
-          }
-        } catch (error) {
-          debug(`Error filtering result for project: ${error.message}`);
-          docProjectMatchMap.set(i, false);
-        }
-      }
-
-      // Enhanced batch check file existence with improved error handling
-      if (docsToCheck.length > 0) {
-        debug(`[OPTIMIZATION] Batch checking existence of ${docsToCheck.length} documentation files`);
-        const existencePromises = docsToCheck.map(async ({ index, absolutePath, filePath }) => {
-          try {
-            await fs.promises.access(absolutePath, fs.constants.F_OK);
-            return { index, exists: true };
-          } catch {
-            debug(`Filtering out non-existent documentation file: ${filePath}`);
-            return { index, exists: false };
-          }
-        });
-
-        const existenceResults = await Promise.all(existencePromises);
-        for (const { index, exists } of existenceResults) {
-          docProjectMatchMap.set(index, exists);
-        }
-      }
-
-      // Filter results based on project match using the map
-      const projectFilteredResults = results.filter((result, index) => docProjectMatchMap.get(index) === true);
+      const projectFilteredResults = await this.filterResultsForProject(
+        results,
+        resolvedProjectPath,
+        (result) => result.original_document_path
+      );
 
       verboseLog(options, chalk.blue(`Filtered to ${projectFilteredResults.length} documentation results from current project`));
       let finalResults = projectFilteredResults.map((result) => {
@@ -493,13 +493,13 @@ export class ContentRetriever {
       if (queryFilePath) {
         const normalizedQueryPath = path.resolve(resolvedProjectPath, queryFilePath);
         // Add condition to exclude the file being reviewed
-        const escapedPath = normalizedQueryPath.replace(/'/g, "''");
+        const escapedPath = escapeSqlString(normalizedQueryPath);
         conditions.push(`path != '${escapedPath}'`);
 
         // Also check for relative path variants to be thorough
         const relativePath = path.relative(resolvedProjectPath, normalizedQueryPath);
         if (relativePath && !relativePath.startsWith('..')) {
-          const escapedRelativePath = relativePath.replace(/'/g, "''");
+          const escapedRelativePath = escapeSqlString(relativePath);
           conditions.push(`path != '${escapedRelativePath}'`);
         }
 
@@ -515,7 +515,7 @@ export class ContentRetriever {
 
           if (hasProjectPathField) {
             // Use exact match for project path
-            conditions.push(`project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`);
+            conditions.push(`project_path = '${escapeSqlString(resolvedProjectPath)}'`);
             debug(`Filtering by project_path: ${resolvedProjectPath}`);
           }
         }
@@ -532,72 +532,11 @@ export class ContentRetriever {
 
       verboseLog(options, chalk.green(`Native hybrid search returned ${results.length} results`));
 
-      // OPTIMIZATION: Batch file existence checks for better performance
-      const resultsToCheck = [];
-      const projectMatchMap = new Map();
-
-      // First pass: collect files that need existence checking
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i];
-
-        // Use project_path field if available (new schema)
-        if (result.project_path) {
-          projectMatchMap.set(i, result.project_path === resolvedProjectPath);
-          continue;
-        }
-
-        // Fallback for old embeddings without project_path field
-        if (!result.path && !result.original_document_path) {
-          projectMatchMap.set(i, false);
-          continue;
-        }
-
-        const filePath = result.original_document_path || result.path;
-        try {
-          // Check if this result belongs to the current project
-          // First try as absolute path
-          if (path.isAbsolute(filePath)) {
-            projectMatchMap.set(i, filePath.startsWith(resolvedProjectPath));
-            continue;
-          }
-
-          // For relative paths, check if the file actually exists in the project
-          const absolutePath = path.resolve(resolvedProjectPath, filePath);
-
-          // Verify the path is within project bounds
-          if (absolutePath.startsWith(resolvedProjectPath)) {
-            // Mark for batch existence check
-            resultsToCheck.push({ result, index: i, absolutePath });
-          } else {
-            projectMatchMap.set(i, false);
-          }
-        } catch (error) {
-          debug(`Error filtering result for project: ${error.message}`);
-          projectMatchMap.set(i, false);
-        }
-      }
-
-      // Batch check file existence for better performance
-      if (resultsToCheck.length > 0) {
-        debug(`[OPTIMIZATION] Batch checking existence of ${resultsToCheck.length} files`);
-        const existencePromises = resultsToCheck.map(async ({ result, index, absolutePath }) => {
-          try {
-            await fs.promises.access(absolutePath, fs.constants.F_OK);
-            return { index, exists: true };
-          } catch {
-            debug(`Filtering out non-existent file: ${result.original_document_path || result.path}`);
-            return { index, exists: false };
-          }
-        });
-
-        const existenceResults = await Promise.all(existencePromises);
-        for (const { index, exists } of existenceResults) {
-          projectMatchMap.set(index, exists);
-        }
-      }
-
-      // Filter results based on project match using the map
-      const projectFilteredResults = results.filter((result, index) => projectMatchMap.get(index) === true);
+      const projectFilteredResults = await this.filterResultsForProject(
+        results,
+        resolvedProjectPath,
+        (result) => result.original_document_path || result.path
+      );
 
       verboseLog(options, chalk.blue(`Filtered to ${projectFilteredResults.length} results from current project`));
 
@@ -643,14 +582,11 @@ export class ContentRetriever {
         try {
           const fileTable = await this.database.getTable(FILE_EMBEDDINGS_TABLE);
           if (fileTable) {
-            // Look for project-specific structure ID
-            const projectStructureId = `__project_structure__${path.basename(resolvedProjectPath)}`;
-            let structureResults = await fileTable.query().where(`id = '${projectStructureId}'`).limit(1).toArray();
-
-            // Fall back to generic project structure if project-specific one doesn't exist
-            if (structureResults.length === 0) {
-              structureResults = await fileTable.query().where("id = '__project_structure__'").limit(1).toArray();
-            }
+            const structureResults = await fileTable
+              .query()
+              .where(`project_path = '${escapeSqlString(resolvedProjectPath)}' AND type = 'directory-structure'`)
+              .limit(1)
+              .toArray();
 
             if (structureResults.length > 0) {
               const structureRecord = structureResults[0];
