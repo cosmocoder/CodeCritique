@@ -12,6 +12,7 @@ import chalk from 'chalk';
 import stopwords from 'stopwords-iso/stopwords-iso.json' with { type: 'json' };
 import { EMBEDDING_DIMENSIONS, TABLE_NAMES } from '../embeddings/constants.js';
 import { getDefaultEmbeddingsSystem } from '../embeddings/factory.js';
+import { verboseLog } from '../utils/logging.js';
 import { truncateToTokenLimit, cleanupTokenizer } from '../utils/mobilebert-tokenizer.js';
 
 // Create embeddings system instance
@@ -107,7 +108,8 @@ export async function storePRCommentsBatch(commentsData, projectPath = process.c
             await table.optimize();
           } catch (optimizeError) {
             if (optimizeError.message && optimizeError.message.includes('legacy format')) {
-              console.log(
+              verboseLog(
+                {},
                 chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`)
               );
             } else {
@@ -115,7 +117,7 @@ export async function storePRCommentsBatch(commentsData, projectPath = process.c
             }
           }
 
-          console.log(chalk.green(`Stored batch of ${validRecords.length} PR comments`));
+          verboseLog({}, chalk.green(`Stored batch of ${validRecords.length} PR comments`));
         } catch (batchError) {
           console.error(chalk.red(`Error storing batch: ${batchError.message}`));
         }
@@ -151,7 +153,7 @@ export async function getPRCommentsStats(repository = null, projectPath = proces
     };
 
     if (!table) {
-      console.log(chalk.yellow('PR comments table not found, returning empty stats'));
+      verboseLog({}, chalk.yellow('PR comments table not found, returning empty stats'));
       return defaultStats;
     }
 
@@ -163,16 +165,16 @@ export async function getPRCommentsStats(repository = null, projectPath = proces
     }
 
     const whereClause = filters.join(' AND ');
-    console.log(chalk.blue(`Getting stats with filter: ${whereClause}`));
+    verboseLog({}, chalk.blue(`Getting stats with filter: ${whereClause}`));
 
     let totalCount = 0;
     try {
       totalCount = await table.countRows(whereClause);
-      console.log(chalk.blue(`Found ${totalCount} total comments matching filter`));
+      verboseLog({}, chalk.blue(`Found ${totalCount} total comments matching filter`));
     } catch (countError) {
       console.warn(chalk.yellow(`Error counting rows: ${countError.message}, trying without filter`));
       totalCount = await table.countRows();
-      console.log(chalk.blue(`Found ${totalCount} total comments in table`));
+      verboseLog({}, chalk.blue(`Found ${totalCount} total comments in table`));
     }
 
     let results = [];
@@ -180,7 +182,7 @@ export async function getPRCommentsStats(repository = null, projectPath = proces
       try {
         // Use query() instead of search() for non-vector queries
         results = await table.query().where(whereClause).limit(10000).toArray();
-        console.log(chalk.blue(`Retrieved ${results.length} comments for analysis`));
+        verboseLog({}, chalk.blue(`Retrieved ${results.length} comments for analysis`));
       } catch (queryError) {
         console.warn(chalk.yellow(`Error with filtered query: ${queryError.message}, trying without filter`));
         try {
@@ -192,7 +194,7 @@ export async function getPRCommentsStats(repository = null, projectPath = proces
           } else {
             results = results.filter((r) => r.project_path === resolvedProjectPath);
           }
-          console.log(chalk.blue(`Retrieved and filtered ${results.length} comments for analysis`));
+          verboseLog({}, chalk.blue(`Retrieved and filtered ${results.length} comments for analysis`));
         } catch (fallbackError) {
           console.error(chalk.red(`Fallback query also failed: ${fallbackError.message}`));
           results = [];
@@ -256,7 +258,7 @@ export async function getPRCommentsStats(repository = null, projectPath = proces
       latest: latestDate ? latestDate.toISOString().split('T')[0] : 'N/A',
     };
 
-    console.log(chalk.green(`Stats generated: ${stats.totalComments} comments, ${stats.totalPRs} PRs, ${stats.uniqueAuthors} authors`));
+    verboseLog({}, chalk.green(`Stats generated: ${stats.totalComments} comments, ${stats.totalPRs} PRs, ${stats.uniqueAuthors} authors`));
     return stats;
   } catch (error) {
     console.error(chalk.red(`Error getting PR comments stats: ${error.message}`));
@@ -317,7 +319,7 @@ export async function getProcessedPRDateRange(repository, projectPath = process.
     const oldestPR = dates[0].toISOString();
     const newestPR = dates[dates.length - 1].toISOString();
 
-    console.log(chalk.blue(`Processed PR date range: ${oldestPR} to ${newestPR} (${prDates.size} PRs)`));
+    verboseLog({}, chalk.blue(`Processed PR date range: ${oldestPR} to ${newestPR} (${prDates.size} PRs)`));
     return { oldestPR, newestPR };
   } catch (error) {
     console.error(chalk.red(`Error getting processed PR date range: ${error.message}`));
@@ -365,7 +367,7 @@ export async function clearPRComments(repository, projectPath = process.cwd()) {
 
     await table.delete(deleteQuery);
 
-    console.log(chalk.yellow(`Cleared ${countBefore} PR comments for repository ${repository}`));
+    verboseLog({}, chalk.yellow(`Cleared ${countBefore} PR comments for repository ${repository}`));
     return countBefore;
   } catch (error) {
     console.error(chalk.red(`Error clearing PR comments: ${error.message}`));
@@ -513,13 +515,13 @@ async function getClassifier() {
 
 async function _initializeClassifier() {
   try {
-    console.log(chalk.blue('Initializing MobileBERT classifier...'));
+    verboseLog({}, chalk.blue('Initializing MobileBERT classifier...'));
     const cls = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli', {
       quantized: true,
       dtype: 'fp32',
       device: 'cpu',
     });
-    console.log(chalk.green('✓ Local MobileBERT classifier initialized successfully'));
+    verboseLog({}, chalk.green('✓ Local MobileBERT classifier initialized successfully'));
     return cls;
   } catch {
     console.warn(chalk.yellow('⚠ Failed to initialize MobileBERT, trying fallback model...'));
@@ -529,7 +531,7 @@ async function _initializeClassifier() {
         dtype: 'fp32',
         device: 'cpu',
       });
-      console.log(chalk.green('✓ Local DistilBERT classifier initialized successfully (fallback)'));
+      verboseLog({}, chalk.green('✓ Local DistilBERT classifier initialized successfully (fallback)'));
       return cls;
     } catch (fallbackError) {
       console.warn(chalk.yellow('⚠ Failed to initialize any local classifier:'), fallbackError.message);
@@ -546,7 +548,7 @@ export async function cleanupClassifier() {
     try {
       await classifier.dispose();
       classifier = null;
-      console.log(chalk.green('✓ Local classifier resources cleaned up'));
+      verboseLog({}, chalk.green('✓ Local classifier resources cleaned up'));
     } catch (error) {
       console.warn(chalk.yellow('⚠ Error cleaning up classifier:'), error.message);
       classifier = null;
@@ -677,13 +679,17 @@ function preFilterWithKeywords(candidate) {
  * Find relevant PR comments using hybrid search with chunking strategy
  * @param {string} reviewFileContent - Content of the review file
  * @param {Object} options - Search options
+ * @param {number} [options.limit=10] - Maximum number of formatted comment matches to return
+ * @param {string} [options.projectPath=process.cwd()] - Project path used for project-isolated search
+ * @param {boolean} [options.isTestFile=false] - Whether the reviewed file is a test file
+ * @param {boolean} [options.verbose=false] - Enable verbose progress logging
  * @returns {Promise<Array<Object>>} Relevant PR comments with verification
  */
 export async function findRelevantPRComments(reviewFileContent, options = {}) {
   const { limit = 10, projectPath = process.cwd(), isTestFile = false } = options;
 
   try {
-    console.log(chalk.cyan('🔍 Starting FORWARD Hybrid Search with LLM Verification'));
+    verboseLog(options, chalk.cyan('🔍 Starting FORWARD Hybrid Search with LLM Verification'));
 
     if (!reviewFileContent) {
       console.warn(chalk.yellow('No review file content provided'));
@@ -696,7 +702,7 @@ export async function findRelevantPRComments(reviewFileContent, options = {}) {
       console.warn(chalk.yellow('No valid chunks created from review file'));
       return [];
     }
-    console.log(chalk.blue(`📝 Created ${codeChunks.length} chunks from the review file.`));
+    verboseLog(options, chalk.blue(`📝 Created ${codeChunks.length} chunks from the review file.`));
 
     const chunkEmbeddings = await Promise.all(
       codeChunks.map(async (chunk) => ({
@@ -715,7 +721,7 @@ export async function findRelevantPRComments(reviewFileContent, options = {}) {
     const resolvedProjectPath = path.resolve(projectPath);
     const projectWhereClause = `project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`;
 
-    console.log(chalk.blue(`🔒 Project isolation: filtering by project_path = '${resolvedProjectPath}'`));
+    verboseLog(options, chalk.blue(`🔒 Project isolation: filtering by project_path = '${resolvedProjectPath}'`));
 
     const searchPromises = chunkEmbeddings.map((chunk) => {
       if (!chunk.vector) return Promise.resolve([]);
@@ -746,29 +752,35 @@ export async function findRelevantPRComments(reviewFileContent, options = {}) {
       }
     }
 
-    console.log(chalk.blue(`🎯 Found ${candidateMatches.size} unique candidate comments for verification.`));
+    verboseLog(options, chalk.blue(`🎯 Found ${candidateMatches.size} unique candidate comments for verification.`));
 
     // --- STEP 3: THE NEW PRE-FILTERING STEP ---
     const preFilteredCandidates = Array.from(candidateMatches.values()).filter(preFilterWithKeywords);
-    console.log(chalk.yellow(`⚡ After keyword pre-filtering, ${preFilteredCandidates.length} candidates remain for LLM verification.`));
+    verboseLog(
+      options,
+      chalk.yellow(`⚡ After keyword pre-filtering, ${preFilteredCandidates.length} candidates remain for LLM verification.`)
+    );
 
     // --- Step 4: LLM Verification ---
     const candidatesArray = preFilteredCandidates;
     const batchSize = HYBRID_SEARCH_CONFIG.LLM_BATCH_SIZE;
     const verifiedComments = [];
-    console.log(chalk.cyan(`🤖 Starting LLM verification of ${candidatesArray.length} candidates...`));
+    verboseLog(options, chalk.cyan(`🤖 Starting LLM verification of ${candidatesArray.length} candidates...`));
 
     for (let i = 0; i < candidatesArray.length; i += batchSize) {
       const batch = candidatesArray.slice(i, i + batchSize);
       const verifiedBatch = await verifyLocally(batch); // SINGLE batch call
       verifiedComments.push(...verifiedBatch);
     }
-    console.log(chalk.green(`✅ LLM verification complete: ${verifiedComments.length}/${candidatesArray.length} comments verified.`));
+    verboseLog(
+      options,
+      chalk.green(`✅ LLM verification complete: ${verifiedComments.length}/${candidatesArray.length} comments verified.`)
+    );
 
     // --- Step 4: Filtering and Formatting (same as before) ---
     let filteredComments = verifiedComments;
     if (isTestFile) {
-      console.log(chalk.blue('🧪 Applying test file filtering - prioritizing test-related comments'));
+      verboseLog(options, chalk.blue('🧪 Applying test file filtering - prioritizing test-related comments'));
       filteredComments = filteredComments.filter((comment) => {
         const filePath = comment.file_path || '';
         const commentText = comment.comment_text || '';
@@ -780,7 +792,7 @@ export async function findRelevantPRComments(reviewFileContent, options = {}) {
         );
       });
     } else {
-      console.log(chalk.blue('📝 Applying non-test file filtering - excluding test-specific comments'));
+      verboseLog(options, chalk.blue('📝 Applying non-test file filtering - excluding test-specific comments'));
       filteredComments = filteredComments.filter((comment) => {
         const filePath = comment.file_path || '';
         const commentText = comment.comment_text || '';
@@ -810,7 +822,7 @@ export async function findRelevantPRComments(reviewFileContent, options = {}) {
       contentVerified: true,
     }));
 
-    console.log(chalk.green.bold(`\n🎉 Final results: ${formattedResults.length} relevant comments found.`));
+    verboseLog(options, chalk.green.bold(`\n🎉 Final results: ${formattedResults.length} relevant comments found.`));
     return formattedResults;
   } catch (error) {
     console.error(chalk.red(`Error in reverse hybrid search: ${error.message}`));

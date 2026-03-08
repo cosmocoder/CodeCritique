@@ -356,6 +356,14 @@ import { Internal } from './internal.js';
 - Handle errors gracefully with meaningful messages
 - Log errors with context
 
+### Logging
+
+- Use `verboseLog(options, ...)` from `src/utils/logging.js` for progress and informational diagnostics that should only appear in verbose mode
+- Use `debug(...)` only for developer-focused tracing that should require `DEBUG`
+- Use `console.warn(...)` and `console.error(...)` for warnings and errors that should always be surfaced
+- Avoid raw `console.log(...)` in normal code paths
+- When a function accepts logging-related options such as `verbose`, document them in JSDoc and pass them through to downstream helpers
+
 ### Async/Await
 
 - Prefer async/await over raw promises

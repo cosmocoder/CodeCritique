@@ -15,6 +15,7 @@
 import { Anthropic } from '@anthropic-ai/sdk';
 import chalk from 'chalk';
 import dotenv from 'dotenv';
+import { verboseLog } from './utils/logging.js';
 
 // Load env variables if present; do not enforce key at import time
 dotenv.config();
@@ -56,7 +57,7 @@ async function sendPromptToClaude(prompt, options = {}) {
   const { model = DEFAULT_MODEL, maxTokens = MAX_TOKENS, temperature = 0.7, system = '', jsonSchema = null, cacheTtl = '5m' } = options;
 
   try {
-    console.log(chalk.cyan('Sending prompt to Claude...'));
+    verboseLog(options, chalk.cyan('Sending prompt to Claude...'));
 
     const client = getAnthropicClient();
 
@@ -104,8 +105,8 @@ async function sendPromptToClaude(prompt, options = {}) {
     const response = await client.messages.create(requestParams);
 
     // Log response structure for debugging
-    console.log(chalk.gray(`  Response stop_reason: ${response.stop_reason}`));
-    console.log(chalk.gray(`  Response content blocks: ${response.content?.length || 0}`));
+    verboseLog(options, chalk.gray(`  Response stop_reason: ${response.stop_reason}`));
+    verboseLog(options, chalk.gray(`  Response content blocks: ${response.content?.length || 0}`));
 
     // Process response based on whether we used tool calling
     if (jsonSchema) {

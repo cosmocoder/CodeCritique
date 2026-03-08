@@ -77,6 +77,12 @@ vi.mock('./utils/language-detection.js', () => ({
 
 vi.mock('./utils/logging.js', () => ({
   debug: vi.fn(),
+  verboseLog: vi.fn((options, ...args) => {
+    if (typeof options === 'boolean' ? options : Boolean(options?.verbose)) {
+      console.log(...args);
+    }
+  }),
+  isVerboseEnabled: vi.fn((options) => Boolean(options?.verbose)),
 }));
 
 vi.mock('./utils/context-inference.js', () => ({
@@ -820,6 +826,23 @@ describe('rag-analyzer', () => {
   // ==========================================================================
 
   describe('verbose logging paths', () => {
+    it('should suppress context dump logs when not verbose', async () => {
+      mockEmbeddingsSystem.findSimilarCode.mockResolvedValue([{ path: '/example.js', content: 'code', similarity: 0.9 }]);
+      mockEmbeddingsSystem.findRelevantDocs.mockResolvedValue([
+        { path: '/docs/api.md', content: 'docs', similarity: 0.8, type: 'documentation-chunk', document_title: 'API' },
+      ]);
+      findRelevantPRComments.mockResolvedValue([createMockPRComment()]);
+      setupSuccessfulLLMResponse();
+
+      const result = await runAnalysis('/test/file.js');
+
+      expect(result.success).toBe(true);
+      const loggedMessages = console.log.mock.calls.flat().join('\n');
+      expect(loggedMessages).not.toContain('Guidelines Sent to LLM');
+      expect(loggedMessages).not.toContain('Checking for PR comments in prompt generation');
+      expect(loggedMessages).not.toContain('Received LLM response, attempting to parse');
+    });
+
     it('should log context information when verbose', async () => {
       mockEmbeddingsSystem.findSimilarCode.mockResolvedValue([{ path: '/example.js', content: 'code', similarity: 0.9 }]);
       mockEmbeddingsSystem.findRelevantDocs.mockResolvedValue([

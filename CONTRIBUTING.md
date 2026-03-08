@@ -139,6 +139,14 @@ src/
 - Handle errors gracefully with meaningful messages
 - Write self-documenting code with clear variable names
 
+### Logging
+
+- Use `verboseLog(options, ...)` from `src/utils/logging.js` for progress and informational diagnostics gated by verbose mode
+- Use `debug(...)` only for developer-focused tracing gated by `DEBUG`
+- Keep `console.warn(...)` and `console.error(...)` for warnings and errors that should always be shown
+- Avoid raw `console.log(...)` in normal code paths
+- Document logging-related options such as `verbose` in JSDoc and pass them through to downstream helpers
+
 ---
 
 ## Commit Conventions

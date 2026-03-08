@@ -12,6 +12,7 @@ import { runAnalysis, gatherUnifiedContextForPR } from './rag-analyzer.js';
 import { shouldProcessFile } from './utils/file-validation.js';
 import { findBaseBranch, getChangedLinesInfo, getFileContentFromGit } from './utils/git.js';
 import { detectFileType, detectLanguageFromExtension } from './utils/language-detection.js';
+import { verboseLog } from './utils/logging.js';
 import { shouldChunkPR, chunkPRFiles, combineChunkResults } from './utils/pr-chunking.js';
 
 /**
@@ -19,11 +20,12 @@ import { shouldChunkPR, chunkPRFiles, combineChunkResults } from './utils/pr-chu
  *
  * @param {string} filePath - Path to the file to review
  * @param {object} options - Review options
+ * @param {boolean} [options.verbose=false] - Enable verbose progress logging
  * @returns {Promise<object>} Review result object
  */
 async function reviewFile(filePath, options = {}) {
   try {
-    console.log(chalk.blue(`Reviewing file: ${filePath}`));
+    verboseLog(options, chalk.blue(`Reviewing file: ${filePath}`));
 
     // Analyze the file using the RAG analyzer
     const analyzeResult = await runAnalysis(filePath, options);
@@ -48,7 +50,7 @@ async function reviewFile(filePath, options = {}) {
 
       // Convert object results to array format expected by the output functions
       if (analyzeResult.results && !Array.isArray(analyzeResult.results)) {
-        console.log(chalk.blue('Converting results object to array format'));
+        verboseLog(options, chalk.blue('Converting results object to array format'));
 
         // Create a new array with one entry containing the object results
         const resultArray = [
@@ -86,14 +88,14 @@ async function reviewFile(filePath, options = {}) {
  *
  * @param {Array<string>} filePaths - Paths to the files to review
  * @param {Object} options - Review options (passed to each reviewFile call)
+ * @param {boolean} [options.verbose=false] - Enable verbose progress logging
+ * @param {number} [options.concurrency=3] - Maximum number of files to review in parallel
  * @returns {Promise<Object>} Aggregated review results { success: boolean, results: Array<Object>, message: string, error?: string }
  */
 async function reviewFiles(filePaths, options = {}) {
   try {
     const verbose = options.verbose || false;
-    if (verbose) {
-      console.log(chalk.blue(`Reviewing ${filePaths.length} files...`));
-    }
+    verboseLog(verbose, chalk.blue(`Reviewing ${filePaths.length} files...`));
 
     // Review files concurrently
     const results = [];
@@ -103,15 +105,12 @@ async function reviewFiles(filePaths, options = {}) {
     for (let i = 0; i < filePaths.length; i += concurrency) {
       const batch = filePaths.slice(i, i + concurrency);
 
-      if (verbose) {
-        console.log(
-          chalk.blue(
-            `Processing review batch ${Math.floor(i / concurrency) + 1}/${Math.ceil(filePaths.length / concurrency)} (${
-              batch.length
-            } files)`
-          )
-        );
-      }
+      verboseLog(
+        verbose,
+        chalk.blue(
+          `Processing review batch ${Math.floor(i / concurrency) + 1}/${Math.ceil(filePaths.length / concurrency)} (${batch.length} files)`
+        )
+      );
 
       // Pass options down to reviewFile
       const batchPromises = batch.map((filePath) => reviewFile(filePath, options));
@@ -137,7 +136,7 @@ async function reviewFiles(filePaths, options = {}) {
     let finalMessage = `Review completed for ${filePaths.length} files. `;
     finalMessage += `Success: ${successCount}, Skipped: ${skippedCount}, Errors: ${errorCount}.`;
 
-    console.log(chalk.green(finalMessage));
+    verboseLog(options, chalk.green(finalMessage));
 
     return {
       success: errorCount === 0,
@@ -161,14 +160,13 @@ async function reviewFiles(filePaths, options = {}) {
  *
  * @param {Array<string>} changedFilePaths - Array of file paths changed in the PR.
  * @param {Object} options - Review options (passed to reviewFiles).
+ * @param {boolean} [options.verbose=false] - Enable verbose progress logging
  * @returns {Promise<Object>} Aggregated review results.
  */
 async function reviewPullRequest(changedFilePaths, options = {}) {
   try {
     const verbose = options.verbose || false;
-    if (verbose) {
-      console.log(chalk.blue(`Reviewing ${changedFilePaths.length} changed files from PR...`));
-    }
+    verboseLog(verbose, chalk.blue(`Reviewing ${changedFilePaths.length} changed files from PR...`));
 
     // No longer filter files here, as new files in a different branch won't exist locally.
     // The downstream functions are responsible for fetching content from git.
@@ -176,7 +174,7 @@ async function reviewPullRequest(changedFilePaths, options = {}) {
 
     if (filesToReview.length === 0) {
       const message = 'No processable files found among the changed files provided for PR review.';
-      console.log(chalk.yellow(message));
+      verboseLog(options, chalk.yellow(message));
       return {
         success: true,
         message: message,
@@ -184,9 +182,7 @@ async function reviewPullRequest(changedFilePaths, options = {}) {
       };
     }
 
-    if (verbose) {
-      console.log(chalk.green(`Reviewing ${filesToReview.length} existing and processable changed files`));
-    }
+    verboseLog(verbose, chalk.green(`Reviewing ${filesToReview.length} existing and processable changed files`));
 
     // Use enhanced PR review with cross-file context
     return await reviewPullRequestWithCrossFileContext(filesToReview, options);
@@ -207,14 +203,18 @@ async function reviewPullRequest(changedFilePaths, options = {}) {
  *
  * @param {Array<string>} filesToReview - Array of file paths to review
  * @param {Object} options - Review options
+ * @param {boolean} [options.verbose=false] - Enable verbose progress logging
+ * @param {number} [options.concurrency=3] - Maximum number of fallback per-file reviews to run in parallel
+ * @param {string} [options.directory] - Working directory for git operations
+ * @param {string} [options.diffWith='HEAD'] - Branch or ref to compare against
+ * @param {string} [options.actualBranch] - Actual target branch used for content retrieval
+ * @param {boolean} [options.skipChunking=false] - Skip PR chunking, used internally for chunk review recursion
  * @returns {Promise<Object>} Aggregated review results
  */
 async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}) {
   try {
     const verbose = options.verbose || false;
-    if (verbose) {
-      console.log(chalk.blue(`Starting enhanced PR review with cross-file context for ${filesToReview.length} files...`));
-    }
+    verboseLog(verbose, chalk.blue(`Starting enhanced PR review with cross-file context for ${filesToReview.length} files...`));
 
     // Step 1: Get the base branch and collect diff info for all files in the PR
     const workingDir = options.directory ? path.resolve(options.directory) : process.cwd();
@@ -224,18 +224,14 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
     // Get the actual branch name from options passed from index.js
     const actualTargetBranch = options.actualBranch || targetBranch;
 
-    if (verbose) {
-      console.log(chalk.gray(`Base branch: ${baseBranch}, Target branch: ${targetBranch}`));
-    }
+    verboseLog(verbose, chalk.gray(`Base branch: ${baseBranch}, Target branch: ${targetBranch}`));
 
     const prFiles = [];
     for (const filePath of filesToReview) {
       try {
         // Check if the file should be processed before fetching its content from git
         if (!shouldProcessFile(filePath, '', options)) {
-          if (verbose) {
-            console.log(chalk.yellow(`Skipping file due to exclusion rules: ${path.basename(filePath)}`));
-          }
+          verboseLog(verbose, chalk.yellow(`Skipping file due to exclusion rules: ${path.basename(filePath)}`));
           continue;
         }
 
@@ -247,9 +243,7 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
         const diffInfo = getChangedLinesInfo(filePath, baseBranch, actualTargetBranch, workingDir);
 
         if (!diffInfo.hasChanges) {
-          if (verbose) {
-            console.log(chalk.yellow(`No changes detected in ${path.basename(filePath)}, skipping`));
-          }
+          verboseLog(verbose, chalk.yellow(`No changes detected in ${path.basename(filePath)}, skipping`));
           continue;
         }
 
@@ -275,7 +269,7 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
     }
 
     if (prFiles.length === 0) {
-      console.log(chalk.yellow('No files with changes found for review'));
+      verboseLog(options, chalk.yellow('No files with changes found for review'));
       return {
         success: true,
         results: [],
@@ -285,25 +279,22 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
 
     // Check if PR should be chunked based on size and complexity (skip if this is already a chunk)
     if (!options.skipChunking) {
-      const chunkingDecision = shouldChunkPR(prFiles);
-      if (verbose) {
-        console.log(chalk.blue(`PR size assessment: ${chunkingDecision.estimatedTokens} tokens, ${prFiles.length} files`));
-        if (chunkingDecision.shouldChunk) {
-          console.log(chalk.yellow(`Large PR detected - will chunk into ~${chunkingDecision.recommendedChunks} chunks`));
-        }
-      }
+      const chunkingDecision = shouldChunkPR(prFiles, options);
+      verboseLog(verbose, chalk.blue(`PR size assessment: ${chunkingDecision.estimatedTokens} tokens, ${prFiles.length} files`));
+      verboseLog(
+        verbose && chunkingDecision.shouldChunk,
+        chalk.yellow(`Large PR detected - will chunk into ~${chunkingDecision.recommendedChunks} chunks`)
+      );
 
       // If PR is too large, use chunked processing
       if (chunkingDecision.shouldChunk) {
-        console.log(chalk.blue(`🔄 Using chunked processing for large PR (${chunkingDecision.estimatedTokens} tokens)`));
+        verboseLog(options, chalk.blue(`🔄 Using chunked processing for large PR (${chunkingDecision.estimatedTokens} tokens)`));
         return await reviewLargePRInChunks(prFiles, options);
       }
     }
 
     // Step 2: Gather unified context for the entire PR (for regular-sized PRs)
-    if (verbose) {
-      console.log(chalk.blue(`Performing unified context retrieval for ${prFiles.length} PR files...`));
-    }
+    verboseLog(verbose, chalk.blue(`Performing unified context retrieval for ${prFiles.length} PR files...`));
     const {
       codeExamples: deduplicatedCodeExamples,
       guidelines: deduplicatedGuidelines,
@@ -311,13 +302,12 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
       customDocChunks: deduplicatedCustomDocChunks,
     } = await gatherUnifiedContextForPR(prFiles, options);
 
-    if (verbose) {
-      console.log(
-        chalk.green(
-          `De-duplicated context: ${deduplicatedCodeExamples.length} code examples, ${deduplicatedGuidelines.length} guidelines, ${deduplicatedPRComments.length} PR comments, ${deduplicatedCustomDocChunks.length} custom doc chunks`
-        )
-      );
-    }
+    verboseLog(
+      verbose,
+      chalk.green(
+        `De-duplicated context: ${deduplicatedCodeExamples.length} code examples, ${deduplicatedGuidelines.length} guidelines, ${deduplicatedPRComments.length} PR comments, ${deduplicatedCustomDocChunks.length} custom doc chunks`
+      )
+    );
 
     // Step 3: Create PR context summary for LLM
     const prContext = {
@@ -334,9 +324,7 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
     };
 
     // Step 4: Perform holistic PR review with all files and unified context
-    if (verbose) {
-      console.log(chalk.blue(`Performing holistic PR review for all ${prFiles.length} files...`));
-    }
+    verboseLog(verbose, chalk.blue(`Performing holistic PR review for all ${prFiles.length} files...`));
 
     try {
       // Create a comprehensive review context with all files and their diffs
@@ -391,15 +379,15 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
         for (const key of possibleKeys) {
           if (holisticResult?.results?.fileSpecificIssues?.[key]) {
             fileIssues = holisticResult.results.fileSpecificIssues[key];
-            console.log(chalk.green(`✅ Found ${fileIssues.length} issues for ${baseName} using key: "${key}"`));
+            verboseLog(options, chalk.green(`✅ Found ${fileIssues.length} issues for ${baseName} using key: "${key}"`));
             break;
           }
         }
 
-        console.log(chalk.gray(`🔍 Mapping issues for ${file.filePath}:`));
-        console.log(chalk.gray(`  - Relative path: "${relativePath}"`));
-        console.log(chalk.gray(`  - Tried keys: ${possibleKeys.map((k) => `"${k}"`).join(', ')}`));
-        console.log(chalk.gray(`  - Final issues: ${fileIssues.length}`));
+        verboseLog(options, chalk.gray(`🔍 Mapping issues for ${file.filePath}:`));
+        verboseLog(options, chalk.gray(`  - Relative path: "${relativePath}"`));
+        verboseLog(options, chalk.gray(`  - Tried keys: ${possibleKeys.map((k) => `"${k}"`).join(', ')}`));
+        verboseLog(options, chalk.gray(`  - Final issues: ${fileIssues.length}`));
 
         return {
           success: true,
@@ -445,9 +433,7 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
       console.error(chalk.red(`Error in holistic PR review: ${error.message}`));
 
       // Fallback to individual file review if holistic review fails
-      if (verbose) {
-        console.log(chalk.yellow(`Falling back to individual file reviews...`));
-      }
+      verboseLog(verbose, chalk.yellow(`Falling back to individual file reviews...`));
 
       const results = [];
       const concurrency = options.concurrency || 3;
@@ -524,26 +510,27 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
  * Reviews a large PR by splitting it into manageable chunks and processing them in parallel
  * @param {Array} prFiles - Array of PR files with diff content
  * @param {Object} options - Review options
+ * @param {boolean} [options.verbose=false] - Enable verbose progress logging
  * @returns {Promise<Object>} Combined review results
  */
 async function reviewLargePRInChunks(prFiles, options) {
-  console.log(chalk.blue(`🔄 Large PR detected: ${prFiles.length} files. Splitting into chunks...`));
+  verboseLog(options, chalk.blue(`🔄 Large PR detected: ${prFiles.length} files. Splitting into chunks...`));
 
   // Step 1: Gather shared context once for all chunks
-  console.log(chalk.cyan('📚 Gathering shared context for entire PR...'));
+  verboseLog(options, chalk.cyan('📚 Gathering shared context for entire PR...'));
   const sharedContext = await gatherUnifiedContextForPR(prFiles, options);
 
   // Step 2: Split PR into manageable chunks
   // Each chunk includes both diff AND full file content, plus ~25k context overhead
   const chunks = chunkPRFiles(prFiles, 35000); // Conservative limit accounting for context overhead
-  console.log(chalk.green(`✂️ Split PR into ${chunks.length} chunks`));
+  verboseLog(options, chalk.green(`✂️ Split PR into ${chunks.length} chunks`));
 
   chunks.forEach((chunk, i) => {
-    console.log(chalk.gray(`  Chunk ${i + 1}: ${chunk.files.length} files (~${chunk.totalTokens} tokens)`));
+    verboseLog(options, chalk.gray(`  Chunk ${i + 1}: ${chunk.files.length} files (~${chunk.totalTokens} tokens)`));
   });
 
   // Step 3: Process chunks in parallel
-  console.log(chalk.blue('🔄 Processing chunks in parallel...'));
+  verboseLog(options, chalk.blue('🔄 Processing chunks in parallel...'));
   const settledChunkResults = await Promise.allSettled(
     chunks.map((chunk, index) => reviewPRChunk(chunk, sharedContext, options, index + 1, chunks.length))
   );
@@ -568,8 +555,8 @@ async function reviewLargePRInChunks(prFiles, options) {
   });
 
   // Step 4: Combine results
-  console.log(chalk.blue('🔗 Combining chunk results...'));
-  return combineChunkResults(chunkResults, prFiles.length);
+  verboseLog(options, chalk.blue('🔗 Combining chunk results...'));
+  return combineChunkResults(chunkResults, prFiles.length, options);
 }
 
 /**
@@ -577,12 +564,13 @@ async function reviewLargePRInChunks(prFiles, options) {
  * @param {Object} chunk - Chunk object with files array
  * @param {Object} sharedContext - Pre-gathered shared context
  * @param {Object} options - Review options
+ * @param {boolean} [options.verbose=false] - Enable verbose progress logging
  * @param {number} chunkNumber - Current chunk number
  * @param {number} totalChunks - Total number of chunks
  * @returns {Promise<Object>} Chunk review results
  */
 async function reviewPRChunk(chunk, sharedContext, options, chunkNumber, totalChunks) {
-  console.log(chalk.cyan(`📝 Reviewing chunk ${chunkNumber}/${totalChunks} (${chunk.files.length} files)...`));
+  verboseLog(options, chalk.cyan(`📝 Reviewing chunk ${chunkNumber}/${totalChunks} (${chunk.files.length} files)...`));
 
   // Create chunk-specific options
   const chunkOptions = {

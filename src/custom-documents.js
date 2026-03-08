@@ -18,7 +18,7 @@ import { CacheManager } from './embeddings/cache-manager.js';
 import { EmbeddingError, ValidationError } from './embeddings/errors.js';
 import { ModelManager } from './embeddings/model-manager.js';
 import { calculateCosineSimilarity, calculatePathSimilarity } from './embeddings/similarity-calculator.js';
-import { debug } from './utils/logging.js';
+import { debug, verboseLog } from './utils/logging.js';
 import { slugify } from './utils/string-utils.js';
 
 /**
@@ -140,7 +140,7 @@ export class CustomDocumentProcessor {
       this.performanceMetrics.averageChunkSize = chunks.reduce((sum, chunk) => sum + chunk.content.length, 0) / chunks.length;
       this.performanceMetrics.processingTime += Date.now() - startTime;
 
-      console.log(chalk.gray(`  Chunked document "${documentTitle}" into ${chunks.length} chunks`));
+      verboseLog({}, chalk.gray(`  Chunked document "${documentTitle}" into ${chunks.length} chunks`));
       return chunks;
     } catch (error) {
       console.error(chalk.red(`Error chunking document: ${error.message}`));
@@ -159,18 +159,18 @@ export class CustomDocumentProcessor {
 
     try {
       if (!customDocs || customDocs.length === 0) {
-        console.log(chalk.gray('No custom documents to process'));
+        verboseLog({}, chalk.gray('No custom documents to process'));
         return [];
       }
 
-      console.log(chalk.cyan(`Processing ${customDocs.length} custom documents into chunks...`));
+      verboseLog({}, chalk.cyan(`Processing ${customDocs.length} custom documents into chunks...`));
 
       const allChunks = [];
       let totalBatchAttempts = 0;
       let successfulBatches = 0;
 
       for (const doc of customDocs) {
-        console.log(chalk.gray(`  Processing document: ${doc.title}`));
+        verboseLog({}, chalk.gray(`  Processing document: ${doc.title}`));
 
         // Chunk the document
         const chunks = this.chunkDocument(doc);
@@ -205,12 +205,12 @@ export class CustomDocumentProcessor {
           const validChunks = chunksWithEmbeddings.filter((chunk) => chunk !== null);
           allChunks.push(...validChunks);
 
-          console.log(chalk.gray(`    Generated embeddings for ${validChunks.length}/${chunks.length} chunks`));
+          verboseLog({}, chalk.gray(`    Generated embeddings for ${validChunks.length}/${chunks.length} chunks`));
           this.performanceMetrics.embeddingsCalculated += validChunks.length;
         } catch (error) {
           console.error(chalk.red(`Error in batch embedding generation for document ${doc.title}: ${error.message}`));
           // Fallback to individual processing for this document
-          console.log(chalk.yellow(`    Falling back to individual processing for ${doc.title}`));
+          verboseLog({}, chalk.yellow(`    Falling back to individual processing for ${doc.title}`));
 
           const chunksWithEmbeddings = await Promise.all(
             chunks.map(async (chunk) => {
@@ -235,7 +235,7 @@ export class CustomDocumentProcessor {
           const validChunks = chunksWithEmbeddings.filter((chunk) => chunk !== null);
           allChunks.push(...validChunks);
 
-          console.log(chalk.gray(`    Generated embeddings for ${validChunks.length}/${chunks.length} chunks (fallback)`));
+          verboseLog({}, chalk.gray(`    Generated embeddings for ${validChunks.length}/${chunks.length} chunks (fallback)`));
         }
       }
 
@@ -252,7 +252,7 @@ export class CustomDocumentProcessor {
       this.performanceMetrics.documentsProcessed += customDocs.length;
       this.performanceMetrics.processingTime += Date.now() - startTime;
 
-      console.log(chalk.green(`Successfully processed ${allChunks.length} custom document chunks (${Date.now() - startTime}ms)`));
+      verboseLog({}, chalk.green(`Successfully processed ${allChunks.length} custom document chunks (${Date.now() - startTime}ms)`));
       return allChunks;
     } catch (error) {
       console.error(chalk.red(`Error processing custom documents: ${error.message}`));
@@ -285,11 +285,11 @@ export class CustomDocumentProcessor {
       }
 
       if (!chunks || chunks.length === 0) {
-        console.log(chalk.gray('No custom document chunks available for search'));
+        verboseLog({}, chalk.gray('No custom document chunks available for search'));
         return [];
       }
 
-      console.log(chalk.cyan(`Searching ${chunks.length} custom document chunks...`));
+      verboseLog({}, chalk.cyan(`Searching ${chunks.length} custom document chunks...`));
 
       // OPTIMIZATION: Use pre-computed query embedding if available
       let queryEmbedding = precomputedQueryEmbedding;
@@ -319,7 +319,7 @@ export class CustomDocumentProcessor {
         filteredResults = filteredResults.slice(0, limit);
       }
 
-      console.log(chalk.green(`Found ${filteredResults.length} relevant custom document chunks (${Date.now() - startTime}ms)`));
+      verboseLog({}, chalk.green(`Found ${filteredResults.length} relevant custom document chunks (${Date.now() - startTime}ms)`));
 
       // Log top results for debugging
       if (filteredResults.length > 0) {
@@ -371,7 +371,7 @@ export class CustomDocumentProcessor {
    * @private
    */
   async _applyParallelReranking(filteredResults, queryText, queryContextForReranking, queryFilePath, queryEmbedding) {
-    console.log(chalk.cyan('Applying optimized parallel contextual reranking to custom document chunks...'));
+    verboseLog({}, chalk.cyan('Applying optimized parallel contextual reranking to custom document chunks...'));
 
     const WEIGHT_INITIAL_SIM = 0.4;
     const WEIGHT_DOCUMENT_TITLE_MATCH = 0.2;
@@ -466,7 +466,7 @@ export class CustomDocumentProcessor {
     // Wait for all reranking calculations to complete in parallel
     await Promise.all(rerankingPromises);
 
-    console.log(chalk.cyan(`Parallel reranking completed for ${filteredResults.length} chunks`));
+    verboseLog({}, chalk.cyan(`Parallel reranking completed for ${filteredResults.length} chunks`));
 
     // Log debug info for first few results
     for (let i = 0; i < Math.min(3, filteredResults.length); i++) {
@@ -521,7 +521,7 @@ export class CustomDocumentProcessor {
       const resolvedProjectPath = path.resolve(projectPath);
       this.customDocumentChunks.delete(resolvedProjectPath);
       this.cacheManager.customDocumentChunks.delete(resolvedProjectPath);
-      console.log(chalk.green(`Cleared custom document chunks for project: ${resolvedProjectPath}`));
+      verboseLog({}, chalk.green(`Cleared custom document chunks for project: ${resolvedProjectPath}`));
     } catch (error) {
       console.error(chalk.red(`Error clearing project chunks: ${error.message}`));
     }
@@ -561,7 +561,7 @@ export class CustomDocumentProcessor {
   clearCaches() {
     this.h1EmbeddingCache.clear();
     this.customDocumentChunks.clear();
-    console.log(chalk.green('CustomDocumentProcessor caches cleared'));
+    verboseLog({}, chalk.green('CustomDocumentProcessor caches cleared'));
   }
 
   /**
@@ -589,7 +589,7 @@ export class CustomDocumentProcessor {
         processingTime: 0,
       };
 
-      console.log(chalk.green('CustomDocumentProcessor cleanup complete'));
+      verboseLog({}, chalk.green('CustomDocumentProcessor cleanup complete'));
     } finally {
       this.cleaningUp = false;
     }

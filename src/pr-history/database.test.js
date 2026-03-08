@@ -196,7 +196,7 @@ describe('PR History Database', () => {
       const result = await storePRCommentsBatch([createValidComment()]);
       expect(result).toBe(expectedResult);
       if (errorMessage === 'legacy format') {
-        expect(console.log).toHaveBeenCalledWith(expect.stringContaining('legacy index format'));
+        expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining('legacy index format'));
       }
     });
 
@@ -277,7 +277,7 @@ describe('PR History Database', () => {
     it('should filter by repository when provided', async () => {
       mockTable.countRows.mockResolvedValue(0);
       await getPRCommentsStats('owner/repo');
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('repository'));
+      expect(mockTable.countRows).toHaveBeenCalledWith(expect.stringContaining("repository = 'owner/repo'"));
     });
 
     it.each([

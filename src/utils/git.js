@@ -9,6 +9,7 @@ import { execSync } from 'child_process';
 import path from 'path';
 import chalk from 'chalk';
 import { execGitSafe } from './command.js';
+import { verboseLog } from './logging.js';
 
 /**
  * Check if a git branch exists locally
@@ -47,19 +48,19 @@ export function ensureBranchExists(branchName, workingDir = process.cwd()) {
   try {
     // Check if branch exists locally
     if (checkBranchExists(branchName, workingDir)) {
-      console.log(chalk.gray(`Branch '${branchName}' exists locally`));
+      verboseLog({}, chalk.gray(`Branch '${branchName}' exists locally`));
       return;
     }
 
-    console.log(chalk.yellow(`Branch '${branchName}' not found locally, attempting to fetch...`));
+    verboseLog({}, chalk.yellow(`Branch '${branchName}' not found locally, attempting to fetch...`));
 
     // Try to fetch the branch from origin
     try {
       execGitSafe('git fetch', ['origin', `${branchName}:${branchName}`], { stdio: 'pipe', cwd: workingDir });
-      console.log(chalk.green(`Successfully fetched branch '${branchName}' from origin`));
+      verboseLog({}, chalk.green(`Successfully fetched branch '${branchName}' from origin`));
     } catch {
       // If direct fetch fails, try fetching all branches and then checking
-      console.log(chalk.yellow(`Direct fetch failed, trying to fetch all branches...`));
+      verboseLog({}, chalk.yellow(`Direct fetch failed, trying to fetch all branches...`));
       execSync('git fetch origin', { stdio: 'pipe', cwd: workingDir });
 
       // Check if branch exists on remote
@@ -67,7 +68,7 @@ export function ensureBranchExists(branchName, workingDir = process.cwd()) {
         execGitSafe('git show-ref', ['--verify', '--quiet', `refs/remotes/origin/${branchName}`], { cwd: workingDir });
         // Create local tracking branch without switching working tree.
         execGitSafe('git branch', ['--track', branchName, `origin/${branchName}`], { stdio: 'pipe', cwd: workingDir });
-        console.log(chalk.green(`Successfully created local branch '${branchName}' tracking origin/${branchName}`));
+        verboseLog({}, chalk.green(`Successfully created local branch '${branchName}' tracking origin/${branchName}`));
       } catch {
         throw new Error(`Branch '${branchName}' not found locally or on remote origin`);
       }

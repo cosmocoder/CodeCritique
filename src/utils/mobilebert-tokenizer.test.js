@@ -106,7 +106,6 @@ describe('mobilebert-tokenizer', () => {
       await cleanupTokenizer();
 
       expect(mockTokenizer.dispose).toHaveBeenCalled();
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('cleaned up'));
     });
 
     it('should handle missing dispose method gracefully', async () => {
@@ -117,7 +116,7 @@ describe('mobilebert-tokenizer', () => {
       await cleanupTokenizer();
 
       // Should not throw
-      expect(console.log).toHaveBeenCalled();
+      expect(mockTokenizer.encode).toHaveBeenCalled();
     });
 
     it('should handle cleanup errors gracefully', async () => {

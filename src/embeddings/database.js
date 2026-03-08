@@ -23,7 +23,7 @@ import path from 'node:path';
 import * as lancedb from '@lancedb/lancedb';
 import { Field, FixedSizeList, Float32, Int32, Schema, Utf8 } from 'apache-arrow';
 import chalk from 'chalk';
-import { debug } from '../utils/logging.js';
+import { debug, verboseLog } from '../utils/logging.js';
 import { EMBEDDING_DIMENSIONS, TABLE_NAMES } from './constants.js';
 import { LANCEDB_PATH } from './constants.js';
 import { createDatabaseError, ERROR_CODES } from './errors.js';
@@ -69,12 +69,12 @@ export class DatabaseManager {
    */
   async getDBConnection() {
     if (!this.dbConnection) {
-      console.log(chalk.blue(`Initializing DB connection. Target Path: ${this.dbPath}`));
+      verboseLog({}, chalk.blue(`Initializing DB connection. Target Path: ${this.dbPath}`));
       if (!fs.existsSync(this.dbPath)) {
         fs.mkdirSync(this.dbPath, { recursive: true });
       }
       this.dbConnection = await lancedb.connect(this.dbPath);
-      console.log(chalk.green('LanceDB connected.'));
+      verboseLog({}, chalk.green('LanceDB connected.'));
     }
     return this.dbConnection;
   }
@@ -104,12 +104,12 @@ export class DatabaseManager {
    */
   async closeConnection() {
     if (this.dbConnection) {
-      console.log('Closing LanceDB connection...');
+      verboseLog({}, 'Closing LanceDB connection...');
       await this.dbConnection.close();
       this.dbConnection = null;
       this.tablesInitialized = false;
       this.tableInitializationPromise = null;
-      console.log('LanceDB connection closed.');
+      verboseLog({}, 'LanceDB connection closed.');
     }
   }
 
@@ -135,11 +135,11 @@ export class DatabaseManager {
     // Start initialization and store the promise
     this.tableInitializationPromise = (async () => {
       try {
-        console.log(chalk.blue('Initializing database tables and indices...'));
+        verboseLog({}, chalk.blue('Initializing database tables and indices...'));
         const db = await this.getDBConnection();
         await this.ensureTablesExist(db);
         this.tablesInitialized = true;
-        console.log(chalk.green('Database tables and indices initialized successfully.'));
+        verboseLog({}, chalk.green('Database tables and indices initialized successfully.'));
       } catch (error) {
         this.tablesInitialized = false;
         console.error(chalk.red('Failed to initialize database tables:'), error);
@@ -200,18 +200,18 @@ export class DatabaseManager {
       let fileTable, documentChunkTable, prCommentsTable;
 
       if (!tableNames.includes(this.fileEmbeddingsTable)) {
-        console.log(chalk.yellow(`Creating ${this.fileEmbeddingsTable} table with optimized schema...`));
+        verboseLog({}, chalk.yellow(`Creating ${this.fileEmbeddingsTable} table with optimized schema...`));
         fileTable = await db.createEmptyTable(this.fileEmbeddingsTable, fileSchema, { mode: 'create' });
-        console.log(chalk.green(`Created ${this.fileEmbeddingsTable} table.`));
+        verboseLog({}, chalk.green(`Created ${this.fileEmbeddingsTable} table.`));
       } else {
         fileTable = await db.openTable(this.fileEmbeddingsTable);
         await this._checkSchemaCompatibility(fileTable, this.fileEmbeddingsTable, 'project_path');
       }
 
       if (!tableNames.includes(this.documentChunkTable)) {
-        console.log(chalk.yellow(`Creating ${this.documentChunkTable} table with optimized schema...`));
+        verboseLog({}, chalk.yellow(`Creating ${this.documentChunkTable} table with optimized schema...`));
         documentChunkTable = await db.createEmptyTable(this.documentChunkTable, documentChunkSchema, { mode: 'create' });
-        console.log(chalk.green(`Created ${this.documentChunkTable} table.`));
+        verboseLog({}, chalk.green(`Created ${this.documentChunkTable} table.`));
       } else {
         documentChunkTable = await db.openTable(this.documentChunkTable);
         await this._checkSchemaCompatibility(documentChunkTable, this.documentChunkTable, 'project_path');
@@ -219,9 +219,9 @@ export class DatabaseManager {
 
       // Create PR comments table
       if (!tableNames.includes(this.prCommentsTable)) {
-        console.log(chalk.yellow(`Creating ${this.prCommentsTable} table with optimized schema...`));
+        verboseLog({}, chalk.yellow(`Creating ${this.prCommentsTable} table with optimized schema...`));
         prCommentsTable = await db.createEmptyTable(this.prCommentsTable, prCommentsSchema, { mode: 'create' });
-        console.log(chalk.green(`Created ${this.prCommentsTable} table.`));
+        verboseLog({}, chalk.green(`Created ${this.prCommentsTable} table.`));
       } else {
         prCommentsTable = await db.openTable(this.prCommentsTable);
       }
@@ -331,17 +331,18 @@ export class DatabaseManager {
   async createAdaptiveVectorIndexes(table, tableName, vectorField = 'vector') {
     try {
       const rowCount = await table.countRows();
-      console.log(chalk.blue(`[${tableName}] Row count: ${rowCount}`));
+      verboseLog({}, chalk.blue(`[${tableName}] Row count: ${rowCount}`));
 
       if (rowCount < 100) {
-        console.log(chalk.blue(`[${tableName}] Skipping indexing for small dataset (${rowCount} rows). Using exact search.`));
+        verboseLog({}, chalk.blue(`[${tableName}] Skipping indexing for small dataset (${rowCount} rows). Using exact search.`));
         return { indexType: 'exact', rowCount };
       } else if (rowCount < 1000) {
-        console.log(chalk.blue(`[${tableName}] Using exact search for small dataset (${rowCount} rows) - no index needed`));
+        verboseLog({}, chalk.blue(`[${tableName}] Using exact search for small dataset (${rowCount} rows) - no index needed`));
         return { indexType: 'exact', rowCount };
       } else if (rowCount < 10000) {
         const numPartitions = Math.max(Math.floor(Math.sqrt(rowCount / 50)), 2);
-        console.log(
+        verboseLog(
+          {},
           chalk.blue(`[${tableName}] Creating/updating IVF-Flat index for medium dataset (${rowCount} rows, ${numPartitions} partitions)`)
         );
         await table.createIndex(vectorField, {
@@ -352,7 +353,8 @@ export class DatabaseManager {
       } else {
         const numPartitions = Math.max(Math.floor(Math.sqrt(rowCount / 100)), 8);
         const numSubVectors = Math.floor(this.embeddingDimensions / 4);
-        console.log(
+        verboseLog(
+          {},
           chalk.blue(`[${tableName}] Creating/updating IVF-PQ index for large dataset (${rowCount} rows, ${numPartitions} partitions)`)
         );
         await table.createIndex(vectorField, {
@@ -367,7 +369,7 @@ export class DatabaseManager {
       }
     } catch (error) {
       if (error.message.includes('already exists')) {
-        console.log(chalk.green(`[${tableName}] Index already up-to-date.`));
+        verboseLog({}, chalk.green(`[${tableName}] Index already up-to-date.`));
         return { indexType: 'existing' };
       }
       console.warn(chalk.yellow(`[${tableName}] Index creation/update failed: ${error.message}. Falling back to exact search.`));
@@ -391,7 +393,7 @@ export class DatabaseManager {
 
     try {
       await this.closeConnection();
-      console.log(chalk.green('Database resources cleaned up.'));
+      verboseLog({}, chalk.green('Database resources cleaned up.'));
     } catch (error) {
       console.error(`Error during database cleanup: ${error.message}`);
     } finally {
@@ -406,11 +408,11 @@ export class DatabaseManager {
   async clearAllEmbeddings() {
     let db = null;
     try {
-      console.log(chalk.cyan('Clearing ALL embeddings by dropping tables...'));
-      console.log(chalk.red('WARNING: This will affect all projects on this machine!'));
+      verboseLog({}, chalk.cyan('Clearing ALL embeddings by dropping tables...'));
+      verboseLog({}, chalk.red('WARNING: This will affect all projects on this machine!'));
 
       if (!fs.existsSync(this.dbPath)) {
-        console.log(chalk.yellow('LanceDB directory does not exist, nothing to clear.'));
+        verboseLog({}, chalk.yellow('LanceDB directory does not exist, nothing to clear.'));
         return true;
       }
 
@@ -420,20 +422,20 @@ export class DatabaseManager {
 
       for (const tableName of [this.fileEmbeddingsTable, this.documentChunkTable, this.prCommentsTable]) {
         if (tableNames.includes(tableName)) {
-          console.log(chalk.yellow(`Dropping table ${tableName}...`));
+          verboseLog({}, chalk.yellow(`Dropping table ${tableName}...`));
           await db.dropTable(tableName);
-          console.log(chalk.green(`Table ${tableName} dropped.`));
+          verboseLog({}, chalk.green(`Table ${tableName} dropped.`));
           droppedCount++;
         } else {
-          console.log(chalk.yellow(`Table ${tableName} does not exist.`));
+          verboseLog({}, chalk.yellow(`Table ${tableName} does not exist.`));
         }
       }
 
       if (droppedCount > 0) {
-        console.log(chalk.green('All embedding tables have been dropped.'));
-        console.log(chalk.yellow('Run the embedding generation process again to recreate tables.'));
+        verboseLog({}, chalk.green('All embedding tables have been dropped.'));
+        verboseLog({}, chalk.yellow('Run the embedding generation process again to recreate tables.'));
       } else {
-        console.log(chalk.green('No embedding tables found to drop.'));
+        verboseLog({}, chalk.green('No embedding tables found to drop.'));
       }
 
       // Reset connection state
@@ -478,10 +480,10 @@ export class DatabaseManager {
         throw new Error(`Project path too generic: ${resolvedProjectPath}. For safety, project must be at least 3 levels deep.`);
       }
 
-      console.log(chalk.cyan(`Clearing embeddings for project: ${resolvedProjectPath} (${projectName})`));
+      verboseLog({}, chalk.cyan(`Clearing embeddings for project: ${resolvedProjectPath} (${projectName})`));
 
       if (!fs.existsSync(this.dbPath)) {
-        console.log(chalk.yellow('LanceDB directory does not exist, nothing to clear.'));
+        verboseLog({}, chalk.yellow('LanceDB directory does not exist, nothing to clear.'));
         return true;
       }
 
@@ -520,12 +522,12 @@ export class DatabaseManager {
       // This embeddings:clear command handles file embeddings, document embeddings, and project summaries
 
       if (deletedCount > 0) {
-        console.log(chalk.green(`Successfully cleared ${deletedCount} embeddings for project: ${resolvedProjectPath}`));
+        verboseLog({}, chalk.green(`Successfully cleared ${deletedCount} embeddings for project: ${resolvedProjectPath}`));
 
         // Optimize tables after cleanup to maintain performance
         await this._optimizeTablesAfterCleanup(db, tableNames);
       } else {
-        console.log(chalk.yellow(`No embeddings found for project: ${resolvedProjectPath}`));
+        verboseLog({}, chalk.yellow(`No embeddings found for project: ${resolvedProjectPath}`));
       }
 
       return true;
@@ -560,8 +562,8 @@ export class DatabaseManager {
       if (currentSchema && currentSchema.fields) {
         const hasRequiredField = currentSchema.fields.some((field) => field.name === requiredField);
         if (!hasRequiredField) {
-          console.log(chalk.yellow(`Table ${tableName} has old schema without ${requiredField}. Migration needed.`));
-          console.log(chalk.yellow(`Please clear embeddings and regenerate them to use the new schema with project isolation.`));
+          console.warn(chalk.yellow(`Table ${tableName} has old schema without ${requiredField}. Migration needed.`));
+          console.warn(chalk.yellow(`Please clear embeddings and regenerate them to use the new schema with project isolation.`));
         }
       }
     } catch (schemaError) {
@@ -586,14 +588,14 @@ export class DatabaseManager {
             `Table ${tableName} does not have project_path field. Cannot perform project-specific cleanup. Please regenerate embeddings to use the new schema with project isolation.`
           );
         }
-        console.log(chalk.green(`✓ Table ${tableName} has project_path field for proper isolation`));
+        verboseLog({}, chalk.green(`✓ Table ${tableName} has project_path field for proper isolation`));
       } else {
-        console.log(chalk.yellow(`Table ${tableName} has no readable schema, skipping validation`));
+        console.warn(chalk.yellow(`Table ${tableName} has no readable schema, skipping validation`));
       }
     } catch (schemaError) {
       // If we can't read the schema, it might be because the table is empty or doesn't exist
       // In this case, we should just warn and continue
-      console.log(chalk.yellow(`Warning: Could not validate schema for ${tableName}: ${schemaError.message}`));
+      console.warn(chalk.yellow(`Warning: Could not validate schema for ${tableName}: ${schemaError.message}`));
     }
   }
 
@@ -603,15 +605,15 @@ export class DatabaseManager {
    * @private
    */
   async _createFTSIndexes(tableSpecs) {
-    console.log(chalk.blue('Creating native FTS indexes...'));
+    verboseLog({}, chalk.blue('Creating native FTS indexes...'));
 
     for (const [table, tableName, contentField] of tableSpecs) {
       try {
         await table.createIndex(contentField, { config: lancedb.Index.fts(), replace: false });
-        console.log(chalk.green(`FTS index created/updated for ${tableName}`));
+        verboseLog({}, chalk.green(`FTS index created/updated for ${tableName}`));
       } catch (error) {
         if (error.message.toLowerCase().includes('already exists')) {
-          console.log(chalk.green(`FTS index already exists for ${tableName}.`));
+          verboseLog({}, chalk.green(`FTS index already exists for ${tableName}.`));
         } else {
           console.warn(chalk.yellow(`FTS index warning for ${tableName}: ${error.message}`));
         }
@@ -625,7 +627,7 @@ export class DatabaseManager {
    * @private
    */
   async _createVectorIndexes(tableSpecs) {
-    console.log(chalk.blue('Creating adaptive vector indexes...'));
+    verboseLog({}, chalk.blue('Creating adaptive vector indexes...'));
 
     const indexResults = [];
     for (const [table, tableName, vectorField] of tableSpecs) {
@@ -633,7 +635,7 @@ export class DatabaseManager {
       indexResults.push(indexInfo);
     }
 
-    console.log(chalk.green(`Indexing complete - ${JSON.stringify(indexResults)}`));
+    verboseLog({}, chalk.green(`Indexing complete - ${JSON.stringify(indexResults)}`));
   }
 
   /**
@@ -642,13 +644,13 @@ export class DatabaseManager {
    * @private
    */
   async _optimizeTables(tableSpecs) {
-    console.log(chalk.blue('Optimizing tables to sync indices with data...'));
+    verboseLog({}, chalk.blue('Optimizing tables to sync indices with data...'));
 
     for (const [table, tableName] of tableSpecs) {
       try {
-        console.log(chalk.blue(`Optimizing table: ${tableName}`));
+        verboseLog({}, chalk.blue(`Optimizing table: ${tableName}`));
         await table.optimize();
-        console.log(chalk.green(`✓ Table ${tableName} optimized successfully`));
+        verboseLog({}, chalk.green(`✓ Table ${tableName} optimized successfully`));
       } catch (error) {
         // Handle legacy FTS index upgrade issues in v0.22.2
         if (error.message && error.message.includes('legacy format')) {
@@ -663,7 +665,7 @@ export class DatabaseManager {
       }
     }
 
-    console.log(chalk.green('Table optimization complete'));
+    verboseLog({}, chalk.green('Table optimization complete'));
   }
 
   /**
@@ -704,7 +706,7 @@ export class DatabaseManager {
     });
 
     if (projectRecords.length > 0) {
-      console.log(chalk.blue(`Found ${projectRecords.length} ${tableName} records for this project`));
+      verboseLog({}, chalk.blue(`Found ${projectRecords.length} ${tableName} records for this project`));
 
       let deletedCount = 0;
       for (const record of projectRecords) {
@@ -716,10 +718,10 @@ export class DatabaseManager {
         }
       }
 
-      console.log(chalk.green(`Deleted ${deletedCount} ${tableName} records for this project`));
+      verboseLog({}, chalk.green(`Deleted ${deletedCount} ${tableName} records for this project`));
       return deletedCount;
     } else {
-      console.log(chalk.yellow(`No ${tableName} records found for this project`));
+      verboseLog({}, chalk.yellow(`No ${tableName} records found for this project`));
       return 0;
     }
   }
@@ -732,11 +734,11 @@ export class DatabaseManager {
     try {
       const table = await this.getTable(this.prCommentsTable);
       if (table) {
-        console.log(chalk.blue(`Updating vector index for ${this.prCommentsTable}...`));
+        verboseLog({}, chalk.blue(`Updating vector index for ${this.prCommentsTable}...`));
         await this.createAdaptiveVectorIndexes(table, this.prCommentsTable, 'combined_embedding');
 
         // Optimize table to sync indices with data (conditional due to legacy index issues)
-        console.log(chalk.blue(`Optimizing ${this.prCommentsTable} table...`));
+        verboseLog({}, chalk.blue(`Optimizing ${this.prCommentsTable} table...`));
         try {
           await table.optimize();
         } catch (optimizeError) {
@@ -747,7 +749,7 @@ export class DatabaseManager {
           }
         }
 
-        console.log(chalk.green(`Vector index for ${this.prCommentsTable} updated and optimized.`));
+        verboseLog({}, chalk.green(`Vector index for ${this.prCommentsTable} updated and optimized.`));
       }
     } catch (error) {
       console.error(chalk.red(`Error updating PR comments index: ${error.message}`));
@@ -807,7 +809,7 @@ export class DatabaseManager {
       // Optimize table to sync indices with data (conditional due to legacy index issues)
       try {
         await table.optimize();
-        console.log(chalk.blue(`✓ Project summaries table optimized`));
+        verboseLog({}, chalk.blue(`✓ Project summaries table optimized`));
       } catch (optimizeError) {
         if (optimizeError.message && optimizeError.message.includes('legacy format')) {
           console.warn(chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
@@ -816,7 +818,7 @@ export class DatabaseManager {
         }
       }
 
-      console.log(chalk.green(`✅ Project summary stored for: ${resolvedProjectPath}`));
+      verboseLog({}, chalk.green(`✅ Project summary stored for: ${resolvedProjectPath}`));
       return true;
     } catch (error) {
       console.error(chalk.red(`Error storing project summary: ${error.message}`));
@@ -879,7 +881,7 @@ export class DatabaseManager {
    * @private
    */
   async _optimizeTablesAfterCleanup(db, availableTableNames) {
-    console.log(chalk.blue('Optimizing tables after cleanup...'));
+    verboseLog({}, chalk.blue('Optimizing tables after cleanup...'));
 
     const tablesToOptimize = [
       { name: this.fileEmbeddingsTable, displayName: 'File embeddings' },
@@ -892,9 +894,9 @@ export class DatabaseManager {
       if (availableTableNames.includes(name)) {
         try {
           const table = await db.openTable(name);
-          console.log(chalk.blue(`Optimizing ${displayName} table...`));
+          verboseLog({}, chalk.blue(`Optimizing ${displayName} table...`));
           await table.optimize();
-          console.log(chalk.green(`✓ ${displayName} table optimized`));
+          verboseLog({}, chalk.green(`✓ ${displayName} table optimized`));
         } catch (error) {
           if (error.message && error.message.includes('legacy format')) {
             console.warn(
@@ -909,7 +911,7 @@ export class DatabaseManager {
       }
     }
 
-    console.log(chalk.green('Post-cleanup table optimization complete'));
+    verboseLog({}, chalk.green('Post-cleanup table optimization complete'));
   }
 
   /**
@@ -919,7 +921,7 @@ export class DatabaseManager {
    * @private
    */
   async _createProjectSummariesTable(db) {
-    console.log(chalk.blue('Creating project summaries table...'));
+    verboseLog({}, chalk.blue('Creating project summaries table...'));
 
     const schema = new Schema([
       new Field('id', new Utf8()),
@@ -932,6 +934,6 @@ export class DatabaseManager {
 
     // Create table with empty initial data
     await db.createEmptyTable(PROJECT_SUMMARIES_TABLE, schema);
-    console.log(chalk.green(`✅ Project summaries table created: ${PROJECT_SUMMARIES_TABLE}`));
+    verboseLog({}, chalk.green(`✅ Project summaries table created: ${PROJECT_SUMMARIES_TABLE}`));
   }
 }

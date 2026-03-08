@@ -18,6 +18,7 @@ import {
   SKIP_FILENAMES,
   SKIP_FILE_PATTERNS,
 } from './constants.js';
+import { verboseLog } from './logging.js';
 
 /**
  * Checks if a file path looks like a test file based on common patterns.
@@ -201,9 +202,11 @@ export function shouldProcessFile(filePath, _, options = {}) {
  *
  * @param {string[]} filePaths - Array of file paths to check
  * @param {string} baseDir - Base directory for git operations
+ * @param {Object} options - Logging options
+ * @param {boolean} [options.verbose=false] - Enable verbose logging for ignored file summaries
  * @returns {Promise<Map<string, boolean>>} Map of relative paths to isIgnored boolean
  */
-export async function batchCheckGitignore(filePaths, baseDir = process.cwd()) {
+export async function batchCheckGitignore(filePaths, baseDir = process.cwd(), options = {}) {
   const resultMap = new Map();
 
   if (filePaths.length === 0) {
@@ -242,11 +245,11 @@ export async function batchCheckGitignore(filePaths, baseDir = process.cwd()) {
 
     // Log ignored files
     if (ignoredFiles.length > 0) {
-      console.log(`  ℹ️  Found ${ignoredFiles.length} gitignored files to exclude`);
+      verboseLog(options, `  ℹ️  Found ${ignoredFiles.length} gitignored files to exclude`);
       const ignoredSample = ignoredFiles.slice(0, 5);
-      ignoredSample.forEach((f) => console.log(`      - ${f}`));
+      ignoredSample.forEach((f) => verboseLog(options, `      - ${f}`));
       if (ignoredFiles.length > 5) {
-        console.log(`      ... and ${ignoredFiles.length - 5} more`);
+        verboseLog(options, `      ... and ${ignoredFiles.length - 5} more`);
       }
     }
   } catch (error) {

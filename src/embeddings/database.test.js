@@ -499,7 +499,7 @@ describe('DatabaseManager', () => {
       mockTable.schema = { fields: [{ name: 'other_field' }] };
       mockDb.tableNames.mockResolvedValue(['file_embeddings']);
       await dbManager.initializeTables();
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('old schema'));
+      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('old schema'));
     });
 
     it('should handle schema check errors', async () => {
@@ -525,7 +525,11 @@ describe('DatabaseManager', () => {
       mockDb.tableNames.mockResolvedValue(['file_embeddings']);
       mockTable.query.mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) });
       await dbManager.clearProjectEmbeddings('/test/project/deep');
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining(expectedLog));
+      if (expectedLog === 'has project_path field') {
+        expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining(expectedLog));
+      } else {
+        expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(expectedLog));
+      }
     });
   });
 
@@ -542,7 +546,7 @@ describe('DatabaseManager', () => {
       mockDb.tableNames.mockResolvedValue([]);
       await dbManager.initializeTables();
       if (error.includes('already')) {
-        expect(console.log).toHaveBeenCalledWith(expect.stringContaining(expectedLog));
+        expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining(expectedLog));
       } else {
         expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(expectedLog));
       }

@@ -30,6 +30,7 @@ import { ProjectAnalyzer } from './project-analyzer.js';
 import { reviewFile, reviewFiles, reviewPullRequest } from './rag-review.js';
 import { execGitSafe } from './utils/command.js';
 import { ensureBranchExists, findBaseBranch } from './utils/git.js';
+import { verboseLog } from './utils/logging.js';
 
 // Create a default embeddings system instance
 const embeddingsSystem = getDefaultEmbeddingsSystem();
@@ -406,9 +407,7 @@ async function runCodeReview(options) {
     const endTime = Date.now();
     const duration = ((endTime - startTime) / 1000).toFixed(2);
 
-    if (options.verbose) {
-      console.log(chalk.blue(`Review process took ${duration} seconds.`));
-    }
+    verboseLog(options, chalk.blue(`Review process took ${duration} seconds.`));
 
     // Process and output results
     if (reviewResult && reviewResult.success) {
@@ -630,15 +629,14 @@ async function generateEmbeddings(options) {
       await embeddingsSystem.storeProjectSummary(projectDir, projectSummary);
 
       console.log(chalk.green('✅ Project analysis complete and stored'));
-      if (options.verbose) {
-        console.log(chalk.gray(`   Project: ${projectSummary.projectName}`));
-        console.log(
-          chalk.gray(
-            `   Technologies: ${projectSummary.technologies.slice(0, 5).join(', ')}${projectSummary.technologies.length > 5 ? '...' : ''}`
-          )
-        );
-        console.log(chalk.gray(`   Key patterns: ${projectSummary.keyPatterns.length}`));
-      }
+      verboseLog(options, chalk.gray(`   Project: ${projectSummary.projectName}`));
+      verboseLog(
+        options,
+        chalk.gray(
+          `   Technologies: ${projectSummary.technologies.slice(0, 5).join(', ')}${projectSummary.technologies.length > 5 ? '...' : ''}`
+        )
+      );
+      verboseLog(options, chalk.gray(`   Key patterns: ${projectSummary.keyPatterns.length}`));
     } catch (error) {
       console.error(chalk.red('⚠️ Project analysis failed but continuing:'), error.message);
     }
@@ -756,10 +754,12 @@ async function showEmbeddingStats(options) {
  *
  * @param {string} directory - Directory to search
  * @param {object} options - Options from generateEmbeddings command
+ * @param {boolean} [options.verbose=false] - Enable verbose glob and filtering logs
+ * @param {string} [options.filePattern] - Optional override pattern instead of the default supported-file patterns
+ * @param {string[]} [options.excludePatterns] - Additional glob exclusion patterns
  * @returns {Promise<Array<string>>} Array of file paths
  */
 async function findSupportedFiles(directory, options = {}) {
-  const verbose = options.verbose || false;
   const baseDir = path.resolve(directory);
 
   // Default patterns match common code files - adjust as needed
@@ -835,19 +835,15 @@ async function findSupportedFiles(directory, options = {}) {
   // Instead, we rely on the shouldProcessFile check in embeddings.js which uses git check-ignore
   globOptions.ignore = [...excludePatterns]; // Use only explicit excludes
 
-  if (verbose) {
-    console.log(chalk.cyan('Using async glob to find files...'));
-    console.log(chalk.gray(`  Patterns: ${patternsToUse.join(', ')}`));
-    console.log(chalk.gray(`  Options:`), globOptions);
-  }
+  verboseLog(options, chalk.cyan('Using async glob to find files...'));
+  verboseLog(options, chalk.gray(`  Patterns: ${patternsToUse.join(', ')}`));
+  verboseLog(options, chalk.gray(`  Options:`), globOptions);
 
   try {
     // Use asynchronous glob
     const files = await glob.glob(patternsToUse, globOptions);
 
-    if (verbose) {
-      console.log(chalk.green(`Glob found ${files.length} potential files.`));
-    }
+    verboseLog(options, chalk.green(`Glob found ${files.length} potential files.`));
 
     // Filter results to ensure they are actual files (glob with stat should mostly handle this)
     // And apply the final utilsShouldProcessFile check (e.g., for binary content if needed)
@@ -864,9 +860,7 @@ async function findSupportedFiles(directory, options = {}) {
     //       finalFiles.push(file);
     //     }
     //   } catch (statError) {
-    //      if (verbose) {
-    //          console.warn(chalk.yellow(`Skipping file due to stat error ${path.relative(baseDir, file)}: ${statError.message}`));
-    //      }
+    //      console.warn(chalk.yellow(`Skipping file due to stat error ${path.relative(baseDir, file)}: ${statError.message}`));
     //   }
     // }
 
@@ -874,9 +868,7 @@ async function findSupportedFiles(directory, options = {}) {
     const finalFiles = files;
 
     // Add log after the filtering loop (now just assignment)
-    if (verbose) {
-      console.log(chalk.green(`Finished filtering glob results. ${finalFiles.length} files remain.`));
-    }
+    verboseLog(options, chalk.green(`Finished filtering glob results. ${finalFiles.length} files remain.`));
     return finalFiles;
   } catch (err) {
     if (err.name === 'AbortError') {
@@ -981,13 +973,13 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
 // REMOVED: checkBranchExists function - Moved to utils.js
 
 // --- Output Formatting Functions --- //
-// These need to be adapted to the structure returned by cag-review.js functions
+// These consume the normalized results returned by the RAG review pipeline
 
 /**
  * Output results in JSON format
  *
- * @param {Array<Object>} reviewResults - Array of individual file review results from cag-review
- * @param {Object} cliOptions - Command line options
+ * @param {Array<Object>} reviewResults - Array of individual file review results
+ * @param {Object} options - Command line options
  */
 function outputJson(reviewResults, options) {
   // Structure the output to be informative
@@ -1149,17 +1141,13 @@ function outputText(reviewResults, cliOptions) {
       return;
     }
     if (fileResult.skipped) {
-      if (cliOptions.verbose) {
-        console.log(chalk.yellow(`\nSkipped: ${fileResult.filePath}`));
-      }
+      verboseLog(cliOptions, chalk.yellow(`\nSkipped: ${fileResult.filePath}`));
       return;
     }
     if (!fileResult.results || !fileResult.results.issues?.length) {
-      if (cliOptions.verbose) {
-        console.log(chalk.green(`\nNo findings for: ${fileResult.filePath}`));
-        if (fileResult.results?.summary) {
-          console.log(chalk.green(`  Summary: ${fileResult.results.summary}`));
-        }
+      verboseLog(cliOptions, chalk.green(`\nNo findings for: ${fileResult.filePath}`));
+      if (fileResult.results?.summary) {
+        verboseLog(cliOptions, chalk.green(`  Summary: ${fileResult.results.summary}`));
       }
       return;
     }
@@ -1287,6 +1275,7 @@ async function analyzePRHistory(options) {
       resume: options.resume,
       clearExisting: options.clear,
       projectPath,
+      verbose: options.verbose,
       onProgress: (progress) => displayProgress(progress, options.verbose),
     };
 
@@ -1305,9 +1294,7 @@ async function analyzePRHistory(options) {
     const endTime = Date.now();
     const duration = ((endTime - startTime) / 1000).toFixed(2);
     console.error(chalk.red(`\nError during PR history analysis (${duration}s):`), error.message);
-    if (options.verbose) {
-      console.error(error.stack);
-    }
+    verboseLog(options, error.stack);
     process.exit(1);
   }
 }
@@ -1406,9 +1393,7 @@ async function clearPRHistory(options) {
     }
   } catch (error) {
     console.error(chalk.red('Error clearing PR history data:'), error.message);
-    if (options.verbose) {
-      console.error(error.stack);
-    }
+    verboseLog(options, error.stack);
     process.exit(1);
   }
 }

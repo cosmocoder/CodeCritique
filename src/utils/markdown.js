@@ -6,6 +6,7 @@
  */
 
 import path from 'path';
+import { debug } from './logging.js';
 
 /**
  * Extracts chunks from Markdown content based on H2 and H3 headings,
@@ -52,19 +53,17 @@ export function extractMarkdownChunks(filePath, content, relativePath) {
       // Check for H1 heading in first few lines
       if (filePath.includes('README.md') || filePath.includes('RUNBOOK.md')) {
         // Log only for specific files to reduce noise
-        console.log(`[extractMarkdownChunks DEBUG] File: ${filePath}, Line ${i + 1} (trimmed): "${trimmedLine}", Attempting H1 match.`);
+        debug(`[extractMarkdownChunks] File: ${filePath}, Line ${i + 1} (trimmed): "${trimmedLine}", Attempting H1 match.`);
       }
       const h1Match = trimmedLine.match(h1Regex);
       if (h1Match) {
         documentH1 = h1Match[1].trim();
         h1Found = true;
-        console.log(`[extractMarkdownChunks DEBUG] H1 FOUND for ${filePath}: "${documentH1}" on line ${i + 1}`);
+        debug(`[extractMarkdownChunks] H1 FOUND for ${filePath}: "${documentH1}" on line ${i + 1}`);
       } else if (filePath.includes('README.md') || filePath.includes('RUNBOOK.md')) {
         if (linesProcessedForH1 <= 5 && trimmedLine.startsWith('#')) {
           // If it starts with # but didn't match
-          console.log(
-            `[extractMarkdownChunks DEBUG] File: ${filePath}, Line ${i + 1}: Starts with # but H1Regex DID NOT match "${trimmedLine}"`
-          );
+          debug(`[extractMarkdownChunks] File: ${filePath}, Line ${i + 1}: Starts with # but H1Regex DID NOT match "${trimmedLine}"`);
         }
       }
     }
@@ -125,7 +124,7 @@ export function extractMarkdownChunks(filePath, content, relativePath) {
 
   if (!documentH1) {
     documentH1 = path.basename(filePath).replace(path.extname(filePath), '');
-    console.log(`[extractMarkdownChunks DEBUG] H1 NOT FOUND for ${filePath}. Using fallback title: "${documentH1}"`);
+    debug(`[extractMarkdownChunks] H1 NOT FOUND for ${filePath}. Using fallback title: "${documentH1}"`);
   }
 
   return { chunks: chunks.filter((chunk) => chunk.content.length > 0), documentH1 };
