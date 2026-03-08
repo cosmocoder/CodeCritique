@@ -1975,40 +1975,58 @@ async function getContextForFile(filePath, content, options = {}) {
     }
   };
 
+  const withContextFallback = async (promise, fallbackValue, label) => {
+    try {
+      return await promise;
+    } catch (error) {
+      console.warn(chalk.yellow(`${label} failed: ${error.message}`));
+      return fallbackValue;
+    }
+  };
+
   const [prContextResult, guidelineCandidates, codeExampleCandidates, relevantCustomDocChunks] = await Promise.all([
-    getPRCommentContext(filePath, {
-      ...options,
-      projectPath,
-      precomputedQueryEmbedding: fileContentQueryEmbedding,
-      maxComments: MAX_PR_COMMENTS_FOR_CONTEXT,
-      similarityThreshold: options.prSimilarityThreshold || 0.3,
-      timeout: options.prTimeout || 300000,
-      repository: options.repository || null,
-    }),
-    embeddingsSystem.findRelevantDocs(guidelineQuery, {
-      ...options,
-      projectPath,
-      precomputedQueryEmbedding: guidelineQueryEmbedding,
-      limit: GUIDELINE_CANDIDATE_LIMIT,
-      similarityThreshold: 0.05,
-      useReranking: true,
-      queryContextForReranking: reviewedSnippetContext,
-    }),
-    embeddingsSystem.findSimilarCode(isTestFile ? `${content}\\n// Looking for similar test files and testing patterns` : content, {
-      ...options,
-      projectPath,
-      isTestFile,
-      precomputedQueryEmbedding: fileContentQueryEmbedding,
-      limit: CODE_EXAMPLE_LIMIT,
-      similarityThreshold: 0.3,
-      queryFilePath: filePath,
-      includeProjectStructure: false,
-    }),
-    processCustomDocuments(), // Add custom document processing as 4th parallel operation
-  ]).catch((error) => {
-    console.warn(chalk.yellow(`Parallel context retrieval failed: ${error.message}`));
-    return [[], [], [], []];
-  });
+    withContextFallback(
+      getPRCommentContext(filePath, {
+        ...options,
+        projectPath,
+        precomputedQueryEmbedding: fileContentQueryEmbedding,
+        maxComments: MAX_PR_COMMENTS_FOR_CONTEXT,
+        similarityThreshold: options.prSimilarityThreshold || 0.3,
+        timeout: options.prTimeout || 300000,
+        repository: options.repository || null,
+      }),
+      { comments: [] },
+      'PR comment context retrieval'
+    ),
+    withContextFallback(
+      embeddingsSystem.findRelevantDocs(guidelineQuery, {
+        ...options,
+        projectPath,
+        precomputedQueryEmbedding: guidelineQueryEmbedding,
+        limit: GUIDELINE_CANDIDATE_LIMIT,
+        similarityThreshold: 0.05,
+        useReranking: true,
+        queryContextForReranking: reviewedSnippetContext,
+      }),
+      [],
+      'Guideline retrieval'
+    ),
+    withContextFallback(
+      embeddingsSystem.findSimilarCode(isTestFile ? `${content}\\n// Looking for similar test files and testing patterns` : content, {
+        ...options,
+        projectPath,
+        isTestFile,
+        precomputedQueryEmbedding: fileContentQueryEmbedding,
+        limit: CODE_EXAMPLE_LIMIT,
+        similarityThreshold: 0.3,
+        queryFilePath: filePath,
+        includeProjectStructure: false,
+      }),
+      [],
+      'Code example retrieval'
+    ),
+    withContextFallback(processCustomDocuments(), [], 'Custom document retrieval'),
+  ]);
 
   const prCommentContext = prContextResult?.comments || [];
   const prContextAvailable = prCommentContext.length > 0;

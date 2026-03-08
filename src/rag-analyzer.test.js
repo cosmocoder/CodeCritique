@@ -326,6 +326,29 @@ describe('rag-analyzer', () => {
       const result = await runAnalysis('/test/file.js');
       expect(result.success).toBe(true);
     });
+
+    it('should preserve successful context sources when one parallel retrieval fails', async () => {
+      mockEmbeddingsSystem.findRelevantDocs.mockResolvedValue([
+        {
+          path: '/docs/api.md',
+          content: 'API docs',
+          similarity: 0.8,
+          type: 'documentation-chunk',
+          document_title: 'API Docs',
+          heading_text: 'Usage',
+        },
+      ]);
+      mockEmbeddingsSystem.findSimilarCode.mockResolvedValue([{ path: '/similar.js', content: 'similar code', similarity: 0.9 }]);
+      findRelevantPRComments.mockRejectedValue(new Error('PR comments failed'));
+      llm.sendPromptToClaude.mockResolvedValue({ json: { summary: 'Review', issues: [] } });
+
+      const result = await runAnalysis('/test/file.js');
+
+      expect(result.success).toBe(true);
+      expect(result.context.codeExamples).toBeGreaterThan(0);
+      expect(result.context.guidelines).toBeGreaterThanOrEqual(0);
+      expect(result.context.prComments).toBe(0);
+    });
   });
 
   // ==========================================================================
