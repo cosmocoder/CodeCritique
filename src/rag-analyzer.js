@@ -722,7 +722,7 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
     context: contextSections,
     codeExamples,
     guidelineSnippets,
-    customDocs: relevantCustomDocChunks || customDocs, // Use relevant chunks if available, fallback to full docs
+    customDocs: relevantCustomDocChunks?.length > 0 ? relevantCustomDocChunks : customDocs, // Use relevant chunks if available, fallback to full docs
     feedbackContext: generateFeedbackContext(dismissedPatterns), // Add feedback context for LLM
     projectSummary: projectSummary, // Add project architecture summary
     metadata: {
@@ -1729,7 +1729,12 @@ async function performHolisticPRAnalysis(options) {
           items: unifiedContext.prComments.slice(0, 10),
         },
       ],
-      customDocs: unifiedContext.customDocChunks || options.relevantCustomDocChunks || customDocs, // Use unified chunks first, then relevant chunks, then full docs
+      customDocs:
+        unifiedContext.customDocChunks?.length > 0
+          ? unifiedContext.customDocChunks
+          : options.relevantCustomDocChunks?.length > 0
+            ? options.relevantCustomDocChunks
+            : customDocs, // Use chunks only when available, then fall back to full docs
       projectSummary: projectSummary, // Add project architecture summary
       metadata: {
         hasCodeExamples: unifiedContext.codeExamples.length > 0,
