@@ -23,6 +23,7 @@ import { calculateCosineSimilarity, calculatePathSimilarity } from './embeddings
 import { inferContextFromDocumentContent } from './utils/context-inference.js';
 import { isGenericDocument, getGenericDocumentContext } from './utils/document-detection.js';
 import { isDocumentationFile } from './utils/file-validation.js';
+import { getTableSchema, schemaHasField } from './utils/lancedb.js';
 import { debug, verboseLog } from './utils/logging.js';
 import { isPathWithinProject } from './utils/path-utils.js';
 import { escapeSqlString } from './utils/string-utils.js';
@@ -152,8 +153,8 @@ export class ContentRetriever {
 
       const resolvedProjectPath = path.resolve(projectPath);
       try {
-        const tableSchema = await table.schema;
-        if (tableSchema?.fields?.some((field) => field.name === 'project_path')) {
+        const tableSchema = await getTableSchema(table);
+        if (schemaHasField(tableSchema, 'project_path')) {
           query = query.where(`project_path = '${escapeSqlString(resolvedProjectPath)}'`);
           debug(`Filtering documentation by project_path: ${resolvedProjectPath}`);
         }
@@ -518,15 +519,11 @@ export class ContentRetriever {
       // Add project path filtering if the field exists in the schema
       // Check if the table has project_path field
       try {
-        const tableSchema = await table.schema;
-        if (tableSchema && tableSchema.fields) {
-          const hasProjectPathField = tableSchema.fields.some((field) => field.name === 'project_path');
-
-          if (hasProjectPathField) {
-            // Use exact match for project path
-            conditions.push(`project_path = '${escapeSqlString(resolvedProjectPath)}'`);
-            debug(`Filtering by project_path: ${resolvedProjectPath}`);
-          }
+        const tableSchema = await getTableSchema(table);
+        if (schemaHasField(tableSchema, 'project_path')) {
+          // Use exact match for project path
+          conditions.push(`project_path = '${escapeSqlString(resolvedProjectPath)}'`);
+          debug(`Filtering by project_path: ${resolvedProjectPath}`);
         }
       }
       catch (schemaError) {

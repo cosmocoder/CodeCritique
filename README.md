@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/codecritique.svg)](https://www.npmjs.com/package/codecritique)
 [![npm downloads](https://img.shields.io/npm/dm/codecritique.svg)](https://www.npmjs.com/package/codecritique)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D22.14.0-brightgreen.svg)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D24.15.0-brightgreen.svg)](https://nodejs.org/)
 [![CI](https://github.com/cosmocoder/CodeCritique/actions/workflows/release.yml/badge.svg)](https://github.com/cosmocoder/CodeCritique/actions/workflows/release.yml)
 
 **AI-Powered Code Review. Context-Aware. Privacy-First.**
@@ -96,7 +96,7 @@ This RAG-based approach provides more accurate, project-specific code reviews co
 
 ### Prerequisites
 
-- **Node.js** v22.14.0 or higher
+- **Node.js** v24.15.0 or higher
 - **Git** (for diff-based analysis)
 - **Anthropic API key** (for LLM analysis)
 
@@ -199,7 +199,7 @@ For easier integration with non-JavaScript projects, you can use the provided sh
 
 3. **Environment setup** (the script handles this automatically):
    - Creates/uses `.env` file in your project directory
-   - Validates Node.js v22.14.0+ requirement
+   - Validates Node.js v24.15.0+ requirement
    - Provides helpful error messages for missing dependencies
 
 ## Quick Start

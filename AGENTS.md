@@ -17,7 +17,7 @@ This document provides comprehensive guidance for AI coding agents working on th
 
 ### Tech Stack
 
-- **Runtime**: Node.js >= 22.14.0
+- **Runtime**: Node.js >= 24.15.0
 - **Language**: JavaScript (ES modules)
 - **Testing**: Vitest with coverage
 - **Linting**: ESLint

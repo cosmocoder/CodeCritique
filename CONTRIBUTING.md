@@ -43,8 +43,8 @@ Thank you for your interest in contributing to CodeCritique! This document provi
 
 ### Prerequisites
 
-- Node.js >= 22.14.0
-- npm >= 10.x
+- Node.js >= 24.15.0
+- npm >= 11.12.1
 - Git (for diff-based analysis)
 - Anthropic API key (for LLM analysis features)
 
