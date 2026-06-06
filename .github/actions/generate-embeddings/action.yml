@@ -88,6 +88,8 @@ runs:
         DEBUG: ${{ inputs.verbose }}
         VERBOSE: ${{ inputs.verbose }}
         GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
+        INPUT_FILES: ${{ inputs.files }}
+        INPUT_EXCLUDE: ${{ inputs.exclude }}
       run: |
         echo "🧠 Generating embeddings for codebase..."
 
@@ -100,8 +102,9 @@ runs:
         fi
 
         # Add specific files if provided
-        if [ -n "${{ inputs.files }}" ]; then
-          for file_pattern in ${{ inputs.files }}; do
+        if [ -n "$INPUT_FILES" ]; then
+          read -r -a FILE_PATTERNS <<< "$INPUT_FILES"
+          for file_pattern in "${FILE_PATTERNS[@]}"; do
             ARGS+=("--files" "${file_pattern}")
           done
         fi
@@ -111,8 +114,9 @@ runs:
         ARGS+=("--exclude" ".codecritique-artifacts/**")
 
         # Add user-specified exclude patterns
-        if [ -n "${{ inputs.exclude }}" ]; then
-          for pattern in ${{ inputs.exclude }}; do
+        if [ -n "$INPUT_EXCLUDE" ]; then
+          read -r -a EXCLUDE_PATTERNS <<< "$INPUT_EXCLUDE"
+          for pattern in "${EXCLUDE_PATTERNS[@]}"; do
             ARGS+=("--exclude" "${pattern}")
           done
         fi

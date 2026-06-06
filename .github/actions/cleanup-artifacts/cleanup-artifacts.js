@@ -226,13 +226,38 @@ const defaultGithubToken = process.env.GITHUB_TOKEN;
 const defaultOutputFile = process.env.GITHUB_OUTPUT;
 
 /**
+ * Format an output assignment for GitHub Actions' $GITHUB_OUTPUT file.
+ * @param {string} name - Output name
+ * @param {string|number|boolean|null|undefined} value - Output value
+ * @returns {string} Formatted output entry
+ */
+export function formatGithubOutput(name, value) {
+  if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(name)) {
+    throw new Error(`Invalid GitHub Actions output name: ${name}`);
+  }
+
+  const outputValue = value == null ? '' : String(value);
+  if (!/[\r\n]/.test(outputValue)) {
+    return `${name}=${outputValue}\n`;
+  }
+
+  let delimiter = `ghadelimiter_${name.replace(/[^A-Za-z0-9_]/g, '_')}`;
+  let suffix = 0;
+  while (outputValue.includes(delimiter)) {
+    suffix += 1;
+    delimiter = `ghadelimiter_${name.replace(/[^A-Za-z0-9_]/g, '_')}_${suffix}`;
+  }
+
+  return `${name}<<${delimiter}\n${outputValue}\n${delimiter}\n`;
+}
+
+/**
  * Append output to GitHub Actions output file
  */
 export function setOutput(name, value, outputFilePath = defaultOutputFile) {
   if (outputFilePath) {
-    fs.appendFileSync(outputFilePath, `${name}=${value}\n`);
+    fs.appendFileSync(outputFilePath, formatGithubOutput(name, value));
   }
-  console.log(`::set-output name=${name}::${value}`);
 }
 
 /**

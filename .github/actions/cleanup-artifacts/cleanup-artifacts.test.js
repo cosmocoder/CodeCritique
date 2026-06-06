@@ -9,6 +9,7 @@ import {
   generateSummary,
   createCleanupReport,
   bytesToMb,
+  formatGithubOutput,
   setOutput,
   setOutputs,
   fetchArtifacts,
@@ -418,19 +419,43 @@ describe('cleanup-artifacts.js', () => {
       const outputFile = '/tmp/test-output';
       setOutput('test-key', 'test-value', outputFile);
       expect(fs.appendFileSync).toHaveBeenCalledWith(outputFile, 'test-key=test-value\n');
-      expect(console.log).toHaveBeenCalledWith('::set-output name=test-key::test-value');
     });
 
     it('should not write to file when output file is not provided', () => {
       setOutput('test-key', 'test-value', null);
       expect(fs.appendFileSync).not.toHaveBeenCalled();
-      expect(console.log).toHaveBeenCalledWith('::set-output name=test-key::test-value');
     });
 
     it('should handle empty values', () => {
       const outputFile = '/tmp/test-output';
       setOutput('empty-key', '', outputFile);
       expect(fs.appendFileSync).toHaveBeenCalledWith(outputFile, 'empty-key=\n');
+    });
+
+    it('should handle multiline values safely', () => {
+      const outputFile = '/tmp/test-output';
+      setOutput('summary', 'Deleted artifact\nSkipped artifact', outputFile);
+
+      expect(fs.appendFileSync).toHaveBeenCalledWith(
+        outputFile,
+        'summary<<ghadelimiter_summary\nDeleted artifact\nSkipped artifact\nghadelimiter_summary\n'
+      );
+    });
+  });
+
+  describe('formatGithubOutput', () => {
+    it('should format single-line output values', () => {
+      expect(formatGithubOutput('report-path', 'cleanup-report.json')).toBe('report-path=cleanup-report.json\n');
+    });
+
+    it('should choose a delimiter that does not appear in the output value', () => {
+      expect(formatGithubOutput('summary', 'line 1\nghadelimiter_summary\nline 3')).toBe(
+        'summary<<ghadelimiter_summary_1\nline 1\nghadelimiter_summary\nline 3\nghadelimiter_summary_1\n'
+      );
+    });
+
+    it('should reject invalid output names', () => {
+      expect(() => formatGithubOutput('bad\nname', 'value')).toThrow('Invalid GitHub Actions output name');
     });
   });
 
