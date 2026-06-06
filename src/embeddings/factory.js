@@ -339,7 +339,7 @@ class EmbeddingsSystem {
    * @returns {Promise<import('@lancedb/lancedb').Table|null>} PR comments table or null on error
    */
   async getPRCommentsTable() {
-    await this.databaseManager.getDBConnection();
+    await this.databaseManager.initializeTables();
     return this.databaseManager.getTable(this.databaseManager.prCommentsTable);
   }
 

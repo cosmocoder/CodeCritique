@@ -246,10 +246,10 @@ describe('EmbeddingsSystem', () => {
   });
 
   describe('getPRCommentsTable', () => {
-    it('should get PR comments table without initializing models', async () => {
+    it('should initialize PR comments schema without initializing models', async () => {
       await system.getPRCommentsTable();
 
-      expect(system.databaseManager.getDBConnection).toHaveBeenCalled();
+      expect(system.databaseManager.initializeTables).toHaveBeenCalled();
       expect(system.databaseManager.getTable).toHaveBeenCalledWith('pr_comments');
       expect(system.modelManager.initialize).not.toHaveBeenCalled();
     });

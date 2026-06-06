@@ -1,5 +1,5 @@
 import { PRHistoryAnalyzer } from './analyzer.js';
-import { clearPRComments, getPRCommentsStats, storePRCommentsBatch } from './database.js';
+import { clearPRComments, getPRCommentsStats, getProcessedPRSyncState, shouldSkipPR, storePRCommentsBatch } from './database.js';
 
 vi.mock('./comment-processor.js', () => ({
   PRCommentProcessor: class {
@@ -17,7 +17,7 @@ vi.mock('./database.js', () => ({
     authors: {},
     repositories: {},
   }),
-  getProcessedPRDateRange: vi.fn().mockResolvedValue({ oldestPR: null, newestPR: null }),
+  getProcessedPRSyncState: vi.fn().mockResolvedValue({ processedPRs: new Map() }),
   shouldSkipPR: vi.fn().mockReturnValue(false),
   storePRCommentsBatch: vi.fn().mockResolvedValue(0),
 }));
@@ -39,6 +39,8 @@ describe('PRHistoryAnalyzer', () => {
 
     analyzer = new PRHistoryAnalyzer();
     analyzer.initialize('test-token');
+    shouldSkipPR.mockReset().mockReturnValue(false);
+    getProcessedPRSyncState.mockReset().mockResolvedValue({ processedPRs: new Map() });
   });
 
   afterEach(() => {
@@ -117,7 +119,37 @@ describe('PRHistoryAnalyzer', () => {
 
       await analyzer.analyzeRepository('owner/repo');
 
-      expect(storePRCommentsBatch).toHaveBeenCalled();
+      expect(storePRCommentsBatch).toHaveBeenCalledWith([{ id: '1', comment_text: 'Comment', comment_embedding: [] }], expect.any(String), {
+        replacePRs: [{ repository: 'owner/repo', prNumber: 1, commentIds: ['1'] }],
+      });
+    });
+
+    it('should replace stored PR comments when a reprocessed PR now has no comments', async () => {
+      const prs = [{ number: 1, merged_at: '2024-01-01' }];
+      analyzer.githubClient.fetchAllPRs.mockResolvedValue(prs);
+      analyzer.githubClient.getPRReviewComments.mockResolvedValue([]);
+      analyzer.githubClient.getPRIssueComments.mockResolvedValue([]);
+
+      await analyzer.analyzeRepository('owner/repo');
+
+      expect(storePRCommentsBatch).toHaveBeenCalledWith([], expect.any(String), {
+        replacePRs: [{ repository: 'owner/repo', prNumber: 1, commentIds: [] }],
+      });
+    });
+
+    it('should filter using exact PR sync state', async () => {
+      const prs = [{ number: 1, merged_at: '2024-01-01', updated_at: '2024-01-03' }];
+      const processedPRs = new Map([
+        [1, { latestCommentAt: '2024-01-02T00:00:00.000Z', latestPRUpdatedAt: '2024-01-03T00:00:00.000Z', commentCount: 1 }],
+      ]);
+      analyzer.githubClient.fetchAllPRs.mockResolvedValue(prs);
+      getProcessedPRSyncState.mockResolvedValue({ processedPRs });
+      shouldSkipPR.mockReturnValue(false);
+
+      await analyzer.analyzeRepository('owner/repo');
+
+      expect(shouldSkipPR).toHaveBeenCalledWith(prs[0], { processedPRs });
+      expect(analyzer.githubClient.getPRReviewComments).toHaveBeenCalledWith('owner', 'repo', 1);
     });
 
     it('should call onProgress callback', async () => {
@@ -172,7 +204,7 @@ describe('PRHistoryAnalyzer', () => {
       expect(analyzer.commentProcessor.processBatch).toHaveBeenCalled();
     });
 
-    it('should return empty array when no comments', async () => {
+    it('should return empty comments and IDs when no comments', async () => {
       analyzer.progress = { repository: 'owner/repo' };
 
       analyzer.githubClient.getPRReviewComments.mockResolvedValue([]);
@@ -181,7 +213,7 @@ describe('PRHistoryAnalyzer', () => {
 
       const result = await analyzer.processSinglePR({ number: 1 });
 
-      expect(result).toEqual([]);
+      expect(result).toEqual({ comments: [], commentIds: [] });
     });
   });
 

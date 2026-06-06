@@ -232,6 +232,7 @@ export class DatabaseManager {
       }
       else {
         prCommentsTable = await db.openTable(this.prCommentsTable);
+        await this._ensureSchemaField(prCommentsTable, this.prCommentsTable, new Field('pr_updated_at', new Utf8(), true));
       }
 
       // Create FTS indexes
@@ -354,6 +355,7 @@ export class DatabaseManager {
       new Field('author', new Utf8(), false),
       new Field('created_at', new Utf8(), false),
       new Field('updated_at', new Utf8(), true),
+      new Field('pr_updated_at', new Utf8(), true),
       new Field('review_id', new Utf8(), true),
       new Field('review_state', new Utf8(), true),
 
@@ -705,6 +707,28 @@ export class DatabaseManager {
     }
     catch (schemaError) {
       debug(`Could not check schema for ${tableName}: ${schemaError.message}`);
+    }
+  }
+
+  /**
+   * Add a nullable field to an existing LanceDB table when it is missing.
+   * @param {LanceDBTable} table - Table instance
+   * @param {string} tableName - Table name
+   * @param {Field} field - Field to add
+   * @private
+   */
+  async _ensureSchemaField(table, tableName, field) {
+    try {
+      const currentSchema = await getTableSchema(table);
+      if (!currentSchema?.fields || schemaHasField(currentSchema, field.name)) {
+        return;
+      }
+
+      verboseLog({}, chalk.yellow(`Adding missing ${field.name} column to ${tableName} table...`));
+      await table.addColumns(field);
+    }
+    catch (schemaError) {
+      console.warn(chalk.yellow(`Warning: Could not add ${field.name} column to ${tableName}: ${schemaError.message}`));
     }
   }
 

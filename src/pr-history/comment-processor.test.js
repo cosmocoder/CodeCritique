@@ -42,7 +42,7 @@ describe('PRCommentProcessor', () => {
         pull_request_review_id: 67890,
       };
       const prContext = {
-        pr: { number: 42, repository: 'owner/repo' },
+        pr: { number: 42, repository: 'owner/repo', updated_at: '2024-01-03T00:00:00Z' },
       };
 
       const metadata = processor.extractMetadata(comment, prContext);
@@ -52,6 +52,7 @@ describe('PRCommentProcessor', () => {
       expect(metadata.repository).toBe('owner/repo');
       expect(metadata.author).toBe('testuser');
       expect(metadata.comment_type).toBe('review');
+      expect(metadata.pr_updated_at).toBe('2024-01-03T00:00:00Z');
     });
 
     it('should handle missing user gracefully', () => {

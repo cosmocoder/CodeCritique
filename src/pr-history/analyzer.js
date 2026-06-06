@@ -8,7 +8,7 @@
 import chalk from 'chalk';
 import { verboseLog } from '../utils/logging.js';
 import { PRCommentProcessor } from './comment-processor.js';
-import { clearPRComments, getPRCommentsStats, getProcessedPRDateRange, shouldSkipPR, storePRCommentsBatch } from './database.js';
+import { clearPRComments, getPRCommentsStats, getProcessedPRSyncState, shouldSkipPR, storePRCommentsBatch } from './database.js';
 import { GitHubAPIClient } from './github-client.js';
 
 /**
@@ -187,12 +187,12 @@ export class PRHistoryAnalyzer {
       this.progress.updatePRs(prs.length, 0);
 
       // Step 2: Process PR comments
-      const processedComments = await this.processPRComments(prs, { onProgress, projectPath, verbose });
+      const { comments: processedComments, processedPRs } = await this.processPRComments(prs, { onProgress, projectPath, verbose });
 
       // Step 3: Store in database
-      if (processedComments.length > 0) {
+      if (processedComments.length > 0 || processedPRs.length > 0) {
         verboseLog(verbose, chalk.blue(`Storing ${processedComments.length} processed comments in database...`));
-        const storedCount = await storePRCommentsBatch(processedComments, projectPath);
+        const storedCount = await storePRCommentsBatch(processedComments, projectPath, { replacePRs: processedPRs });
         verboseLog(verbose, chalk.green(`Successfully stored ${storedCount} PR comments`));
       }
 
@@ -281,11 +281,12 @@ export class PRHistoryAnalyzer {
    * @param {Function|null} [options.onProgress=null] - Optional progress callback
    * @param {string} [options.projectPath=process.cwd()] - Project path used for database filtering
    * @param {boolean} [options.verbose=false] - Enable verbose progress logging
-   * @returns {Promise<Array>} Array of processed comments
+   * @returns {Promise<{comments: Array, processedPRs: Array}>} Processed comments and fully fetched PR metadata
    */
   async processPRComments(prs, options = {}) {
     const { onProgress, projectPath = process.cwd(), verbose = false } = options;
     const allProcessedComments = [];
+    const processedPRs = [];
     let totalComments = 0;
     let processedComments = 0;
     let failedComments = 0;
@@ -293,23 +294,23 @@ export class PRHistoryAnalyzer {
     verboseLog(verbose, chalk.blue(`Processing comments for ${prs.length} PRs...`));
     verboseLog(verbose, chalk.cyan(`This may take several minutes for large repositories...`));
 
-    // Get processed PR date range to skip already processed PRs
+    // Get exact processed PR state to skip only PRs that are already stored and unchanged
     verboseLog(verbose, chalk.blue(`Checking for already processed PRs...`));
-    const { oldestPR, newestPR } = await getProcessedPRDateRange(this.progress.repository, projectPath);
+    const processedPRSyncState = await getProcessedPRSyncState(this.progress.repository, projectPath);
 
     let skippedPRs = 0;
     let prsToProcess = prs;
 
-    if (oldestPR && newestPR) {
-      verboseLog(verbose, chalk.blue(`Found processed PR range: ${oldestPR} to ${newestPR}`));
+    if (processedPRSyncState.processedPRs.size > 0) {
+      verboseLog(verbose, chalk.blue(`Found stored state for ${processedPRSyncState.processedPRs.size} processed PRs`));
       prsToProcess = prs.filter((pr) => {
-        const shouldSkip = shouldSkipPR(pr, oldestPR, newestPR);
+        const shouldSkip = shouldSkipPR(pr, processedPRSyncState);
         if (shouldSkip) {
           skippedPRs++;
         }
         return !shouldSkip;
       });
-      verboseLog(verbose, chalk.green(`Skipping ${skippedPRs} already processed PRs, processing ${prsToProcess.length} new PRs`));
+      verboseLog(verbose, chalk.green(`Skipping ${skippedPRs} unchanged processed PRs, processing ${prsToProcess.length} PRs`));
     }
     else {
       verboseLog(verbose, chalk.blue(`No previously processed PRs found, processing all ${prs.length} PRs`));
@@ -317,7 +318,7 @@ export class PRHistoryAnalyzer {
 
     if (prsToProcess.length === 0) {
       verboseLog(verbose, chalk.yellow(`All PRs have already been processed!`));
-      return allProcessedComments;
+      return { comments: allProcessedComments, processedPRs };
     }
 
     // First pass: count total comments for better progress tracking
@@ -349,7 +350,8 @@ export class PRHistoryAnalyzer {
       const batchPromises = batch.map(async (pr, batchIndex) => {
         try {
           const prIndex = i + batchIndex;
-          const prComments = await this.processSinglePR(pr);
+          const prResult = await this.processSinglePR(pr);
+          const prComments = prResult.comments;
 
           this.progress.setLastProcessed(pr.number);
           this.progress.updatePRs(prsToProcess.length, prIndex + 1);
@@ -363,12 +365,15 @@ export class PRHistoryAnalyzer {
             });
           }
 
-          return prComments;
+          return {
+            comments: prComments,
+            processedPR: { repository: this.progress.repository, prNumber: pr.number, commentIds: prResult.commentIds },
+          };
         }
         catch (error) {
           console.error(chalk.red(`Error processing PR #${pr.number}: ${error.message}`));
           this.progress.addError(error, `PR #${pr.number}`);
-          return [];
+          return { comments: [], processedPR: null };
         }
       });
 
@@ -377,13 +382,17 @@ export class PRHistoryAnalyzer {
 
       // Flatten and collect results
       let batchCommentCount = 0;
-      for (const prComments of batchResults) {
+      for (const batchResult of batchResults) {
+        const prComments = batchResult.comments;
         totalComments += prComments.length;
         const validComments = prComments.filter((comment) => comment !== null);
         processedComments += validComments.length;
         failedComments += prComments.length - validComments.length;
         allProcessedComments.push(...validComments);
         batchCommentCount += prComments.length;
+        if (batchResult.processedPR) {
+          processedPRs.push(batchResult.processedPR);
+        }
       }
 
       const batchDuration = (Date.now() - batchStartTime) / 1000;
@@ -418,14 +427,14 @@ export class PRHistoryAnalyzer {
       verboseLog(verbose, chalk.yellow(`Failed to process ${failedComments} comments`));
     }
 
-    return allProcessedComments;
+    return { comments: allProcessedComments, processedPRs };
   }
 
   /**
    * Process comments for a single PR
    * @private
    * @param {Object} pr - PR object
-   * @returns {Promise<Array>} Array of processed comments
+   * @returns {Promise<{comments: Array, commentIds: Array<string>}>} Processed comments and all live fetched comment IDs
    */
   async processSinglePR(pr) {
     try {
@@ -443,9 +452,13 @@ export class PRHistoryAnalyzer {
         ...reviewComments.map((comment) => ({ ...comment, type: 'review' })),
         ...issueComments.map((comment) => ({ ...comment, type: 'issue' })),
       ];
+      const commentIds = allComments
+        .map((comment) => comment.id)
+        .filter((id) => id !== null && id !== undefined)
+        .map(String);
 
       if (allComments.length === 0) {
-        return [];
+        return { comments: [], commentIds };
       }
 
       // Create PR context
@@ -453,13 +466,14 @@ export class PRHistoryAnalyzer {
         pr: {
           number: pr.number,
           repository: this.progress.repository,
+          updated_at: pr.updated_at || pr.merged_at || pr.created_at || null,
         },
         files: prFiles,
       };
 
       // Process comments using comment processor
       const processedComments = await this.commentProcessor.processBatch(allComments, prContext);
-      return processedComments;
+      return { comments: processedComments, commentIds };
     }
     catch (error) {
       console.error(chalk.red(`Error processing PR #${pr.number}: ${error.message}`));

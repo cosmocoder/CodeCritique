@@ -14,6 +14,7 @@ import { EMBEDDING_DIMENSIONS, TABLE_NAMES } from '../embeddings/constants.js';
 import { getDefaultEmbeddingsSystem } from '../embeddings/factory.js';
 import { verboseLog } from '../utils/logging.js';
 import { truncateToTokenLimit, cleanupTokenizer } from '../utils/mobilebert-tokenizer.js';
+import { escapeSqlString } from '../utils/string-utils.js';
 
 // Create embeddings system instance
 const embeddingsSystem = getDefaultEmbeddingsSystem();
@@ -21,21 +22,29 @@ const embeddingsSystem = getDefaultEmbeddingsSystem();
 // Import constants from embeddings.js to avoid duplication
 const { PR_COMMENTS } = TABLE_NAMES;
 const PR_COMMENTS_TABLE = PR_COMMENTS;
+const PR_SYNC_STATE_BATCH_SIZE = 10000;
+const STALE_COMMENT_DELETE_BATCH_SIZE = 500;
 
 /**
  * Store multiple PR comments in batch
  * @param {Array<Object>} commentsData - Array of processed comment data
  * @param {string} projectPath - Project path for isolation (optional, defaults to cwd)
+ * @param {Object} options - Storage options
+ * @param {Array<Object>} [options.replacePRs=[]] - PRs that were fully reprocessed and should have stale comments removed
  * @returns {Promise<number>} Number of successfully stored comments
  */
-export async function storePRCommentsBatch(commentsData, projectPath = process.cwd()) {
-  if (!Array.isArray(commentsData) || commentsData.length === 0) {
+export async function storePRCommentsBatch(commentsData, projectPath = process.cwd(), options = {}) {
+  const replacePRs = Array.isArray(options.replacePRs) ? options.replacePRs : [];
+  if ((!Array.isArray(commentsData) || commentsData.length === 0) && replacePRs.length === 0) {
     return 0;
   }
 
   let successCount = 0;
   const batchSize = 100;
   const resolvedProjectPath = path.resolve(projectPath);
+  const sourceComments = Array.isArray(commentsData) ? commentsData : [];
+  const validRecords = [];
+  const liveIdsByPR = collectLiveCommentIdsByPR(sourceComments, replacePRs);
 
   try {
     const table = await embeddingsSystem.getPRCommentsTable();
@@ -44,9 +53,8 @@ export async function storePRCommentsBatch(commentsData, projectPath = process.c
       throw new Error(`Table ${PR_COMMENTS_TABLE} not found`);
     }
 
-    for (let i = 0; i < commentsData.length; i += batchSize) {
-      const batch = commentsData.slice(i, i + batchSize);
-      const validRecords = [];
+    for (let i = 0; i < sourceComments.length; i += batchSize) {
+      const batch = sourceComments.slice(i, i + batchSize);
 
       for (const commentData of batch) {
         try {
@@ -84,6 +92,7 @@ export async function storePRCommentsBatch(commentsData, projectPath = process.c
             author: commentData.author || 'unknown',
             created_at: commentData.created_at || new Date().toISOString(),
             updated_at: commentData.updated_at || null,
+            pr_updated_at: commentData.pr_updated_at || null,
             review_id: commentData.review_id || null,
             review_state: commentData.review_state || null,
 
@@ -98,36 +107,38 @@ export async function storePRCommentsBatch(commentsData, projectPath = process.c
           console.warn(chalk.yellow(`Error preparing record for ${commentData.id}: ${recordError.message}`));
         }
       }
+    }
 
-      if (validRecords.length > 0) {
-        try {
-          await table.add(validRecords);
-          successCount += validRecords.length;
-
-          // Optimize table to sync indices with data and prevent TakeExec panics
-          try {
-            await table.optimize();
-          }
-          catch (optimizeError) {
-            if (optimizeError.message && optimizeError.message.includes('legacy format')) {
-              verboseLog(
-                {},
-                chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`)
-              );
-            }
-            else {
-              console.warn(chalk.yellow(`Warning: Failed to optimize PR comments table after adding records: ${optimizeError.message}`));
-            }
-          }
-
-          verboseLog({}, chalk.green(`Stored batch of ${validRecords.length} PR comments`));
+    const failedStoragePRKeys = new Set();
+    for (let i = 0; i < validRecords.length; i += batchSize) {
+      const batch = validRecords.slice(i, i + batchSize);
+      try {
+        if (typeof table.mergeInsert === 'function') {
+          await table.mergeInsert(['id', 'project_path']).whenMatchedUpdateAll().whenNotMatchedInsertAll().execute(batch);
         }
-        catch (batchError) {
-          console.error(chalk.red(`Error storing batch: ${batchError.message}`));
+        else {
+          await table.add(batch);
         }
+        successCount += batch.length;
+        verboseLog({}, chalk.green(`Stored batch of ${batch.length} PR comments`));
+      }
+      catch (batchError) {
+        for (const record of batch) {
+          failedStoragePRKeys.add(getPRStorageKey(record.repository, record.pr_number));
+        }
+        console.error(chalk.red(`Error storing batch: ${batchError.message}`));
       }
     }
-    if (successCount > 0) {
+
+    let staleCleanupAttempted = false;
+    if (replacePRs.length > 0) {
+      staleCleanupAttempted = await deleteStalePRComments(table, replacePRs, liveIdsByPR, resolvedProjectPath, {
+        failedStoragePRKeys,
+      });
+    }
+
+    if (successCount > 0 || staleCleanupAttempted) {
+      await optimizePRCommentsTable(table);
       await embeddingsSystem.updatePRCommentsIndex();
     }
   }
@@ -136,6 +147,145 @@ export async function storePRCommentsBatch(commentsData, projectPath = process.c
   }
 
   return successCount;
+}
+
+async function optimizePRCommentsTable(table) {
+  try {
+    await table.optimize();
+  }
+  catch (optimizeError) {
+    if (optimizeError.message && optimizeError.message.includes('legacy format')) {
+      verboseLog({}, chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
+    }
+    else {
+      console.warn(chalk.yellow(`Warning: Failed to optimize PR comments table after adding records: ${optimizeError.message}`));
+    }
+  }
+}
+
+async function deleteStalePRComments(table, replacePRs, liveIdsByPR, resolvedProjectPath, options = {}) {
+  const failedStoragePRKeys = options.failedStoragePRKeys || new Set();
+  let attempted = false;
+  const seenPRs = new Set();
+  for (const pr of replacePRs) {
+    const repository = pr.repository || pr.repo;
+    const prNumber = Number(pr.prNumber ?? pr.pr_number ?? pr.number);
+    if (!repository || !Number.isFinite(prNumber)) {
+      continue;
+    }
+
+    const key = getPRStorageKey(repository, prNumber);
+    if (seenPRs.has(key)) {
+      continue;
+    }
+    seenPRs.add(key);
+    if (failedStoragePRKeys.has(key)) {
+      continue;
+    }
+
+    const filters = [
+      `repository = '${escapeSqlString(repository)}'`,
+      `project_path = '${escapeSqlString(resolvedProjectPath)}'`,
+      `pr_number = ${prNumber}`,
+    ];
+    const baseFilter = filters.join(' AND ');
+    const liveIds = liveIdsByPR.get(key) || new Set();
+
+    try {
+      if (liveIds.size === 0) {
+        // Empty live ID sets come from successful API responses for PRs that currently have no comments.
+        await table.delete(baseFilter);
+        attempted = true;
+        continue;
+      }
+
+      const storedIds = await getStoredPRCommentIds(table, baseFilter);
+      const staleIds = storedIds.filter((id) => !liveIds.has(id));
+      for (let i = 0; i < staleIds.length; i += STALE_COMMENT_DELETE_BATCH_SIZE) {
+        const staleIdBatch = staleIds.slice(i, i + STALE_COMMENT_DELETE_BATCH_SIZE);
+        const staleIdFilter = staleIdBatch.map((id) => `'${escapeSqlString(id)}'`).join(', ');
+        await table.delete(`${baseFilter} AND id IN (${staleIdFilter})`);
+        attempted = true;
+      }
+    }
+    catch (deleteError) {
+      console.warn(chalk.yellow(`Warning: Could not remove stale PR comments for #${prNumber}: ${deleteError.message}`));
+    }
+  }
+
+  return attempted;
+}
+
+async function getStoredPRCommentIds(table, whereClause) {
+  const ids = [];
+  let offset = 0;
+  while (true) {
+    const batch = await table
+      .query()
+      .where(whereClause)
+      .select(['id'])
+      .orderBy([{ column: 'id', order: 'asc' }])
+      .limit(PR_SYNC_STATE_BATCH_SIZE)
+      .offset(offset)
+      .toArray();
+
+    ids.push(
+      ...batch
+        .map((row) => row.id)
+        .filter(Boolean)
+        .map(String)
+    );
+    if (batch.length < PR_SYNC_STATE_BATCH_SIZE) {
+      break;
+    }
+    offset += batch.length;
+  }
+
+  return ids;
+}
+
+function collectLiveCommentIdsByPR(sourceComments, replacePRs) {
+  const liveIdsByPR = new Map();
+  for (const pr of replacePRs) {
+    const repository = pr.repository || pr.repo;
+    const prNumber = Number(pr.prNumber ?? pr.pr_number ?? pr.number);
+    if (!repository || !Number.isFinite(prNumber)) {
+      continue;
+    }
+
+    const key = getPRStorageKey(repository, prNumber);
+    if (!liveIdsByPR.has(key)) {
+      liveIdsByPR.set(key, new Set());
+    }
+
+    if (Array.isArray(pr.commentIds)) {
+      for (const id of pr.commentIds) {
+        if (id !== null && id !== undefined) {
+          liveIdsByPR.get(key).add(String(id));
+        }
+      }
+    }
+  }
+
+  for (const commentData of sourceComments) {
+    const repository = commentData.repository || commentData.repo;
+    const prNumber = Number(commentData.prNumber ?? commentData.pr_number ?? commentData.number);
+    if (!commentData.id || !repository || !Number.isFinite(prNumber)) {
+      continue;
+    }
+
+    const key = getPRStorageKey(repository, prNumber);
+    if (!liveIdsByPR.has(key)) {
+      liveIdsByPR.set(key, new Set());
+    }
+    liveIdsByPR.get(key).add(String(commentData.id));
+  }
+
+  return liveIdsByPR;
+}
+
+function getPRStorageKey(repository, prNumber) {
+  return `${repository}#${Number(prNumber)}`;
 }
 
 /**
@@ -164,9 +314,9 @@ export async function getPRCommentsStats(repository = null, projectPath = proces
 
     const resolvedProjectPath = path.resolve(projectPath);
 
-    const filters = [`project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`];
+    const filters = [`project_path = '${escapeSqlString(resolvedProjectPath)}'`];
     if (repository) {
-      filters.push(`repository = '${repository.replace(/'/g, "''")}'`);
+      filters.push(`repository = '${escapeSqlString(repository)}'`);
     }
 
     const whereClause = filters.join(' AND ');
@@ -285,77 +435,104 @@ export async function getPRCommentsStats(repository = null, projectPath = proces
 }
 
 /**
- * Get the date range of processed PRs for a repository
+ * Get exact processed PR sync state for a repository.
  * @param {string} repository - Repository in format "owner/repo"
  * @param {string} projectPath - Project path for filtering (optional, defaults to cwd)
- * @returns {Promise<{oldestPR: string|null, newestPR: string|null}>} Date range of processed PRs
+ * @returns {Promise<{processedPRs: Map<number, {latestCommentAt: string|null, latestPRUpdatedAt: string|null, commentCount: number}>}>} Processed PR state
  */
-export async function getProcessedPRDateRange(repository, projectPath = process.cwd()) {
+export async function getProcessedPRSyncState(repository, projectPath = process.cwd()) {
   try {
     const table = await embeddingsSystem.getPRCommentsTable();
 
     if (!table) {
-      return { oldestPR: null, newestPR: null };
+      return { processedPRs: new Map() };
     }
 
     const resolvedProjectPath = path.resolve(projectPath);
-    const whereClause = `repository = '${repository.replace(/'/g, "''")}' AND project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`;
-
-    // Get all unique PR numbers and their creation dates
-    const results = await table.query().where(whereClause).limit(10000).toArray();
-
-    if (results.length === 0) {
-      return { oldestPR: null, newestPR: null };
+    const whereClause = `repository = '${escapeSqlString(repository)}' AND project_path = '${escapeSqlString(resolvedProjectPath)}'`;
+    const results = [];
+    let offset = 0;
+    while (true) {
+      const batch = await table
+        .query()
+        .where(whereClause)
+        .select(['id', 'pr_number', 'created_at', 'updated_at', 'pr_updated_at'])
+        .orderBy([{ column: 'id', order: 'asc' }])
+        .limit(PR_SYNC_STATE_BATCH_SIZE)
+        .offset(offset)
+        .toArray();
+      results.push(...batch);
+      if (batch.length < PR_SYNC_STATE_BATCH_SIZE) {
+        break;
+      }
+      offset += batch.length;
     }
+    const processedPRs = new Map();
 
-    // Extract unique PRs with their dates
-    const prDates = new Map();
-    results.forEach((comment) => {
-      if (comment.pr_number && comment.created_at) {
-        const prNumber = comment.pr_number;
-        const commentDate = new Date(comment.created_at);
+    for (const comment of results) {
+      if (!comment.pr_number) {
+        continue;
+      }
 
-        if (!prDates.has(prNumber) || commentDate < prDates.get(prNumber)) {
-          prDates.set(prNumber, commentDate);
+      const prNumber = Number(comment.pr_number);
+      const existing = processedPRs.get(prNumber) || { latestCommentAt: null, latestPRUpdatedAt: null, commentCount: 0 };
+      const commentTimestamp = comment.updated_at || comment.created_at;
+      const prTimestamp = comment.pr_updated_at;
+
+      existing.commentCount += 1;
+      if (commentTimestamp) {
+        const timestampDate = new Date(commentTimestamp);
+        const existingDate = existing.latestCommentAt ? new Date(existing.latestCommentAt) : null;
+        if (!Number.isNaN(timestampDate.getTime()) && (!existingDate || timestampDate > existingDate)) {
+          existing.latestCommentAt = timestampDate.toISOString();
         }
       }
-    });
+      if (prTimestamp) {
+        const prUpdatedDate = new Date(prTimestamp);
+        const existingPRUpdatedDate = existing.latestPRUpdatedAt ? new Date(existing.latestPRUpdatedAt) : null;
+        if (!Number.isNaN(prUpdatedDate.getTime()) && (!existingPRUpdatedDate || prUpdatedDate > existingPRUpdatedDate)) {
+          existing.latestPRUpdatedAt = prUpdatedDate.toISOString();
+        }
+      }
 
-    if (prDates.size === 0) {
-      return { oldestPR: null, newestPR: null };
+      processedPRs.set(prNumber, existing);
     }
 
-    const dates = Array.from(prDates.values()).sort((a, b) => a - b);
-    const oldestPR = dates[0].toISOString();
-    const newestPR = dates[dates.length - 1].toISOString();
-
-    verboseLog({}, chalk.blue(`Processed PR date range: ${oldestPR} to ${newestPR} (${prDates.size} PRs)`));
-    return { oldestPR, newestPR };
+    verboseLog({}, chalk.blue(`Found stored PR sync state for ${processedPRs.size} PRs`));
+    return { processedPRs };
   }
   catch (error) {
-    console.error(chalk.red(`Error getting processed PR date range: ${error.message}`));
-    return { oldestPR: null, newestPR: null };
+    console.error(chalk.red(`Error getting processed PR sync state: ${error.message}`));
+    return { processedPRs: new Map() };
   }
 }
 
 /**
- * Check if a PR should be skipped based on processed date range
+ * Check if a PR should be skipped based on exact processed sync state.
  * @param {Object} pr - PR object with merged_at or created_at date
- * @param {string} oldestPR - Oldest processed PR date (ISO string)
- * @param {string} newestPR - Newest processed PR date (ISO string)
+ * @param {Object} processedPRSyncState - Exact processed PR sync state
  * @returns {boolean} True if PR should be skipped
  */
-export function shouldSkipPR(pr, oldestPR, newestPR) {
-  if (!oldestPR || !newestPR || !pr) {
+export function shouldSkipPR(pr, processedPRSyncState) {
+  const processedPRs = processedPRSyncState?.processedPRs;
+  const prNumber = Number(pr?.number || pr?.pr_number);
+  const processedState = processedPRs instanceof Map ? processedPRs.get(prNumber) : null;
+  if (!pr || !processedState) {
     return false;
   }
 
-  const prDate = new Date(pr.merged_at || pr.created_at || pr.updated_at);
-  const oldestDate = new Date(oldestPR);
-  const newestDate = new Date(newestPR);
+  if (!processedState.latestPRUpdatedAt) {
+    // Legacy rows predate pr_updated_at; keep them as processed markers to avoid a one-time full history re-crawl.
+    return Boolean(processedState.latestCommentAt);
+  }
 
-  // Skip if PR date falls within the already processed range
-  return prDate >= oldestDate && prDate <= newestDate;
+  const latestStoredDate = new Date(processedState.latestPRUpdatedAt);
+  const latestPRDate = new Date(pr.updated_at || pr.merged_at || pr.created_at);
+  if (Number.isNaN(latestStoredDate.getTime()) || Number.isNaN(latestPRDate.getTime())) {
+    return false;
+  }
+
+  return latestPRDate <= latestStoredDate;
 }
 
 /**
@@ -373,7 +550,7 @@ export async function clearPRComments(repository, projectPath = process.cwd()) {
     }
 
     const resolvedProjectPath = path.resolve(projectPath);
-    const deleteQuery = `repository = '${repository.replace(/'/g, "''")}' AND project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`;
+    const deleteQuery = `repository = '${escapeSqlString(repository)}' AND project_path = '${escapeSqlString(resolvedProjectPath)}'`;
     const countBefore = await table.countRows(deleteQuery);
 
     await table.delete(deleteQuery);
@@ -401,11 +578,11 @@ export async function hasPRComments(repository, projectPath = process.cwd()) {
       return false;
     }
 
-    let whereClause = `repository = '${repository.replace(/'/g, "''")}'`;
+    let whereClause = `repository = '${escapeSqlString(repository)}'`;
 
     if (projectPath !== null) {
       const resolvedProjectPath = path.resolve(projectPath);
-      whereClause += ` AND project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`;
+      whereClause += ` AND project_path = '${escapeSqlString(resolvedProjectPath)}'`;
     }
 
     const count = await table.countRows(whereClause);
@@ -433,7 +610,7 @@ export async function getLastAnalysisTimestamp(repository, projectPath) {
 
     const resolvedProjectPath = path.resolve(projectPath);
 
-    const filters = [`repository = '${repository.replace(/'/g, "''")}'`, `project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`];
+    const filters = [`repository = '${escapeSqlString(repository)}'`, `project_path = '${escapeSqlString(resolvedProjectPath)}'`];
 
     const results = await table
       .query()
@@ -746,7 +923,7 @@ export async function findRelevantPRComments(reviewFileContent, options = {}) {
 
     // Create project-specific WHERE clause for filtering
     const resolvedProjectPath = path.resolve(projectPath);
-    const projectWhereClause = `project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`;
+    const projectWhereClause = `project_path = '${escapeSqlString(resolvedProjectPath)}'`;
 
     verboseLog(options, chalk.blue(`🔒 Project isolation: filtering by project_path = '${resolvedProjectPath}'`));
 
