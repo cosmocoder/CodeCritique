@@ -823,9 +823,9 @@ export class DatabaseManager {
    */
   async _clearProjectTableRecords(db, tableName, resolvedProjectPath, pathField) {
     const table = await db.openTable(tableName);
-    const allRecords = await table.query().toArray();
+    const records = await this._getProjectTableRecords(table, tableName, resolvedProjectPath, pathField);
 
-    const projectRecords = allRecords.filter((record) => {
+    const projectRecords = records.filter((record) => {
       if (!record[pathField]) {
         return false;
       }
@@ -866,6 +866,34 @@ export class DatabaseManager {
       verboseLog({}, chalk.yellow(`No ${tableName} records found for this project`));
       return 0;
     }
+  }
+
+  /**
+   * Fetch candidate cleanup records, using a project-scoped table query when the schema supports it.
+   * @param {LanceDBTable} table - Table instance
+   * @param {string} tableName - Table name
+   * @param {string} resolvedProjectPath - Resolved project path
+   * @param {string} pathField - Field used to scope project records
+   * @returns {Promise<Object[]>} Candidate cleanup records
+   * @private
+   */
+  async _getProjectTableRecords(table, tableName, resolvedProjectPath, pathField) {
+    try {
+      const currentSchema = await getTableSchema(table);
+
+      if (pathField === 'project_path' && schemaHasField(currentSchema, 'project_path')) {
+        return await table
+          .query()
+          .where(`project_path = '${escapeSqlString(resolvedProjectPath)}'`)
+          .toArray();
+      }
+    }
+    catch (queryError) {
+      debug(`Could not query ${tableName} by ${pathField}: ${queryError.message}`);
+    }
+
+    verboseLog({}, chalk.yellow(`Falling back to full ${tableName} scan for project cleanup`));
+    return await table.query().toArray();
   }
 
   /**

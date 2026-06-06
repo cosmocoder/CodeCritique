@@ -402,6 +402,14 @@ describe('ProjectAnalyzer', () => {
       expect(mockTable.query).toHaveBeenCalled();
     });
 
+    it('should escape project paths in key file queries', async () => {
+      const queryChain = mockTable.query();
+
+      await analyzer.mineKeyFilesFromEmbeddings("/mock/we're/project");
+
+      expect(queryChain.where).toHaveBeenCalledWith(expect.stringContaining("/mock/we''re/project"));
+    });
+
     it('should handle table optimization errors gracefully', async () => {
       mockTable.optimize.mockRejectedValue(new Error('legacy format'));
       mockTable.query().toArray.mockResolvedValue([]);
