@@ -100,7 +100,8 @@ export class ModelManager {
               this.modelInitialized = true;
             }
             break; // Exit loop on success
-          } catch (initError) {
+          }
+          catch (initError) {
             retries++;
             console.error(chalk.yellow(`Model initialization attempt ${retries}/${this.maxRetries} failed: ${initError.message}`));
             if (retries >= this.maxRetries) {
@@ -117,7 +118,8 @@ export class ModelManager {
         // Clear the initialization promise since we're done
         this.modelInitializationPromise = null;
         return this.embeddingModel;
-      } catch (err) {
+      }
+      catch (err) {
         // Clear the initialization promise on error
         this.modelInitializationPromise = null;
         console.error(chalk.red(`Fatal: Failed to initialize fastembed model: ${err.message}`), err);
@@ -190,7 +192,8 @@ export class ModelManager {
       }
 
       return embedding;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error calculating embedding: ${error.message}`), error);
       throw createEmbeddingGenerationError(`Failed to calculate embedding: ${error.message}`, error, { text: text.substring(0, 100) });
     }
@@ -220,7 +223,8 @@ export class ModelManager {
           // Validate each generated embedding
           if (vec && typeof vec.length === 'number' && vec.length === this.embeddingDimensions) {
             embeddings.push(Array.from(vec)); // Convert Float32Array (or other array-like) to regular array
-          } else {
+          }
+          else {
             console.error(
               chalk.red(
                 `Generated batch embedding dimension (${vec?.length}) does not match expected (${this.embeddingDimensions}) or embedding is invalid.`
@@ -243,7 +247,8 @@ export class ModelManager {
 
       debug(`Batch embeddings generated successfully, count: ${embeddings.filter((e) => e !== null).length}`);
       return embeddings;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error calculating batch embeddings: ${error.message}`), error);
       throw createEmbeddingGenerationError(`Failed to calculate batch embeddings: ${error.message}`, error, { textsCount: texts.length });
     }
@@ -286,7 +291,8 @@ export class ModelManager {
         }
 
         return embedding;
-      } else {
+      }
+      else {
         console.error(
           chalk.red(
             `Generated query embedding dimension (${embeddingArray?.length}) does not match expected (${this.embeddingDimensions}) or embedding is invalid.`
@@ -294,7 +300,8 @@ export class ModelManager {
         );
         return null;
       }
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error calculating query embedding: ${error.message}`), error);
       throw createEmbeddingGenerationError(`Failed to calculate query embedding: ${error.message}`, error, {
         text: text.substring(0, 100),
@@ -328,9 +335,11 @@ export class ModelManager {
       }
 
       verboseLog({}, chalk.green('[ModelManager] Model resources cleaned up.'));
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`[ModelManager] Error during cleanup: ${error.message}`));
-    } finally {
+    }
+    finally {
       this.cleaningUp = false;
     }
   }

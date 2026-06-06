@@ -942,7 +942,9 @@ describe('rag-analyzer', () => {
   describe('gatherUnifiedContextForPR error handling', () => {
     it('should handle file context gathering errors', async () => {
       fs.readFileSync.mockImplementation((path) => {
-        if (path.includes('error-file')) throw new Error('Read error');
+        if (path.includes('error-file')) {
+          throw new Error('Read error');
+        }
         return 'const x = 1;';
       });
       const prFiles = [

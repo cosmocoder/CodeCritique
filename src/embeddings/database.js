@@ -142,11 +142,13 @@ export class DatabaseManager {
         await this.ensureTablesExist(db);
         this.tablesInitialized = true;
         verboseLog({}, chalk.green('Database tables and indices initialized successfully.'));
-      } catch (error) {
+      }
+      catch (error) {
         this.tablesInitialized = false;
         console.error(chalk.red('Failed to initialize database tables:'), error);
         throw error; // Re-throw to propagate the error to callers
-      } finally {
+      }
+      finally {
         // The initialization attempt is over, clear the promise
         this.tableInitializationPromise = null;
       }
@@ -205,7 +207,8 @@ export class DatabaseManager {
         verboseLog({}, chalk.yellow(`Creating ${this.fileEmbeddingsTable} table with optimized schema...`));
         fileTable = await db.createEmptyTable(this.fileEmbeddingsTable, fileSchema, { mode: 'create' });
         verboseLog({}, chalk.green(`Created ${this.fileEmbeddingsTable} table.`));
-      } else {
+      }
+      else {
         fileTable = await db.openTable(this.fileEmbeddingsTable);
         await this._checkSchemaCompatibility(fileTable, this.fileEmbeddingsTable, 'project_path');
       }
@@ -214,7 +217,8 @@ export class DatabaseManager {
         verboseLog({}, chalk.yellow(`Creating ${this.documentChunkTable} table with optimized schema...`));
         documentChunkTable = await db.createEmptyTable(this.documentChunkTable, documentChunkSchema, { mode: 'create' });
         verboseLog({}, chalk.green(`Created ${this.documentChunkTable} table.`));
-      } else {
+      }
+      else {
         documentChunkTable = await db.openTable(this.documentChunkTable);
         await this._checkSchemaCompatibility(documentChunkTable, this.documentChunkTable, 'project_path');
       }
@@ -224,7 +228,8 @@ export class DatabaseManager {
         verboseLog({}, chalk.yellow(`Creating ${this.prCommentsTable} table with optimized schema...`));
         prCommentsTable = await db.createEmptyTable(this.prCommentsTable, prCommentsSchema, { mode: 'create' });
         verboseLog({}, chalk.green(`Created ${this.prCommentsTable} table.`));
-      } else {
+      }
+      else {
         prCommentsTable = await db.openTable(this.prCommentsTable);
       }
 
@@ -241,7 +246,8 @@ export class DatabaseManager {
         [documentChunkTable, this.documentChunkTable, 'vector'],
         [prCommentsTable, this.prCommentsTable, 'combined_embedding'],
       ]);
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error ensuring tables exist: ${error.message}`), error.stack);
       throw error;
     }
@@ -264,7 +270,8 @@ export class DatabaseManager {
         return await db.openTable(tableName);
       }
       return null;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error opening table ${tableName}: ${error.message}`), error);
       return null;
     }
@@ -338,10 +345,12 @@ export class DatabaseManager {
       if (rowCount < 100) {
         verboseLog({}, chalk.blue(`[${tableName}] Skipping indexing for small dataset (${rowCount} rows). Using exact search.`));
         return { indexType: 'exact', rowCount };
-      } else if (rowCount < 1000) {
+      }
+      else if (rowCount < 1000) {
         verboseLog({}, chalk.blue(`[${tableName}] Using exact search for small dataset (${rowCount} rows) - no index needed`));
         return { indexType: 'exact', rowCount };
-      } else if (rowCount < 10000) {
+      }
+      else if (rowCount < 10000) {
         const numPartitions = Math.max(Math.floor(Math.sqrt(rowCount / 50)), 2);
         verboseLog(
           {},
@@ -352,7 +361,8 @@ export class DatabaseManager {
           replace: false,
         });
         return { indexType: 'ivf_flat', rowCount, numPartitions };
-      } else {
+      }
+      else {
         const numPartitions = Math.max(Math.floor(Math.sqrt(rowCount / 100)), 8);
         const numSubVectors = Math.floor(this.embeddingDimensions / 4);
         verboseLog(
@@ -369,7 +379,8 @@ export class DatabaseManager {
         });
         return { indexType: 'ivf_pq', rowCount, numPartitions, numSubVectors };
       }
-    } catch (error) {
+    }
+    catch (error) {
       if (error.message.includes('already exists')) {
         verboseLog({}, chalk.green(`[${tableName}] Index already up-to-date.`));
         return { indexType: 'existing' };
@@ -396,9 +407,11 @@ export class DatabaseManager {
     try {
       await this.closeConnection();
       verboseLog({}, chalk.green('Database resources cleaned up.'));
-    } catch (error) {
+    }
+    catch (error) {
       console.error(`Error during database cleanup: ${error.message}`);
-    } finally {
+    }
+    finally {
       this.cleaningUp = false;
     }
   }
@@ -428,7 +441,8 @@ export class DatabaseManager {
           await db.dropTable(tableName);
           verboseLog({}, chalk.green(`Table ${tableName} dropped.`));
           droppedCount++;
-        } else {
+        }
+        else {
           verboseLog({}, chalk.yellow(`Table ${tableName} does not exist.`));
         }
       }
@@ -436,7 +450,8 @@ export class DatabaseManager {
       if (droppedCount > 0) {
         verboseLog({}, chalk.green('All embedding tables have been dropped.'));
         verboseLog({}, chalk.yellow('Run the embedding generation process again to recreate tables.'));
-      } else {
+      }
+      else {
         verboseLog({}, chalk.green('No embedding tables found to drop.'));
       }
 
@@ -444,16 +459,19 @@ export class DatabaseManager {
       this.dbConnection = null;
       this.tablesInitialized = false;
       return true;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error clearing embeddings: ${error.message}`), error);
       this.dbConnection = null;
       this.tablesInitialized = false;
       throw error;
-    } finally {
+    }
+    finally {
       if (db) {
         try {
           await db.close();
-        } catch (closeError) {
+        }
+        catch (closeError) {
           console.warn(chalk.yellow(`Warning: Failed to close temporary database connection: ${closeError.message}`));
         }
       }
@@ -521,19 +539,23 @@ export class DatabaseManager {
 
         // Optimize tables after cleanup to maintain performance
         await this._optimizeTablesAfterCleanup(db, tableNames);
-      } else {
+      }
+      else {
         verboseLog({}, chalk.yellow(`No embeddings found for project: ${resolvedProjectPath}`));
       }
 
       return true;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error clearing project embeddings: ${error.message}`), error);
       throw error;
-    } finally {
+    }
+    finally {
       if (db) {
         try {
           await db.close();
-        } catch (closeError) {
+        }
+        catch (closeError) {
           console.warn(chalk.yellow(`Warning: Failed to close temporary database connection: ${closeError.message}`));
         }
       }
@@ -572,7 +594,8 @@ export class DatabaseManager {
       try {
         await table.delete(`id = '${escapeSqlString(record.id)}'`);
         deletedCount++;
-      } catch (deleteError) {
+      }
+      catch (deleteError) {
         console.warn(chalk.yellow(`Warning: Could not prune file embedding ${record.id}: ${deleteError.message}`));
       }
     }
@@ -608,7 +631,8 @@ export class DatabaseManager {
       try {
         await table.delete(`id = '${escapeSqlString(record.id)}'`);
         deletedCount++;
-      } catch (deleteError) {
+      }
+      catch (deleteError) {
         console.warn(chalk.yellow(`Warning: Could not prune document chunk ${record.id}: ${deleteError.message}`));
       }
     }
@@ -637,7 +661,8 @@ export class DatabaseManager {
           console.warn(chalk.yellow(`Please clear embeddings and regenerate them to use the new schema with project isolation.`));
         }
       }
-    } catch (schemaError) {
+    }
+    catch (schemaError) {
       debug(`Could not check schema for ${tableName}: ${schemaError.message}`);
     }
   }
@@ -660,10 +685,12 @@ export class DatabaseManager {
           );
         }
         verboseLog({}, chalk.green(`✓ Table ${tableName} has project_path field for proper isolation`));
-      } else {
+      }
+      else {
         console.warn(chalk.yellow(`Table ${tableName} has no readable schema, skipping validation`));
       }
-    } catch (schemaError) {
+    }
+    catch (schemaError) {
       // If we can't read the schema, it might be because the table is empty or doesn't exist
       // In this case, we should just warn and continue
       console.warn(chalk.yellow(`Warning: Could not validate schema for ${tableName}: ${schemaError.message}`));
@@ -682,10 +709,12 @@ export class DatabaseManager {
       try {
         await table.createIndex(contentField, { config: lancedb.Index.fts(), replace: false });
         verboseLog({}, chalk.green(`FTS index created/updated for ${tableName}`));
-      } catch (error) {
+      }
+      catch (error) {
         if (error.message.toLowerCase().includes('already exists')) {
           verboseLog({}, chalk.green(`FTS index already exists for ${tableName}.`));
-        } else {
+        }
+        else {
           console.warn(chalk.yellow(`FTS index warning for ${tableName}: ${error.message}`));
         }
       }
@@ -722,7 +751,8 @@ export class DatabaseManager {
         verboseLog({}, chalk.blue(`Optimizing table: ${tableName}`));
         await table.optimize();
         verboseLog({}, chalk.green(`✓ Table ${tableName} optimized successfully`));
-      } catch (error) {
+      }
+      catch (error) {
         // Handle legacy FTS index upgrade issues in v0.22.2
         if (error.message && error.message.includes('legacy format')) {
           console.warn(
@@ -730,7 +760,8 @@ export class DatabaseManager {
               `Skipping optimization for ${tableName} due to legacy index format - will be auto-upgraded during normal operations`
             )
           );
-        } else {
+        }
+        else {
           console.warn(chalk.yellow(`Warning: Failed to optimize table ${tableName}: ${error.message}`));
         }
       }
@@ -753,17 +784,21 @@ export class DatabaseManager {
     const allRecords = await table.query().toArray();
 
     const projectRecords = allRecords.filter((record) => {
-      if (!record[pathField]) return false;
+      if (!record[pathField]) {
+        return false;
+      }
 
       // Check if this record belongs to the current project
       try {
         if (pathField === 'project_path') {
           return record[pathField] === resolvedProjectPath;
-        } else {
+        }
+        else {
           const absolutePath = path.resolve(resolvedProjectPath, record[pathField]);
           return isPathWithinProject(absolutePath, resolvedProjectPath);
         }
-      } catch {
+      }
+      catch {
         return false;
       }
     });
@@ -776,14 +811,16 @@ export class DatabaseManager {
         try {
           await table.delete(`id = '${escapeSqlString(record.id)}'`);
           deletedCount++;
-        } catch (deleteError) {
+        }
+        catch (deleteError) {
           console.warn(chalk.yellow(`Warning: Could not delete record ${record.id}: ${deleteError.message}`));
         }
       }
 
       verboseLog({}, chalk.green(`Deleted ${deletedCount} ${tableName} records for this project`));
       return deletedCount;
-    } else {
+    }
+    else {
       verboseLog({}, chalk.yellow(`No ${tableName} records found for this project`));
       return 0;
     }
@@ -804,17 +841,20 @@ export class DatabaseManager {
         verboseLog({}, chalk.blue(`Optimizing ${this.prCommentsTable} table...`));
         try {
           await table.optimize();
-        } catch (optimizeError) {
+        }
+        catch (optimizeError) {
           if (optimizeError.message && optimizeError.message.includes('legacy format')) {
             console.warn(chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
-          } else {
+          }
+          else {
             throw optimizeError; // Re-throw non-legacy errors
           }
         }
 
         verboseLog({}, chalk.green(`Vector index for ${this.prCommentsTable} updated and optimized.`));
       }
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error updating PR comments index: ${error.message}`));
       throw createDatabaseError(`Failed to update PR comments index: ${error.message}`, ERROR_CODES.INDEX_UPDATE_ERROR, error);
     }
@@ -862,7 +902,8 @@ export class DatabaseManager {
         for (const existing of existingRecords) {
           await table.delete(`id = '${existing.id.replace(/'/g, "''")}'`);
         }
-      } catch {
+      }
+      catch {
         // Continue if no existing records found
       }
 
@@ -873,17 +914,20 @@ export class DatabaseManager {
       try {
         await table.optimize();
         verboseLog({}, chalk.blue(`✓ Project summaries table optimized`));
-      } catch (optimizeError) {
+      }
+      catch (optimizeError) {
         if (optimizeError.message && optimizeError.message.includes('legacy format')) {
           console.warn(chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
-        } else {
+        }
+        else {
           console.warn(chalk.yellow(`Warning: Failed to optimize project summaries table: ${optimizeError.message}`));
         }
       }
 
       verboseLog({}, chalk.green(`✅ Project summary stored for: ${resolvedProjectPath}`));
       return true;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error storing project summary: ${error.message}`));
       throw createDatabaseError(`Failed to store project summary: ${error.message}`, ERROR_CODES.STORAGE_ERROR, error);
     }
@@ -931,7 +975,8 @@ export class DatabaseManager {
       };
 
       return summary;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error retrieving project summary: ${error.message}`));
       return null; // Return null instead of throwing to allow graceful fallback
     }
@@ -960,14 +1005,16 @@ export class DatabaseManager {
           verboseLog({}, chalk.blue(`Optimizing ${displayName} table...`));
           await table.optimize();
           verboseLog({}, chalk.green(`✓ ${displayName} table optimized`));
-        } catch (error) {
+        }
+        catch (error) {
           if (error.message && error.message.includes('legacy format')) {
             console.warn(
               chalk.yellow(
                 `Skipping optimization for ${displayName} due to legacy index format - will be auto-upgraded during normal operations`
               )
             );
-          } else {
+          }
+          else {
             console.warn(chalk.yellow(`Warning: Failed to optimize ${displayName} table: ${error.message}`));
           }
         }

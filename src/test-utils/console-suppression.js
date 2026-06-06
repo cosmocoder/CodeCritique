@@ -30,7 +30,8 @@ export function setupConsoleSpies() {
       if (enableConsoleOutput) {
         // Spy but call through to original - shows output but allows assertions
         consoleSpies[method] = vi.spyOn(console, method);
-      } else {
+      }
+      else {
         // Spy and suppress output
         consoleSpies[method] = vi.spyOn(console, method).mockImplementation(() => {});
       }

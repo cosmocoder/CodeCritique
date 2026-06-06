@@ -253,7 +253,8 @@ export class CacheManager {
       const size = cacheMap.size;
       cacheMap.clear();
       verboseLog({}, chalk.yellow(`[CACHE] Cleared ${cacheType} cache - ${size} items`));
-    } else {
+    }
+    else {
       console.warn(chalk.yellow(`[CACHE] Unknown cache type: ${cacheType}`));
     }
   }
@@ -318,7 +319,8 @@ export class CacheManager {
     try {
       this.clearAllCaches();
       verboseLog({}, chalk.green('[CACHE] Cache cleanup completed'));
-    } finally {
+    }
+    finally {
       this.cleaningUp = false;
     }
   }

@@ -23,7 +23,9 @@ import { GENERIC_DOC_REGEX } from './constants.js';
  * // Returns: false
  */
 export function isGenericDocument(docPath, docH1 = null) {
-  if (!docPath) return false;
+  if (!docPath) {
+    return false;
+  }
 
   // Check filename pattern
   if (GENERIC_DOC_REGEX.test(docPath)) {
@@ -69,31 +71,36 @@ export function getGenericDocumentContext(docPath) {
       area: 'Documentation',
       dominantTech: ['markdown', 'documentation'],
     };
-  } else if (fileName.includes('runbook')) {
+  }
+  else if (fileName.includes('runbook')) {
     return {
       ...baseContext,
       area: 'Operations',
       dominantTech: ['operations', 'deployment', 'devops'],
     };
-  } else if (fileName.includes('changelog')) {
+  }
+  else if (fileName.includes('changelog')) {
     return {
       ...baseContext,
       area: 'Documentation',
       dominantTech: ['versioning', 'releases'],
     };
-  } else if (fileName.includes('contributing')) {
+  }
+  else if (fileName.includes('contributing')) {
     return {
       ...baseContext,
       area: 'Development',
       dominantTech: ['git', 'development', 'contribution'],
     };
-  } else if (fileName.includes('license')) {
+  }
+  else if (fileName.includes('license')) {
     return {
       ...baseContext,
       area: 'Legal',
       dominantTech: ['licensing'],
     };
-  } else if (fileName.includes('setup') || fileName.includes('install')) {
+  }
+  else if (fileName.includes('setup') || fileName.includes('install')) {
     return {
       ...baseContext,
       area: 'Setup',

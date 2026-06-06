@@ -33,7 +33,9 @@ import { verboseLog } from './logging.js';
  * isTestFile('src/utils.js'); // false
  */
 export function isTestFile(filePath) {
-  if (!filePath) return false;
+  if (!filePath) {
+    return false;
+  }
   const lowerPath = filePath.toLowerCase();
   // Common patterns: /__tests__/, /tests/, /specs/, _test., _spec., .test., .spec.
   // Ensure delimiters are present or it's in a specific test directory.
@@ -124,13 +126,15 @@ export function shouldProcessFile(filePath, _, options = {}) {
     if (fileStats.size > 1024 * 1024) {
       return false;
     }
-  } else {
+  }
+  else {
     try {
       const stats = fs.statSync(filePath);
       if (stats.size > 1024 * 1024) {
         return false;
       }
-    } catch {
+    }
+    catch {
       // If we can't get file stats, assume it's processable
     }
   }
@@ -184,12 +188,17 @@ export function shouldProcessFile(filePath, _, options = {}) {
       });
 
       // If we get here, the file is ignored by git
-      if (gitignoreCache) gitignoreCache.set(relativePath, true);
+      if (gitignoreCache) {
+        gitignoreCache.set(relativePath, true);
+      }
       return false;
-    } catch {
+    }
+    catch {
       // If git check-ignore exits with non-zero status, the file is not ignored
       // This is expected behavior, so we continue processing
-      if (gitignoreCache) gitignoreCache.set(relativePath, false);
+      if (gitignoreCache) {
+        gitignoreCache.set(relativePath, false);
+      }
     }
   }
 
@@ -252,7 +261,8 @@ export async function batchCheckGitignore(filePaths, baseDir = process.cwd(), op
         verboseLog(options, `      ... and ${ignoredFiles.length - 5} more`);
       }
     }
-  } catch (error) {
+  }
+  catch (error) {
     // Check if this is just "no files ignored" (exit code 1) vs actual error
     // Exit code 1 from git check-ignore means no paths matched - this is normal
     if (error.status === 1) {
@@ -260,7 +270,8 @@ export async function batchCheckGitignore(filePaths, baseDir = process.cwd(), op
       for (const relPath of relativePaths) {
         resultMap.set(relPath, false);
       }
-    } else {
+    }
+    else {
       // Actual error (exit code 128 or other) - log and fall back
       console.warn(`⚠️ Batch gitignore check failed: ${error.message}`);
       console.warn('  Falling back to individual checks (may be slower)');

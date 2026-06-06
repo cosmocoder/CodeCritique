@@ -23,7 +23,8 @@ export function detectLanguageFromExtension(extension) {
   const normalizedExt = extension.toLowerCase();
   if (!normalizedExt.startsWith('.')) {
     extension = `.${normalizedExt}`;
-  } else {
+  }
+  else {
     extension = normalizedExt;
   }
 
@@ -71,16 +72,20 @@ export function detectFileType(filePath, content = '') {
   if (baseName.endsWith('.d.ts')) {
     result.type = 'type-definition';
     result.isTypeDefinition = true;
-  } else if (baseName.match(/\.test\.|\.spec\.|_test\.|_spec\./)) {
+  }
+  else if (baseName.match(/\.test\.|\.spec\.|_test\.|_spec\./)) {
     result.type = 'test';
     result.isTest = true;
-  } else if (baseName.match(/^test.*\.|^spec.*\./)) {
+  }
+  else if (baseName.match(/^test.*\.|^spec.*\./)) {
     result.type = 'test';
     result.isTest = true;
-  } else if (baseName.match(/config|conf|settings|\.rc$/)) {
+  }
+  else if (baseName.match(/config|conf|settings|\.rc$/)) {
     result.type = 'config';
     result.isConfig = true;
-  } else if (language) {
+  }
+  else if (language) {
     result.type = language;
   }
 

@@ -321,7 +321,8 @@ export async function runCleanup(options = {}) {
   let artifacts;
   try {
     artifacts = await fetchArtifacts(repository, githubToken);
-  } catch (error) {
+  }
+  catch (error) {
     console.error(`❌ Failed to fetch artifacts: ${error.message}`);
     setOutputs(
       {
@@ -376,9 +377,11 @@ export async function runCleanup(options = {}) {
     for (const { artifact, reason, pattern } of skipped) {
       if (reason === 'expired') {
         console.log(`⏭️ Skipping expired artifact: ${artifact.name}`);
-      } else if (reason === 'excluded') {
+      }
+      else if (reason === 'excluded') {
         console.log(`⏭️ Excluding artifact matching pattern '${pattern}': ${artifact.name}`);
-      } else if (reason === 'too_recent') {
+      }
+      else if (reason === 'too_recent') {
         console.log(`⏭️ Skipping recent artifact: ${artifact.name} (created: ${artifact.created_at})`);
       }
     }
@@ -395,7 +398,8 @@ export async function runCleanup(options = {}) {
       console.log(`🔍 [DRY RUN] Would delete artifact: ${artifact.name}`);
       artifactsDeleted++;
       spaceReclaimed += sizeMb;
-    } else {
+    }
+    else {
       if (requireConfirmation) {
         // In CI, confirmation isn't practical - skip confirmation logic
         console.log(`❓ Confirmation required for: ${artifact.name} (skipped in non-interactive mode)`);
@@ -410,7 +414,8 @@ export async function runCleanup(options = {}) {
         artifactsDeleted++;
         spaceReclaimed += sizeMb;
         deletedArtifacts.push({ ...artifact, deleted: true });
-      } else {
+      }
+      else {
         console.log(`❌ Failed to delete: ${artifact.name}`);
         failedDeletions.push(artifact.name);
         errors.push({

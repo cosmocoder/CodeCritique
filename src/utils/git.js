@@ -28,7 +28,8 @@ function checkBranchExists(branchName, workingDir = process.cwd()) {
   try {
     execGitSafe('git show-ref', ['--verify', '--quiet', `refs/heads/${branchName}`], { cwd: workingDir });
     return true;
-  } catch {
+  }
+  catch {
     // Command returns non-zero exit code if branch doesn't exist
     return false;
   }
@@ -58,7 +59,8 @@ export function ensureBranchExists(branchName, workingDir = process.cwd()) {
     try {
       execGitSafe('git fetch', ['origin', `${branchName}:${branchName}`], { stdio: 'pipe', cwd: workingDir });
       verboseLog({}, chalk.green(`Successfully fetched branch '${branchName}' from origin`));
-    } catch {
+    }
+    catch {
       // If direct fetch fails, try fetching all branches and then checking
       verboseLog({}, chalk.yellow(`Direct fetch failed, trying to fetch all branches...`));
       execSync('git fetch origin', { stdio: 'pipe', cwd: workingDir });
@@ -69,11 +71,13 @@ export function ensureBranchExists(branchName, workingDir = process.cwd()) {
         // Create local tracking branch without switching working tree.
         execGitSafe('git branch', ['--track', branchName, `origin/${branchName}`], { stdio: 'pipe', cwd: workingDir });
         verboseLog({}, chalk.green(`Successfully created local branch '${branchName}' tracking origin/${branchName}`));
-      } catch {
+      }
+      catch {
         throw new Error(`Branch '${branchName}' not found locally or on remote origin`);
       }
     }
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red(`Error ensuring branch '${branchName}' exists:`), error.message);
     throw error;
   }
@@ -101,7 +105,8 @@ export function findBaseBranch(workingDir = process.cwd()) {
     try {
       execGitSafe('git show-ref', ['--verify', '--quiet', `refs/remotes/origin/${branch}`], { cwd: workingDir });
       return branch;
-    } catch {
+    }
+    catch {
       // Branch doesn't exist on remote either, continue to next candidate
     }
   }
@@ -130,7 +135,8 @@ function getFileDiff(filePath, baseBranch, targetBranch, workingDir = process.cw
     const diffOutput = execGitSafe('git diff', [`${baseBranch}...${targetBranch}`, '--', filePath], { cwd: workingDir, encoding: 'utf8' });
 
     return diffOutput;
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red(`Error getting git diff for ${filePath}: ${error.message}`));
     return '';
   }
@@ -171,12 +177,15 @@ export function getChangedLinesInfo(filePath, baseBranch, targetBranch, workingD
         if (match) {
           currentLineNumber = parseInt(match[2]);
         }
-      } else if (line.startsWith('+') && !line.startsWith('+++')) {
+      }
+      else if (line.startsWith('+') && !line.startsWith('+++')) {
         addedLines.push({ lineNumber: currentLineNumber, content: line.substring(1) });
         currentLineNumber++;
-      } else if (line.startsWith('-') && !line.startsWith('---')) {
+      }
+      else if (line.startsWith('-') && !line.startsWith('---')) {
         removedLines.push({ content: line.substring(1) });
-      } else if (line.startsWith(' ')) {
+      }
+      else if (line.startsWith(' ')) {
         contextLines.push({ lineNumber: currentLineNumber, content: line.substring(1) });
         currentLineNumber++;
       }
@@ -189,7 +198,8 @@ export function getChangedLinesInfo(filePath, baseBranch, targetBranch, workingD
       contextLines,
       fullDiff: diffOutput,
     };
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red(`Error parsing diff for ${filePath}: ${error.message}`));
     return { hasChanges: false, addedLines: [], removedLines: [], contextLines: [] };
   }
@@ -217,7 +227,8 @@ export function getFileContentFromGit(filePath, branchOrCommit, workingDir) {
     // Command: git show <branch>:<path>
     // Use safe execution to prevent command injection
     return execGitSafe('git show', [`${branchOrCommit}:${gitPath}`], { cwd: workingDir, encoding: 'utf8' });
-  } catch (error) {
+  }
+  catch (error) {
     // Handle cases where the file might not exist in that commit (e.g., a new file in a feature branch)
     if (error.stderr && error.stderr.includes('exists on disk, but not in')) {
       // This case can be ignored if we are sure the file is new.

@@ -103,11 +103,13 @@ program
       await embeddingsSystem.clearAllEmbeddings();
       console.log(chalk.green('All embeddings have been cleared.'));
       await embeddingsSystem.databaseManager.cleanup();
-    } catch (err) {
+    }
+    catch (err) {
       console.error(chalk.red('Error clearing all embeddings:'), err.message);
       try {
         await embeddingsSystem.databaseManager.cleanup();
-      } catch (cleanupErr) {
+      }
+      catch (cleanupErr) {
         console.error(chalk.red('Error during cleanup:'), cleanupErr.message);
       }
       process.exit(1);
@@ -203,7 +205,8 @@ const hasCommand = process.argv
 if (!hasCommand && process.argv.length > 2) {
   // If no command is specified but there are arguments, default to 'analyze'
   program.parse(['node', 'index.js', 'analyze', ...process.argv.slice(2)]);
-} else {
+}
+else {
   program.parse();
 }
 
@@ -223,7 +226,8 @@ process.on('SIGINT', async () => {
     clearTimeout(forceExitTimeout); // Cleanup finished, clear the timeout
     console.log(chalk.cyan('SIGINT handler: Exiting normally (code 0).'));
     process.exit(0); // Exit normally
-  } catch (err) {
+  }
+  catch (err) {
     console.error(chalk.red('Error during embeddingsSystem.cleanup():'), err.message);
     clearTimeout(forceExitTimeout);
     console.log(chalk.cyan('SIGINT handler: Exiting after error (code 1).'));
@@ -246,7 +250,8 @@ process.on('SIGTERM', async () => {
     clearTimeout(forceExitTimeout); // Cleanup finished, clear the timeout
     console.log(chalk.cyan('SIGTERM handler: Exiting normally (code 0).'));
     process.exit(0); // Exit normally
-  } catch (err) {
+  }
+  catch (err) {
     console.error(chalk.red('Error during embeddingsSystem.cleanup():'), err.message);
     clearTimeout(forceExitTimeout);
     console.log(chalk.cyan('SIGTERM handler: Exiting after error (code 1).'));
@@ -366,13 +371,15 @@ async function runCodeReview(options) {
         diffWith: options.diffWith,
       };
       reviewTask = reviewPullRequest(changedFiles, enhancedReviewOptions);
-    } else if (options.file) {
+    }
+    else if (options.file) {
       operationDescription = `single file: ${options.file}`;
       if (!fs.existsSync(options.file)) {
         throw new Error(`File not found: ${options.file}`);
       }
       reviewTask = reviewFile(options.file, reviewOptions);
-    } else if (options.files && options.files.length > 0) {
+    }
+    else if (options.files && options.files.length > 0) {
       const filesToAnalyze = await expandFilePatterns(options.files);
       if (filesToAnalyze.length === 0) {
         console.log(chalk.yellow('No files found matching the specified patterns. Exiting.'));
@@ -380,7 +387,8 @@ async function runCodeReview(options) {
       }
       operationDescription = `${filesToAnalyze.length} specific files/patterns`;
       reviewTask = reviewFiles(filesToAnalyze, reviewOptions);
-    } else {
+    }
+    else {
       // No valid options provided - show error and exit
       console.error(chalk.red('Error: You must specify one of the following:'));
       console.error(chalk.yellow('  --file <file>                    Analyze a single file'));
@@ -418,7 +426,8 @@ async function runCodeReview(options) {
         // Pass the detailed results array to the output function
         outputFn(reviewResult.results, options);
         console.log(chalk.bold.green(`\nAnalysis complete for ${operationDescription}! (${duration}s)`));
-      } else {
+      }
+      else {
         // No results to display (e.g., all files were excluded/skipped)
         const message = reviewResult.message || 'All files were excluded from review (e.g., config files, lock files).';
         console.log(chalk.yellow(message));
@@ -432,7 +441,8 @@ async function runCodeReview(options) {
 
         console.log(chalk.bold.yellow(`\nReview complete for ${operationDescription} - no reviewable files found (${duration}s)`));
       }
-    } else {
+    }
+    else {
       console.error(chalk.red('\nCode review process failed.'));
       if (reviewResult && reviewResult.error) {
         console.error(chalk.red(`Error: ${reviewResult.error}`));
@@ -445,11 +455,13 @@ async function runCodeReview(options) {
       await embeddingsSystem.cleanup();
       await cleanupClassifier();
       console.log(chalk.green('All resources cleaned up successfully'));
-    } catch (cleanupErr) {
+    }
+    catch (cleanupErr) {
       console.error(chalk.yellow('Error during cleanup:'), cleanupErr.message);
       process.exit(1);
     }
-  } catch (err) {
+  }
+  catch (err) {
     console.error(chalk.red(`\nError during code review (${operationDescription}):`), err.message);
     console.error(err.stack);
     // Clean up resources even on error
@@ -457,7 +469,8 @@ async function runCodeReview(options) {
       await embeddingsSystem.cleanup();
       await cleanupClassifier();
       console.log(chalk.green('All resources cleaned up successfully'));
-    } catch (cleanupErr) {
+    }
+    catch (cleanupErr) {
       console.error(chalk.red('Error during cleanup:'), cleanupErr.message);
     }
     process.exit(1);
@@ -500,7 +513,8 @@ async function generateEmbeddings(options) {
           .map((line) => line.trim())
           .filter((line) => line && !line.startsWith('#'));
         excludePatterns = [...excludePatterns, ...filePatterns];
-      } else {
+      }
+      else {
         console.warn(chalk.yellow(`Exclude file not found: ${excludeFilePath}`));
       }
     }
@@ -512,7 +526,8 @@ async function generateEmbeddings(options) {
     // Log gitignore status
     if (options.gitignore === false) {
       console.log(chalk.yellow('Automatic .gitignore exclusion is disabled.'));
-    } else {
+    }
+    else {
       console.log(chalk.cyan('Respecting .gitignore patterns (if present).'));
     }
     console.log(chalk.green('Exclusion pattern processing complete.'));
@@ -525,7 +540,8 @@ async function generateEmbeddings(options) {
       console.log(chalk.cyan('Processing specified files/patterns...'));
       filesToProcess = await expandFilePatterns(options.files, baseDir);
       console.log(chalk.green(`Expanded specified files/patterns to ${filesToProcess.length} files.`));
-    } else {
+    }
+    else {
       console.log(chalk.cyan(`Scanning directory for supported files: ${baseDir}`));
       // Show spinner during file discovery
       const scanSpinner = new Spinner('Scanning files... %s');
@@ -591,11 +607,14 @@ async function generateEmbeddings(options) {
           // Update counters based on status
           if (status === 'processed') {
             processedCount++;
-          } else if (status === 'skipped') {
+          }
+          else if (status === 'skipped') {
             skippedCount++;
-          } else if (status === 'failed') {
+          }
+          else if (status === 'failed') {
             failedCount++;
-          } else if (status === 'excluded') {
+          }
+          else if (status === 'excluded') {
             excludedCount++;
           }
 
@@ -603,7 +622,8 @@ async function generateEmbeddings(options) {
           updateSpinner();
         },
       });
-    } finally {
+    }
+    finally {
       // Clean up the progress display even if embedding generation fails.
       clearInterval(progressInterval);
       spinner.stop(true);
@@ -636,7 +656,8 @@ async function generateEmbeddings(options) {
         )
       );
       verboseLog(options, chalk.gray(`   Key patterns: ${projectSummary.keyPatterns.length}`));
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red('⚠️ Project analysis failed but continuing:'), error.message);
     }
 
@@ -644,7 +665,8 @@ async function generateEmbeddings(options) {
     console.log(chalk.cyan('Cleaning up resources...'));
     await embeddingsSystem.cleanup();
     console.log(chalk.green('Cleanup successful.'));
-  } catch (err) {
+  }
+  catch (err) {
     console.error(chalk.red('Error generating embeddings:'), err.message);
     console.error(err.stack);
     // Clean up resources even on error
@@ -652,7 +674,8 @@ async function generateEmbeddings(options) {
       console.log(chalk.cyan('Cleaning up resources after error...'));
       await embeddingsSystem.cleanup();
       console.log(chalk.green('Cleanup successful.'));
-    } catch (cleanupErr) {
+    }
+    catch (cleanupErr) {
       console.error(chalk.red('Error during cleanup:'), cleanupErr.message);
     }
     process.exit(1);
@@ -678,13 +701,15 @@ async function clearEmbeddings(options) {
     // Clean up resources (only database connection since we skipped full initialization)
     console.log(chalk.cyan('Cleaning up resources...'));
     await embeddingsSystem.databaseManager.cleanup();
-  } catch (err) {
+  }
+  catch (err) {
     console.error(chalk.red('Error clearing embeddings:'), err.message);
     console.error(err.stack);
     // Clean up resources even on error (only database connection)
     try {
       await embeddingsSystem.databaseManager.cleanup();
-    } catch (cleanupErr) {
+    }
+    catch (cleanupErr) {
       console.error(chalk.red('Error during cleanup:'), cleanupErr.message);
     }
     process.exit(1);
@@ -703,7 +728,8 @@ async function showEmbeddingStats(options) {
 
     if (options.directory) {
       console.log(chalk.cyan(`Fetching embedding statistics for project: ${projectDir}`));
-    } else {
+    }
+    else {
       console.log(chalk.cyan('Fetching embedding statistics for all projects...'));
     }
 
@@ -714,7 +740,8 @@ async function showEmbeddingStats(options) {
 
     if (!stats || Object.keys(stats).length === 0 || stats.totalCount === 0) {
       console.log(chalk.yellow('No embeddings found or database is empty.'));
-    } else {
+    }
+    else {
       console.log(` ${chalk.cyan('Total Embeddings:')} ${chalk.green(stats.totalCount)}`);
       if (stats.dimensions) {
         console.log(` ${chalk.cyan('Vector Dimensions:')} ${chalk.green(stats.dimensions)}`);
@@ -733,7 +760,8 @@ async function showEmbeddingStats(options) {
     // Clean up resources
     // console.log(chalk.cyan('Cleaning up resources...'));
     // await embeddingsSystem.cleanup();
-  } catch (err) {
+  }
+  catch (err) {
     console.error(chalk.red('Error fetching embedding statistics:'), err.message);
     console.error(err.stack);
     // Clean up resources even on error
@@ -869,10 +897,12 @@ async function findSupportedFiles(directory, options = {}) {
     // Add log after the filtering loop (now just assignment)
     verboseLog(options, chalk.green(`Finished filtering glob results. ${finalFiles.length} files remain.`));
     return finalFiles;
-  } catch (err) {
+  }
+  catch (err) {
     if (err.name === 'AbortError') {
       console.error(chalk.red('Glob operation timed out. The directory might be too large or complex.'));
-    } else {
+    }
+    else {
       console.error(chalk.red(`Error during glob file search: ${err.message}`));
     }
     console.error(err.stack); // Log stack for debugging
@@ -897,7 +927,8 @@ async function expandFilePatterns(patterns, baseDir = process.cwd()) {
       // Check if it's a direct file path first
       if (fs.existsSync(absolutePattern) && fs.statSync(absolutePattern).isFile()) {
         files.add(absolutePattern);
-      } else {
+      }
+      else {
         // Treat as a glob pattern
         // Use the original pattern with baseDir as cwd for correct globbing
         const matchedFiles = await glob.glob(pattern, { cwd: baseDir, absolute: true, nodir: true });
@@ -910,7 +941,8 @@ async function expandFilePatterns(patterns, baseDir = process.cwd()) {
       }
     }
     return Array.from(files);
-  } catch (err) {
+  }
+  catch (err) {
     console.error(chalk.red('Error expanding file patterns:'), err.message);
     return [];
   }
@@ -939,7 +971,8 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
     // Ensure the base branch exists locally as well (crucial for diff operations)
     try {
       ensureBranchExists(baseBranch, workingDir);
-    } catch (error) {
+    }
+    catch (error) {
       console.warn(chalk.yellow(`Warning: Could not ensure base branch '${baseBranch}' exists locally: ${error.message}`));
       // Continue with the original baseBranch name, it might work with remote refs
     }
@@ -962,7 +995,8 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
     }
 
     return changedFiles;
-  } catch (err) {
+  }
+  catch (err) {
     console.error(chalk.red('Error getting git diff:'), err.message);
     return [];
   }
@@ -988,7 +1022,9 @@ function outputJson(reviewResults, options) {
       filesWithIssues: reviewResults.filter((r) => r.success && !r.skipped && r.results?.issues?.length > 0).length,
       totalIssues: reviewResults.reduce((sum, r) => sum + (r.results?.issues?.length || 0), 0),
       issuesWithCodeSuggestions: reviewResults.reduce((sum, r) => {
-        if (!r.success || r.skipped || !r.results?.issues) return sum;
+        if (!r.success || r.skipped || !r.results?.issues) {
+          return sum;
+        }
         return sum + r.results.issues.filter((issue) => issue.codeSuggestion).length;
       }, 0),
       skippedFiles: reviewResults.filter((r) => r.skipped).length,
@@ -1019,7 +1055,8 @@ function outputJson(reviewResults, options) {
   if (options && options.outputFile) {
     fs.writeFileSync(options.outputFile, jsonOutput, 'utf8');
     console.log(chalk.green(`JSON output saved to: ${options.outputFile}`));
-  } else {
+  }
+  else {
     // Write JSON output to stdout (process.stdout is not buffered)
     process.stdout.write(jsonOutput);
   }
@@ -1048,8 +1085,12 @@ function outputMarkdown(reviewResults, options) {
     `- **Total Issues Found:** ${totalIssues}`,
   ];
 
-  if (skippedFiles > 0) lines.push(`- **Files Skipped:** ${skippedFiles}`);
-  if (errorFiles > 0) lines.push(`- **Errors:** ${errorFiles}`);
+  if (skippedFiles > 0) {
+    lines.push(`- **Files Skipped:** ${skippedFiles}`);
+  }
+  if (errorFiles > 0) {
+    lines.push(`- **Errors:** ${errorFiles}`);
+  }
 
   lines.push('', '## Detailed Review per File', '');
 
@@ -1128,8 +1169,12 @@ function outputText(reviewResults, cliOptions) {
   console.log(`Files Analyzed: ${chalk.bold(totalFiles)}`);
   console.log(`Files with Issues: ${chalk.bold(filesWithIssues)}`);
   console.log(`Total Issues Found: ${chalk.bold(totalIssues)}`);
-  if (skippedFiles > 0) console.log(`Files Skipped: ${chalk.yellow(skippedFiles)}`);
-  if (errorFiles > 0) console.log(`Errors: ${chalk.red(errorFiles)}`);
+  if (skippedFiles > 0) {
+    console.log(`Files Skipped: ${chalk.yellow(skippedFiles)}`);
+  }
+  if (errorFiles > 0) {
+    console.log(`Errors: ${chalk.red(errorFiles)}`);
+  }
   console.log(chalk.bold.blue('================================================'));
 
   reviewResults.forEach((fileResult) => {
@@ -1289,7 +1334,8 @@ async function analyzePRHistory(options) {
     // Display results using utility function
     displayAnalysisResults(results, duration);
     console.log(chalk.bold.green(`\nPR history analysis complete for ${repository}!`));
-  } catch (error) {
+  }
+  catch (error) {
     const endTime = Date.now();
     const duration = ((endTime - startTime) / 1000).toFixed(2);
     console.error(chalk.red(`\nError during PR history analysis (${duration}s):`), error.message);
@@ -1323,10 +1369,12 @@ async function getPRHistoryStatus(options) {
     if (hasComments) {
       const stats = await getPRCommentsStats(repository, projectPath);
       displayDatabaseStats(stats, hasComments);
-    } else {
+    }
+    else {
       displayDatabaseStats(null, hasComments);
     }
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red('Error getting PR history status:'), error.message);
     process.exit(1);
   }
@@ -1387,10 +1435,12 @@ async function clearPRHistory(options) {
 
     if (cleared) {
       console.log(chalk.bold.green(`\nPR analysis data cleared successfully for ${repository}`));
-    } else {
+    }
+    else {
       console.log(chalk.yellow('No data was found to clear.'));
     }
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red('Error clearing PR history data:'), error.message);
     verboseLog(options, error.stack);
     process.exit(1);

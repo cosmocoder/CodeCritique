@@ -74,9 +74,15 @@ export class FileProcessor {
         this.startTime = Date.now();
       },
       update(type) {
-        if (type === 'processed') this.processedCount++;
-        if (type === 'skipped') this.skippedCount++;
-        if (type === 'failed') this.failedCount++;
+        if (type === 'processed') {
+          this.processedCount++;
+        }
+        if (type === 'skipped') {
+          this.skippedCount++;
+        }
+        if (type === 'failed') {
+          this.failedCount++;
+        }
         // Progress logging is now handled by the spinner in index.js via onProgress callback
       },
     };
@@ -133,7 +139,9 @@ export class FileProcessor {
       });
 
     const buildStructure = (dir, depth = 0, prefix = '') => {
-      if (depth > maxDepth) return '';
+      if (depth > maxDepth) {
+        return '';
+      }
       let result = '';
       try {
         const entries = fs
@@ -145,18 +153,23 @@ export class FileProcessor {
           const entryPath = path.join(dir, entry.name);
           const relativePath = path.relative(rootDir, entryPath);
           // Skip if ignored
-          if (shouldIgnore(relativePath) || entry.name === LANCEDB_DIR_NAME || entry.name === FASTEMBED_CACHE_DIR_NAME) continue; // Also ignore DB/cache dirs
+          if (shouldIgnore(relativePath) || entry.name === LANCEDB_DIR_NAME || entry.name === FASTEMBED_CACHE_DIR_NAME) {
+            continue;
+          }
+          // Also ignore DB/cache dirs
 
           const connector = isLast ? '└── ' : '├── ';
           const nextPrefix = isLast ? prefix + '    ' : prefix + '│   ';
           if (entry.isDirectory()) {
             result += `${prefix}${connector}${entry.name}/\n`;
             result += buildStructure(entryPath, depth + 1, nextPrefix);
-          } else if (showFiles) {
+          }
+          else if (showFiles) {
             result += `${prefix}${connector}${entry.name}\n`;
           }
         }
-      } catch (error) {
+      }
+      catch (error) {
         console.error(`Error reading directory ${dir}:`, error.message);
       }
       return result;
@@ -193,7 +206,9 @@ export class FileProcessor {
       const structureId = createProjectStructureId(resolvedRootDir);
 
       const directoryStructure = this.generateDirectoryStructure(options);
-      if (!directoryStructure) throw new Error('[generateDirEmb] Failed to generate directory structure string');
+      if (!directoryStructure) {
+        throw new Error('[generateDirEmb] Failed to generate directory structure string');
+      }
       debug('[generateDirEmb] Directory structure string generated.');
 
       const directoryStructureHash = createShortHash(directoryStructure);
@@ -203,7 +218,8 @@ export class FileProcessor {
           .query()
           .where(`project_path = '${escapeSqlString(resolvedRootDir)}' AND type = '${DIRECTORY_STRUCTURE_TYPE}'`)
           .toArray();
-      } catch (queryError) {
+      }
+      catch (queryError) {
         debug(`[generateDirEmb] Could not query existing project structure embeddings: ${queryError.message}`);
       }
 
@@ -217,7 +233,8 @@ export class FileProcessor {
         try {
           await table.delete(`id = '${escapeSqlString(existingRecord.id)}'`);
           debug(`[generateDirEmb] Deleted stale project structure embedding: ${existingRecord.id}`);
-        } catch (error) {
+        }
+        catch (error) {
           if (!error.message.includes('Record not found') && !error.message.includes('cannot find')) {
             debug(`[generateDirEmb] Error deleting existing project structure: ${error.message}`);
           }
@@ -258,11 +275,13 @@ export class FileProcessor {
         await table.add([record]);
         verboseLog(options, chalk.green('[generateDirEmb] Successfully added directory structure embedding.'));
         return true; // Indicate success
-      } catch (addError) {
+      }
+      catch (addError) {
         console.error(chalk.red(`[generateDirEmb] !!! Error during table.add: ${addError.message}`), addError.stack);
         return false; // Indicate failure
       }
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`[generateDirEmb] Overall error: ${error.message}`), error.stack);
       return false; // Indicate failure
     }
@@ -301,7 +320,8 @@ export class FileProcessor {
 
     try {
       await this.modelManager.initialize(); // Ensure model is ready
-    } catch {
+    }
+    catch {
       console.error(chalk.red('Failed to initialize embedding model. Aborting batch process.'));
       return { processed: 0, failed: filePaths.length, skipped: 0, excluded: 0, files: [], failedFiles: [...filePaths], excludedFiles: [] };
     }
@@ -310,7 +330,8 @@ export class FileProcessor {
     try {
       await this.databaseManager.getDB();
       verboseLog(options, chalk.green('Database table check complete.'));
-    } catch (dbError) {
+    }
+    catch (dbError) {
       console.error(chalk.red(`Failed to initialize database or tables: ${dbError.message}. Aborting batch process.`));
       return { processed: 0, failed: filePaths.length, skipped: 0, excluded: 0, files: [], failedFiles: [...filePaths], excludedFiles: [] };
     }
@@ -332,7 +353,8 @@ export class FileProcessor {
         showFiles: true,
         verbose: options.verbose,
       });
-    } catch (structureError) {
+    }
+    catch (structureError) {
       console.warn(chalk.yellow(`Warning: Failed to generate directory structure embedding: ${structureError.message}`));
     }
 
@@ -411,7 +433,8 @@ export class FileProcessor {
           existingFilesMap.get(record.path).push(record);
         }
         verboseLog(options, chalk.cyan(`Found ${existingRecords.length} existing file embeddings for comparison`));
-      } catch (queryError) {
+      }
+      catch (queryError) {
         console.warn(chalk.yellow(`Warning: Could not query existing embeddings: ${queryError.message}`));
       }
     }
@@ -426,7 +449,8 @@ export class FileProcessor {
           existingDocChunksMap.get(chunk.original_document_path).push(chunk);
         }
         verboseLog(options, chalk.cyan(`Found ${existingChunks.length} existing document chunks for comparison`));
-      } catch (queryError) {
+      }
+      catch (queryError) {
         console.warn(chalk.yellow(`Warning: Could not query existing document chunks: ${queryError.message}`));
       }
     }
@@ -466,7 +490,9 @@ export class FileProcessor {
           results.excluded++;
           results.excludedFiles.push(filePath);
           this.progressTracker.update('skipped');
-          if (typeof onProgress === 'function') onProgress('excluded', filePath);
+          if (typeof onProgress === 'function') {
+            onProgress('excluded', filePath);
+          }
           this.processedFiles.set(filePath, 'excluded');
           continue;
         }
@@ -480,11 +506,14 @@ export class FileProcessor {
           isDocumentation: isDocumentationFile(absoluteFilePath, language),
           existingRecords: sharedState.existingFilesMap.get(relativePath) || [],
         });
-      } catch {
+      }
+      catch {
         results.failed++;
         results.failedFiles.push(filePath);
         this.progressTracker.update('failed');
-        if (typeof onProgress === 'function') onProgress('failed', filePath);
+        if (typeof onProgress === 'function') {
+          onProgress('failed', filePath);
+        }
         this.processedFiles.set(filePath, 'failed_stat');
       }
     }
@@ -509,7 +538,9 @@ export class FileProcessor {
           if (rawContent.trim().length === 0) {
             results.skipped++;
             this.progressTracker.update('skipped');
-            if (typeof onProgress === 'function') onProgress('skipped', candidate.originalInputPath);
+            if (typeof onProgress === 'function') {
+              onProgress('skipped', candidate.originalInputPath);
+            }
             this.processedFiles.set(candidate.originalInputPath, 'skipped_empty');
             continue;
           }
@@ -531,7 +562,9 @@ export class FileProcessor {
           if (unchangedRecord) {
             results.skipped++;
             this.progressTracker.update('skipped');
-            if (typeof onProgress === 'function') onProgress('skipped', candidate.originalInputPath);
+            if (typeof onProgress === 'function') {
+              onProgress('skipped', candidate.originalInputPath);
+            }
             this.processedFiles.set(candidate.originalInputPath, 'skipped_unchanged');
             debug(`Skipping unchanged file: ${candidate.relativePath} (hash: ${candidate.contentHash})`);
             continue;
@@ -543,12 +576,15 @@ export class FileProcessor {
 
           filesToActuallyProcess.push(candidate);
           contentsToActuallyProcess.push(candidate.embeddingContent);
-        } catch {
+        }
+        catch {
           candidate.readError = true;
           results.failed++;
           results.failedFiles.push(candidate.originalInputPath);
           this.progressTracker.update('failed');
-          if (typeof onProgress === 'function') onProgress('failed', candidate.originalInputPath);
+          if (typeof onProgress === 'function') {
+            onProgress('failed', candidate.originalInputPath);
+          }
           this.processedFiles.set(candidate.originalInputPath, 'failed_read');
         }
       }
@@ -557,7 +593,8 @@ export class FileProcessor {
         try {
           await sharedState.fileTable.delete(`id = '${escapeSqlString(recordToDelete.id)}'`);
           debug(`Deleted old version: ${recordToDelete.path} (old hash: ${recordToDelete.content_hash})`);
-        } catch (deleteError) {
+        }
+        catch (deleteError) {
           console.warn(chalk.yellow(`Warning: Could not delete old version of ${recordToDelete.path}: ${deleteError.message}`));
         }
       }
@@ -585,7 +622,9 @@ export class FileProcessor {
             results.failed++;
             results.failedFiles.push(candidate.originalInputPath);
             this.progressTracker.update('failed');
-            if (typeof onProgress === 'function') onProgress('failed', candidate.originalInputPath);
+            if (typeof onProgress === 'function') {
+              onProgress('failed', candidate.originalInputPath);
+            }
             this.processedFiles.set(candidate.originalInputPath, 'failed_embedding');
             continue;
           }
@@ -609,12 +648,14 @@ export class FileProcessor {
 
           try {
             await sharedState.fileTable.optimize();
-          } catch (optimizeError) {
+          }
+          catch (optimizeError) {
             if (optimizeError.message && optimizeError.message.includes('legacy format')) {
               console.warn(
                 chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`)
               );
-            } else {
+            }
+            else {
               console.warn(
                 chalk.yellow(`Warning: Failed to optimize file embeddings table after adding records: ${optimizeError.message}`)
               );
@@ -625,17 +666,22 @@ export class FileProcessor {
             results.processed++;
             results.files.push(candidate.originalInputPath);
             this.progressTracker.update('processed');
-            if (typeof onProgress === 'function') onProgress('processed', candidate.originalInputPath);
+            if (typeof onProgress === 'function') {
+              onProgress('processed', candidate.originalInputPath);
+            }
             this.processedFiles.set(candidate.originalInputPath, 'processed');
           }
         }
-      } catch (error) {
+      }
+      catch (error) {
         console.error(chalk.red(`Error processing batch: ${error.message}`));
         for (const candidate of filesToActuallyProcess) {
           results.failed++;
           results.failedFiles.push(candidate.originalInputPath);
           this.progressTracker.update('failed');
-          if (typeof onProgress === 'function') onProgress('failed', candidate.originalInputPath);
+          if (typeof onProgress === 'function') {
+            onProgress('failed', candidate.originalInputPath);
+          }
           this.processedFiles.set(candidate.originalInputPath, 'failed_batch');
         }
       }
@@ -714,7 +760,8 @@ export class FileProcessor {
             original_document_path: candidate.relativePath,
           });
         }
-      } catch (docError) {
+      }
+      catch (docError) {
         console.warn(chalk.yellow(`Error processing document ${candidate.relativePath} for chunking: ${docError.message}`));
       }
     }
@@ -760,7 +807,8 @@ export class FileProcessor {
           await sharedState.documentChunkTable.delete(
             `project_path = '${escapeSqlString(sharedState.baseDir)}' AND original_document_path = '${escapeSqlString(docPathToDelete)}'`
           );
-        } catch (deleteError) {
+        }
+        catch (deleteError) {
           console.warn(chalk.yellow(`Error deleting chunks for document ${docPathToDelete}: ${deleteError.message}`));
         }
       }
@@ -773,10 +821,12 @@ export class FileProcessor {
         // Optimize table to sync indices with data and prevent TakeExec panics
         try {
           await sharedState.documentChunkTable.optimize();
-        } catch (optimizeError) {
+        }
+        catch (optimizeError) {
           if (optimizeError.message && optimizeError.message.includes('legacy format')) {
             console.warn(chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
-          } else {
+          }
+          else {
             console.warn(chalk.yellow(`Warning: Failed to optimize document chunk table after adding records: ${optimizeError.message}`));
           }
         }
@@ -785,7 +835,8 @@ export class FileProcessor {
           { verbose },
           chalk.green(`Successfully added ${allDocChunkRecordsToAdd.length} document chunk embeddings to ${this.documentChunkTable}.`)
         );
-      } catch (addError) {
+      }
+      catch (addError) {
         console.error(chalk.red(`Error batch adding document chunk embeddings to DB: ${addError.message}`), addError.stack);
       }
     }
@@ -800,7 +851,8 @@ export class FileProcessor {
         this.databaseManager.pruneProjectDocumentChunks(sharedState.baseDir, sharedState.liveDocumentPaths),
       ]);
       verboseLog({ verbose }, chalk.cyan(`Pruned ${prunedFiles} stale file embeddings and ${prunedDocs} stale document chunk embeddings.`));
-    } catch (error) {
+    }
+    catch (error) {
       console.warn(chalk.yellow(`Warning: Failed to prune stale embeddings: ${error.message}`));
     }
   }
@@ -823,9 +875,11 @@ export class FileProcessor {
       this.processedFiles.clear();
       this.progressTracker.reset(0);
       verboseLog({}, chalk.green('[FileProcessor] Resources cleaned up.'));
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`[FileProcessor] Error during cleanup: ${error.message}`));
-    } finally {
+    }
+    finally {
       this.cleaningUp = false;
     }
   }

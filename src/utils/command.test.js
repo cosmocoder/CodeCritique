@@ -142,7 +142,8 @@ describe('execGitSafe', () => {
       try {
         execGitSafe('git show', ['nonexistent']);
         expect.fail('Should have thrown');
-      } catch (e) {
+      }
+      catch (e) {
         expect(e.status).toBe(128);
       }
     });

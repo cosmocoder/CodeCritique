@@ -55,7 +55,8 @@ async function ensureSemanticSimilarityInitialized() {
     // Initialize semantic similarity using the shared embeddings system
     await initializeSemanticSimilarity();
     semanticSimilarityInitialized = true;
-  } catch (error) {
+  }
+  catch (error) {
     console.warn(chalk.yellow(`⚠️ Could not initialize semantic similarity: ${error.message}`));
     // Continue without semantic similarity - word-based fallback will be used
   }
@@ -228,7 +229,8 @@ async function getProjectSummary(projectPath, options = {}) {
     }
 
     return summary;
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red(`Error retrieving project summary: ${error.message}`));
     return null;
   }
@@ -240,7 +242,9 @@ async function getProjectSummary(projectPath, options = {}) {
  * @returns {string} Formatted context string
  */
 function formatProjectSummaryForLLM(summary) {
-  if (!summary) return '';
+  if (!summary) {
+    return '';
+  }
 
   let context = `\n## PROJECT ARCHITECTURE CONTEXT\n\n`;
 
@@ -456,7 +460,8 @@ async function runAnalysis(filePath, options = {}) {
       // For PR reviews, always read the full file content for context awareness
       fullFileContent = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : null;
       verboseLog(options, chalk.blue(`Analyzing diff only for ${path.basename(filePath)}`));
-    } else {
+    }
+    else {
       content = fs.readFileSync(filePath, 'utf8');
       fullFileContent = content;
       verboseLog(options, chalk.blue(`Analyzing full file ${path.basename(filePath)}`));
@@ -503,7 +508,8 @@ async function runAnalysis(filePath, options = {}) {
         verboseLog(options, chalk.magenta(`  [${i + 1}] Path: ${g.path} ${g.headingText ? `(Heading: "${g.headingText}")` : ''}`));
         verboseLog(options, chalk.gray(`      Content: ${g.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
       });
-    } else {
+    }
+    else {
       verboseLog(options, chalk.magenta('  (None)'));
     }
 
@@ -513,7 +519,8 @@ async function runAnalysis(filePath, options = {}) {
         verboseLog(options, chalk.magenta(`  [${i + 1}] Path: ${ex.path} (Similarity: ${ex.similarity?.toFixed(3) || 'N/A'})`));
         verboseLog(options, chalk.gray(`      Content: ${ex.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
       });
-    } else {
+    }
+    else {
       verboseLog(options, chalk.magenta('  (None)'));
     }
 
@@ -524,7 +531,8 @@ async function runAnalysis(filePath, options = {}) {
         verboseLog(options, chalk.magenta(`      Similarity: ${chunk.similarity?.toFixed(3) || 'N/A'}`));
         verboseLog(options, chalk.gray(`      Content: ${chunk.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
       });
-    } else {
+    }
+    else {
       verboseLog(options, chalk.magenta('  (None)'));
     }
     verboseLog(options, chalk.magenta('---------------------------------'));
@@ -593,7 +601,8 @@ async function runAnalysis(filePath, options = {}) {
         ...(filteredResults.metadata || {}),
       },
     };
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red(`Error analyzing file: ${error.message}`));
     return {
       success: false,
@@ -745,7 +754,8 @@ async function callLLMForAnalysis(context, options = {}) {
 
     if (options.isHolisticPRReview) {
       prompt = generateHolisticPRAnalysisPrompt(context);
-    } else {
+    }
+    else {
       prompt = options.isTestFile ? generateTestFileAnalysisPrompt(context) : generateAnalysisPrompt(context);
     }
 
@@ -781,7 +791,8 @@ async function callLLMForAnalysis(context, options = {}) {
 
     verboseLog(options, chalk.green('Successfully parsed LLM response with expected structure'));
     return analysisResponse;
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red(`Error calling LLM for analysis: ${error.message}`));
     console.error(error.stack);
     throw error;
@@ -945,7 +956,8 @@ async function sendPromptToLLM(promptConfig, llmOptions) {
     });
 
     return response;
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red(`Error in LLM call: ${error.message}`));
     throw error;
   }
@@ -1013,10 +1025,12 @@ Similar code patterns and issues identified by human reviewers in past PRs
       prHistorySection += `Only report issues that EXACTLY match historical patterns with SPECIFIC code fixes.\n\n`;
 
       verboseLog(context.options, chalk.blue(`PR History section preview: ${prHistorySection.substring(0, 200)}...`));
-    } else {
+    }
+    else {
       verboseLog(context.options, chalk.yellow(`❌ No PR comments section found in context`));
     }
-  } else {
+  }
+  else {
     verboseLog(context.options, chalk.yellow(`❌ No context sections available for PR comments`));
   }
 
@@ -1476,7 +1490,8 @@ async function getPRCommentContext(filePath, options = {}) {
         fileContent = fs.readFileSync(filePath, 'utf8');
         const maxEmbeddingLength = 8000; // Keep consistent with original truncation
         contentForSearch = fileContent.length > maxEmbeddingLength ? fileContent.substring(0, maxEmbeddingLength) : fileContent;
-      } catch (readError) {
+      }
+      catch (readError) {
         debug(`[getPRCommentContext] Could not read file ${filePath}: ${readError.message}`);
         return {
           success: false,
@@ -1486,11 +1501,13 @@ async function getPRCommentContext(filePath, options = {}) {
           summary: 'Failed to read file for context analysis',
         };
       }
-    } else {
+    }
+    else {
       // Fallback to original behavior if no pre-computed embedding provided
       try {
         fileContent = fs.readFileSync(filePath, 'utf8');
-      } catch (readError) {
+      }
+      catch (readError) {
         debug(`[getPRCommentContext] Could not read file ${filePath}: ${readError.message}`);
         return {
           success: false,
@@ -1537,7 +1554,8 @@ async function getPRCommentContext(filePath, options = {}) {
           );
         });
       }
-    } catch (dbError) {
+    }
+    catch (dbError) {
       console.warn(chalk.yellow(`⚠️ Hybrid search failed: ${dbError.message}`));
       debug(`[getPRCommentContext] Hybrid search failed: ${dbError.message}`);
       // No fallback needed - if hybrid search fails, we just return empty results
@@ -1568,7 +1586,8 @@ async function getPRCommentContext(filePath, options = {}) {
           relevantComments.length > 0 && relevantComments[0].similarity_score !== 0.5 ? 'semantic_embedding' : 'file_path_fallback',
       },
     };
-  } catch (error) {
+  }
+  catch (error) {
     debug(`[getPRCommentContext] Error getting PR comment context: ${error.message}`);
     return {
       success: false,
@@ -1737,7 +1756,8 @@ async function performHolisticPRAnalysis(options) {
         );
         verboseLog(options, chalk.gray(`      Content: ${g.content.substring(0, 100).replace(/\n/g, ' ')}...`));
       });
-    } else {
+    }
+    else {
       verboseLog(options, chalk.magenta('  (None)'));
     }
 
@@ -1747,7 +1767,8 @@ async function performHolisticPRAnalysis(options) {
         verboseLog(options, chalk.magenta(`  [${i + 1}] Path: ${ex.path} (Similarity: ${ex.similarity?.toFixed(3) || 'N/A'})`));
         verboseLog(options, chalk.gray(`      Content: ${ex.content.substring(0, 100).replace(/\\n/g, ' ')}...`));
       });
-    } else {
+    }
+    else {
       verboseLog(options, chalk.magenta('  (None)'));
     }
 
@@ -1763,7 +1784,8 @@ async function performHolisticPRAnalysis(options) {
         verboseLog(options, chalk.gray(`      File: ${comment.filePath}`));
         verboseLog(options, chalk.gray(`      Comment: ${comment.body.substring(0, 100).replace(/\n/g, ' ')}...`));
       });
-    } else {
+    }
+    else {
       verboseLog(options, chalk.magenta('  (None)'));
     }
 
@@ -1774,7 +1796,8 @@ async function performHolisticPRAnalysis(options) {
         verboseLog(options, chalk.gray(`      Similarity: ${chunk.similarity?.toFixed(3) || 'N/A'}`));
         verboseLog(options, chalk.gray(`      Content: ${chunk.content.substring(0, 100).replace(/\n/g, ' ')}...`));
       });
-    } else {
+    }
+    else {
       verboseLog(options, chalk.magenta('  (None)'));
     }
     verboseLog(options, chalk.magenta('--- Sending Holistic PR Analysis Prompt to LLM ---'));
@@ -1821,7 +1844,8 @@ async function performHolisticPRAnalysis(options) {
         },
       },
     };
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red(`Error in holistic PR analysis: ${error.message}`));
     return {
       success: false,
@@ -1852,7 +1876,8 @@ async function getContextForFile(filePath, content, options = {}) {
   // Note: This may be called concurrently. `initializeTables` should be idempotent.
   try {
     await embeddingsSystem.initialize();
-  } catch (initError) {
+  }
+  catch (initError) {
     console.warn(chalk.yellow(`Database initialization warning: ${initError.message}`));
   }
 
@@ -1932,7 +1957,8 @@ async function getContextForFile(filePath, content, options = {}) {
         verboseLog(options, chalk.cyan('📄 Custom documents not yet processed for this project, processing now...'));
         // Process custom documents into chunks (only if not already processed)
         processedChunks = await embeddingsSystem.processCustomDocumentsInMemory(options.customDocs, projectPath);
-      } else {
+      }
+      else {
         verboseLog(options, chalk.green(`📄 Reusing ${processedChunks.length} already processed custom document chunks`));
       }
 
@@ -1961,7 +1987,8 @@ async function getContextForFile(filePath, content, options = {}) {
 
         return relevantChunks;
       }
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error processing custom documents: ${error.message}`));
     }
 
@@ -1973,7 +2000,8 @@ async function getContextForFile(filePath, content, options = {}) {
     try {
       // Use the statically imported function
       return await embeddingsSystem.getExistingCustomDocumentChunks(projectPath);
-    } catch {
+    }
+    catch {
       verboseLog(options, chalk.gray('No existing custom document chunks found, will process from scratch'));
       return [];
     }
@@ -1982,7 +2010,8 @@ async function getContextForFile(filePath, content, options = {}) {
   const withContextFallback = async (promise, fallbackValue, label) => {
     try {
       return await promise;
-    } catch (error) {
+    }
+    catch (error) {
       console.warn(chalk.yellow(`${label} failed: ${error.message}`));
       return fallbackValue;
     }
@@ -2055,11 +2084,14 @@ async function getContextForFile(filePath, content, options = {}) {
     if (isGenericDocument(docPath, docH1)) {
       candidateDocFullContext = getGenericDocumentContext(docPath, docH1);
       debug(`[FAST-PATH] Using pre-computed context for generic document in RAG: ${docPath}`);
-    } else {
+    }
+    else {
       candidateDocFullContext = await inferContextFromDocumentContent(docPath, docH1, docChunks, language);
     }
     const relevantChunksForDoc = docChunks.filter((c) => c.similarity >= RELEVANT_CHUNK_THRESHOLD);
-    if (relevantChunksForDoc.length === 0) continue;
+    if (relevantChunksForDoc.length === 0) {
+      continue;
+    }
 
     const maxChunkScoreInDoc = Math.max(...relevantChunksForDoc.map((c) => c.similarity));
     const avgChunkScoreInDoc = relevantChunksForDoc.reduce((sum, c) => sum + c.similarity, 0) / relevantChunksForDoc.length;
@@ -2080,7 +2112,8 @@ async function getContextForFile(filePath, content, options = {}) {
             break;
           }
         }
-      } else if (reviewedSnippetContext.area !== 'GeneralJS_TS') {
+      }
+      else if (reviewedSnippetContext.area !== 'GeneralJS_TS') {
         docLevelContextMatchScore -= 0.2;
       }
     }
@@ -2205,13 +2238,15 @@ async function gatherUnifiedContextForPR(prFiles, options = {}) {
       if (!processedChunks || processedChunks.length === 0) {
         verboseLog(options, chalk.cyan('📄 Custom documents not yet processed for this project, processing now...'));
         processedChunks = await embeddingsSystem.processCustomDocumentsInMemory(options.customDocs, projectPath);
-      } else {
+      }
+      else {
         verboseLog(options, chalk.green(`📄 Reusing ${processedChunks.length} already processed custom document chunks`));
       }
 
       globalCustomDocChunks = processedChunks;
       verboseLog(options, chalk.green(`📄 Custom documents processed: ${globalCustomDocChunks.length} chunks available for PR analysis`));
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error processing custom documents for PR: ${error.message}`));
     }
   }
@@ -2231,7 +2266,8 @@ async function gatherUnifiedContextForPR(prFiles, options = {}) {
         ...context,
         filePath,
       };
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error gathering context for file ${file.filePath}: ${error.message}`));
       return null; // Return null on error for this file
     }

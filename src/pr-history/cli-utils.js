@@ -43,7 +43,8 @@ function detectGitHubRepository(projectPath) {
     }
 
     return null;
-  } catch (error) {
+  }
+  catch (error) {
     console.warn(chalk.yellow(`Warning: Could not detect GitHub repository: ${error.message}`));
     return null;
   }
@@ -101,7 +102,8 @@ export function getRepositoryAndProjectPath(options) {
       );
     }
     console.log(chalk.green(`Auto-detected repository: ${repository}`));
-  } else {
+  }
+  else {
     if (!isValidRepositoryFormat(repository)) {
       throw new Error('Invalid repository format. Please use "owner/repo" format.');
     }
@@ -197,7 +199,8 @@ export function displayDatabaseStats(stats, hasComments) {
     console.log(chalk.blue('\nStored Data:'));
     console.log(chalk.cyan(`Total Comments in Database: ${stats.total_comments}`));
     console.log(chalk.cyan(`Comment Types: ${Object.keys(stats.comment_types).join(', ')}`));
-  } else {
+  }
+  else {
     console.log(chalk.yellow('\nNo PR comments found in database for this repository.'));
   }
 }

@@ -212,7 +212,8 @@ export class ProjectAnalyzer {
         const currentEmbeddingInventoryHash = await this.calculateEmbeddingInventoryHash(projectPath);
         if (existingSummary.embeddingInventoryHash !== currentEmbeddingInventoryHash) {
           verboseLog(verbose, chalk.yellow('🔄 Embedding inventory changed, regenerating analysis...'));
-        } else {
+        }
+        else {
           const currentHash = await this.calculateKeyFilesHash(existingSummary.keyFiles);
           if (existingSummary.keyFilesHash === currentHash) {
             verboseLog(verbose, chalk.green('✅ Project analysis up-to-date (no key file changes detected)'));
@@ -220,7 +221,8 @@ export class ProjectAnalyzer {
           }
           verboseLog(verbose, chalk.yellow('🔄 Key files changed, regenerating analysis...'));
         }
-      } else {
+      }
+      else {
         verboseLog(
           verbose,
           chalk.cyan(
@@ -260,7 +262,8 @@ export class ProjectAnalyzer {
       verboseLog(verbose, chalk.gray(`   Key files tracked: ${keyFiles.length}`));
 
       return projectSummary;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red('Error analyzing project:'), error.message);
       return this.createFallbackSummary(projectPath);
     }
@@ -285,7 +288,8 @@ export class ProjectAnalyzer {
         return { ...summary, keyFiles };
       }
       return null;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.yellow('Warning: Could not load existing analysis:'), error.message);
       return null;
     }
@@ -299,7 +303,8 @@ export class ProjectAnalyzer {
       const embeddingsSystem = getDefaultEmbeddingsSystem();
       await embeddingsSystem.storeProjectSummary(projectPath, projectSummary);
       verboseLog({}, chalk.green('✅ Project analysis stored in database'));
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.yellow('Warning: Could not store analysis:'), error.message);
     }
   }
@@ -358,10 +363,12 @@ export class ProjectAnalyzer {
     // Optimize table to sync indices with data and prevent TakeExec panics
     try {
       await table.optimize();
-    } catch (optimizeError) {
+    }
+    catch (optimizeError) {
       if (optimizeError.message && optimizeError.message.includes('legacy format')) {
         console.warn(chalk.yellow(`Skipping optimization due to legacy index format - will be auto-upgraded during normal operations`));
-      } else {
+      }
+      else {
         console.warn(chalk.yellow(`Warning: Failed to optimize file embeddings table: ${optimizeError.message}`));
       }
     }
@@ -378,7 +385,8 @@ export class ProjectAnalyzer {
 
           if (config.whereClause) {
             query = query.where(`project_path = '${projectPath}' AND (${config.whereClause})`);
-          } else if (config.terms) {
+          }
+          else if (config.terms) {
             // For term-based searches, query ALL files and sort by depth to prioritize shallow config files
             const allFiles = await table
               .query()
@@ -406,12 +414,14 @@ export class ProjectAnalyzer {
 
               return matches;
             });
-          } else {
+          }
+          else {
             query = query.where(`project_path = '${projectPath}'`);
           }
 
           return await query.limit(config.limit || 30).toArray();
-        } catch (error) {
+        }
+        catch (error) {
           verboseLog({}, chalk.yellow(`     ⚠️ Query failed for ${config.category}: ${error.message}`));
           return [];
         }
@@ -430,7 +440,8 @@ export class ProjectAnalyzer {
           }
         });
       }
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red('Error mining embeddings:'), error.message);
       return [];
     }
@@ -444,11 +455,17 @@ export class ProjectAnalyzer {
    * Unified file type matching using consolidated patterns
    */
   matchesFileType(filePath, fileName, type) {
-    if (type === 'docs') return isDocumentationFile(filePath);
-    if (type === 'tests') return isTestFile(filePath);
+    if (type === 'docs') {
+      return isDocumentationFile(filePath);
+    }
+    if (type === 'tests') {
+      return isTestFile(filePath);
+    }
 
     const config = FILE_PATTERNS[type];
-    if (!config) return false;
+    if (!config) {
+      return false;
+    }
 
     const fileNameLower = fileName.toLowerCase();
     const filePathLower = filePath.toLowerCase();
@@ -546,10 +563,12 @@ Select files following the criteria in the system instructions.`;
 
         verboseLog({}, chalk.cyan(`🎯 LLM selected ${keyFiles.length} final key files`));
         return keyFiles;
-      } else {
+      }
+      else {
         throw new Error(`Failed to extract valid JSON array from LLM response`);
       }
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red('Error in LLM selection:'), error.message);
       verboseLog({}, chalk.yellow('   🔄 Falling back to automatic selection...'));
       return this.fallbackFileSelection(candidates, projectPath);
@@ -611,7 +630,8 @@ Select files following the criteria in the system instructions.`;
           const content = fs.readFileSync(fullPath, 'utf8');
           hash.update(content.substring(0, 1000));
         }
-      } catch {
+      }
+      catch {
         hash.update(file.relativePath || file.path || '');
       }
     }
@@ -646,7 +666,8 @@ Select files following the criteria in the system instructions.`;
       }
 
       return hash.digest('hex');
-    } catch (error) {
+    }
+    catch (error) {
       verboseLog({}, chalk.yellow(`Warning: Could not calculate embedding inventory hash: ${error.message}`));
       return 'embedding-inventory-unavailable';
     }
@@ -816,12 +837,14 @@ Follow the analysis guidelines from the system instructions to identify custom i
         validatedSummary.projectPath = projectPath;
         validatedSummary.keyFilesCount = keyFiles.length;
         return validatedSummary;
-      } else {
+      }
+      else {
         console.error(chalk.red('Failed to parse LLM response as JSON'));
         console.error(chalk.gray('Response content preview:'), response.content.substring(0, 500));
         throw new Error('Failed to parse LLM response as JSON');
       }
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red('Error generating project summary:'), error.message);
       const fallback = this.createFallbackSummary(projectPath, keyFiles);
       verboseLog({}, chalk.yellow('Using fallback summary with technologies:'), fallback.technologies);
@@ -839,7 +862,9 @@ Follow the analysis guidelines from the system instructions to identify custom i
 
     for (const file of keyFiles.slice(0, 25)) {
       // Max 25 files
-      if (totalSize >= maxTotalSize) break;
+      if (totalSize >= maxTotalSize) {
+        break;
+      }
 
       try {
         const fileContent = fs.readFileSync(file.fullPath, 'utf8');
@@ -848,7 +873,8 @@ Follow the analysis guidelines from the system instructions to identify custom i
 
         content += `\n\n=== ${file.relativePath} (${file.category}) ===\n${contentToAdd}`;
         totalSize += contentToAdd.length;
-      } catch (error) {
+      }
+      catch (error) {
         content += `\n\n=== ${file.relativePath} (${file.category}) ===\n[Could not read file: ${error.message}]`;
       }
     }
@@ -912,7 +938,8 @@ Follow the analysis guidelines from the system instructions to identify custom i
         projectName = packageJson.name || projectName;
         const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
         technologies = Object.keys(deps).slice(0, 10);
-      } catch {
+      }
+      catch {
         // Continue with defaults
       }
     }

@@ -41,7 +41,9 @@ const headerPartial = `## {{#if @root.linkCompare}}[{{version}}]({{@root.host}}/
  * @returns {string} - The indented body
  */
 function indentBody(body) {
-  if (!body) return body;
+  if (!body) {
+    return body;
+  }
   return body
     .split('\n')
     .map((line) => `  ${line}`)

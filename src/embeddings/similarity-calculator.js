@@ -57,7 +57,9 @@ export function calculateCosineSimilarity(vecA, vecB) {
  * @returns {number} Similarity score between 0 and 1
  */
 export function calculatePathSimilarity(path1, path2) {
-  if (!path1 || !path2) return 0;
+  if (!path1 || !path2) {
+    return 0;
+  }
 
   try {
     // Normalize paths and split into directory components
@@ -76,7 +78,8 @@ export function calculatePathSimilarity(path1, path2) {
     for (let i = 0; i < minLength; i++) {
       if (parts1[i] === parts2[i]) {
         commonPrefixLength++;
-      } else {
+      }
+      else {
         break;
       }
     }
@@ -90,7 +93,8 @@ export function calculatePathSimilarity(path1, path2) {
 
     const score = commonPrefixLength / avgLength;
     return Math.max(0, Math.min(1, score)); // Clamp score between 0 and 1
-  } catch (error) {
+  }
+  catch (error) {
     debug(`[calculatePathSimilarity] Error comparing paths '${path1}' and '${path2}': ${error.message}`);
     return 0; // Return 0 similarity on error
   }

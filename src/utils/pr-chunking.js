@@ -78,7 +78,9 @@ export function chunkPRFiles(prFiles, maxTokensPerChunk = 35000) {
     const dirB = getDirectoryDepth(b.filePath);
 
     // Primary: Directory structure (keep related files together)
-    if (dirA !== dirB) return dirA.localeCompare(dirB);
+    if (dirA !== dirB) {
+      return dirA.localeCompare(dirB);
+    }
 
     // Secondary: Change importance (larger changes first)
     return b.changeSize - a.changeSize;
@@ -123,7 +125,9 @@ export function chunkPRFiles(prFiles, maxTokensPerChunk = 35000) {
  * @returns {number} Total number of additions and deletions
  */
 function calculateChangeSize(diffContent) {
-  if (!diffContent) return 0;
+  if (!diffContent) {
+    return 0;
+  }
   const lines = diffContent.split('\n');
   const additions = lines.filter((line) => line.startsWith('+')).length;
   const deletions = lines.filter((line) => line.startsWith('-')).length;
@@ -143,15 +147,27 @@ function calculateFileComplexity(file) {
 
   // Path-based heuristics (works for any language)
   const path = file.filePath.toLowerCase();
-  if (path.includes('/src/') || path.includes('/lib/')) complexity += 10;
-  if (path.includes('/test/') || path.includes('/spec/')) complexity += 5;
-  if (path.includes('/config/') || path.includes('/settings/')) complexity += 8;
-  if (path.includes('/main.') || path.includes('/index.')) complexity += 15;
+  if (path.includes('/src/') || path.includes('/lib/')) {
+    complexity += 10;
+  }
+  if (path.includes('/test/') || path.includes('/spec/')) {
+    complexity += 5;
+  }
+  if (path.includes('/config/') || path.includes('/settings/')) {
+    complexity += 8;
+  }
+  if (path.includes('/main.') || path.includes('/index.')) {
+    complexity += 15;
+  }
 
   // Change type heuristics
   if (file.diffContent) {
-    if (file.diffContent.includes('new file mode')) complexity += 12;
-    if (file.diffContent.includes('deleted file mode')) complexity += 8;
+    if (file.diffContent.includes('new file mode')) {
+      complexity += 12;
+    }
+    if (file.diffContent.includes('deleted file mode')) {
+      complexity += 8;
+    }
   }
 
   return complexity;
@@ -220,7 +236,9 @@ export function combineChunkResults(chunkResults, totalFiles, options = {}) {
  */
 function createCombinedSummary(chunkResults) {
   const totalIssues = chunkResults.reduce((sum, chunk) => {
-    if (!chunk.results) return sum;
+    if (!chunk.results) {
+      return sum;
+    }
     return (
       sum +
       chunk.results.reduce((fileSum, file) => {

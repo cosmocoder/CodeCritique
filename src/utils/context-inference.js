@@ -40,27 +40,45 @@ export function inferContextFromCodeContent(codeContent, language) {
       lowerCode.includes('.tsx')
     ) {
       context.area = 'Frontend';
-      if (lowerCode.includes('react')) context.dominantTech.push('React');
-      if (lowerCode.includes('angular')) context.dominantTech.push('Angular');
-      if (lowerCode.includes('vue')) context.dominantTech.push('Vue');
-    } else if (
+      if (lowerCode.includes('react')) {
+        context.dominantTech.push('React');
+      }
+      if (lowerCode.includes('angular')) {
+        context.dominantTech.push('Angular');
+      }
+      if (lowerCode.includes('vue')) {
+        context.dominantTech.push('Vue');
+      }
+    }
+    else if (
       lowerCode.includes("require('express')") ||
       lowerCode.includes('http.createserver') ||
       lowerCode.includes('fs.readfilesync') ||
       lowerCode.includes('process.env')
     ) {
       context.area = 'Backend';
-      if (lowerCode.includes('express')) context.dominantTech.push('Node.js/Express');
-      else context.dominantTech.push('Node.js');
-    } else {
+      if (lowerCode.includes('express')) {
+        context.dominantTech.push('Node.js/Express');
+      }
+      else {
+        context.dominantTech.push('Node.js');
+      }
+    }
+    else {
       context.area = 'GeneralJS_TS';
     }
-  } else if (language === 'python') {
+  }
+  else if (language === 'python') {
     if (lowerCode.includes('django') || lowerCode.includes('flask')) {
       context.area = 'Backend';
-      if (lowerCode.includes('django')) context.dominantTech.push('Django');
-      if (lowerCode.includes('flask')) context.dominantTech.push('Flask');
-    } else {
+      if (lowerCode.includes('django')) {
+        context.dominantTech.push('Django');
+      }
+      if (lowerCode.includes('flask')) {
+        context.dominantTech.push('Flask');
+      }
+    }
+    else {
       context.area = 'GeneralPython'; // Or just "Backend"
     }
   }
@@ -68,7 +86,9 @@ export function inferContextFromCodeContent(codeContent, language) {
 
   const commonTechWords = ['api', 'component', 'module', 'function', 'class', 'hook', 'service', 'database', 'query', 'state', 'props'];
   commonTechWords.forEach((word) => {
-    if (lowerCode.includes(word)) context.keywords.push(word);
+    if (lowerCode.includes(word)) {
+      context.keywords.push(word);
+    }
   });
   context.keywords = [...new Set(context.keywords)];
   context.dominantTech = [...new Set(context.dominantTech)];
@@ -107,7 +127,9 @@ export async function inferContextFromDocumentContent(docPath, h1Content, chunks
 
   for (const chunk of chunksSample) {
     // Iterate over potentially all sample chunks from findSimilarCode
-    if (charCount >= MAX_CHARS_FROM_CHUNKS) break;
+    if (charCount >= MAX_CHARS_FROM_CHUNKS) {
+      break;
+    }
     const chunkContentLower = (chunk.content || '').toLowerCase();
     const chunkHeadingLower = (chunk.heading_text || '').toLowerCase();
     let textToAppend = '';
@@ -127,8 +149,10 @@ export async function inferContextFromDocumentContent(docPath, h1Content, chunks
 
   if (!fullTextForAnalysis.trim()) {
     // If absolutely no text content after H1, filename, and chunks
-    if (lowerDocPath)
-      fullTextForAnalysis = lowerDocPath; // Fallback to path for keyword extraction if all else fails
+    if (lowerDocPath) {
+      fullTextForAnalysis = lowerDocPath;
+    }
+    // Fallback to path for keyword extraction if all else fails
     else {
       context.area = 'UndeterminedByContent';
       return context; // Early exit if no text to analyze at all
@@ -268,7 +292,8 @@ export async function inferContextFromDocumentContent(docPath, h1Content, chunks
     // Set threshold for area selection
     if (maxScore >= 0.4) {
       context.area = selectedArea;
-    } else {
+    }
+    else {
       context.area = 'Unknown';
     }
 
@@ -337,7 +362,8 @@ export async function inferContextFromDocumentContent(docPath, h1Content, chunks
 
     // Remove duplicates and limit
     context.keywords = [...new Set(context.keywords)].slice(0, 15);
-  } catch (error) {
+  }
+  catch (error) {
     console.error('Error in automatic zero-shot classification:', error);
 
     // Fallback to basic keyword extraction

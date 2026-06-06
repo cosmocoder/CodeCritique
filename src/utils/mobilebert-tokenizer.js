@@ -20,7 +20,9 @@ let initializationPromise = null;
  */
 async function getTokenizer() {
   // If already initialized, return immediately
-  if (tokenizer) return tokenizer;
+  if (tokenizer) {
+    return tokenizer;
+  }
 
   // If currently initializing, wait for the existing initialization
   if (isInitializing && initializationPromise) {
@@ -34,7 +36,8 @@ async function getTokenizer() {
   try {
     tokenizer = await initializationPromise;
     return tokenizer;
-  } finally {
+  }
+  finally {
     isInitializing = false;
     initializationPromise = null;
   }
@@ -50,7 +53,8 @@ async function _initializeTokenizer() {
     const tok = await AutoTokenizer.from_pretrained('Xenova/mobilebert-uncased-mnli');
     verboseLog({}, chalk.green('✓ MobileBERT tokenizer initialized successfully'));
     return tok;
-  } catch (error) {
+  }
+  catch (error) {
     console.warn(chalk.yellow('⚠ Failed to initialize tokenizer, falling back to character estimation'), error.message);
     return null;
   }
@@ -75,7 +79,8 @@ async function countTokens(text) {
 
     const encoded = await tok.encode(text);
     return encoded.length;
-  } catch (error) {
+  }
+  catch (error) {
     console.warn(chalk.gray('Token counting failed, using character estimation'), error.message);
     return Math.ceil(text.length / 3);
   }
@@ -88,7 +93,9 @@ async function countTokens(text) {
  * @returns {Promise<string>} Truncated text
  */
 export async function truncateToTokenLimit(text, maxTokens = 450) {
-  if (!text) return '';
+  if (!text) {
+    return '';
+  }
 
   const currentTokens = await countTokens(text);
   if (currentTokens <= maxTokens) {
@@ -108,7 +115,8 @@ export async function truncateToTokenLimit(text, maxTokens = 450) {
     if (tokens <= maxTokens) {
       bestLength = mid;
       left = mid + 1;
-    } else {
+    }
+    else {
       right = mid - 1;
     }
   }
@@ -134,7 +142,8 @@ export async function cleanupTokenizer() {
       }
       tokenizer = null;
       verboseLog({}, chalk.green('✓ MobileBERT tokenizer resources cleaned up'));
-    } catch (error) {
+    }
+    catch (error) {
       console.warn(chalk.yellow('⚠ Error cleaning up tokenizer:'), error.message);
       tokenizer = null;
     }

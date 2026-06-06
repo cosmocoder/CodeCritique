@@ -134,7 +134,8 @@ export class PRCommentProcessor {
       let classification;
       try {
         classification = await this.classifyComment(comment.body, codeContext);
-      } catch {
+      }
+      catch {
         // Graceful degradation on classification failure
         classification = {
           issue_category: 'unknown',
@@ -151,7 +152,8 @@ export class PRCommentProcessor {
         combined_embedding: combinedEmbedding,
         ...classification,
       };
-    } catch (error) {
+    }
+    catch (error) {
       console.error('Error processing comment:', error);
       throw error;
     }
@@ -271,9 +273,11 @@ export class PRCommentProcessor {
     for (const line of lines) {
       if (line.startsWith('-')) {
         originalCode.push(line.substring(1));
-      } else if (line.startsWith('+')) {
+      }
+      else if (line.startsWith('+')) {
         suggestedCode.push(line.substring(1));
-      } else if (!line.startsWith('@@') && line.trim()) {
+      }
+      else if (!line.startsWith('@@') && line.trim()) {
         contextLines.push(line.substring(1) || line);
       }
     }
@@ -309,7 +313,8 @@ export class PRCommentProcessor {
       if (currentLine === line) {
         if (patchLine.startsWith('-')) {
           originalCode = patchLine.substring(1);
-        } else if (patchLine.startsWith('+')) {
+        }
+        else if (patchLine.startsWith('+')) {
           suggestedCode = patchLine.substring(1);
         }
         break;
@@ -390,9 +395,15 @@ export class PRCommentProcessor {
     for (const [cat, patterns] of Object.entries(this.classificationPatterns)) {
       let score = 0;
       for (const pattern of patterns) {
-        if (pattern.test(text)) score += 2;
-        if (pattern.test(code)) score += 1;
-        if (pattern.test(filePath)) score += 0.5;
+        if (pattern.test(text)) {
+          score += 2;
+        }
+        if (pattern.test(code)) {
+          score += 1;
+        }
+        if (pattern.test(filePath)) {
+          score += 0.5;
+        }
       }
 
       if (score > maxScore) {
@@ -403,7 +414,9 @@ export class PRCommentProcessor {
 
     // Special handling for security context
     if (code.includes('password') || code.includes('token') || filePath.includes('auth')) {
-      if (category === 'general') category = 'security';
+      if (category === 'general') {
+        category = 'security';
+      }
     }
 
     // Determine severity
@@ -415,7 +428,9 @@ export class PRCommentProcessor {
           break;
         }
       }
-      if (severity !== 'minor') break;
+      if (severity !== 'minor') {
+        break;
+      }
     }
 
     // Adjust severity based on category

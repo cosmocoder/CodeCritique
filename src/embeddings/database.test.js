@@ -72,9 +72,15 @@ describe('DatabaseManager', () => {
       ['custom', { dbPath: '/custom', embeddingDimensions: 768 }, { path: '/custom', dim: 768 }],
     ])('should initialize with %s options', (_, opts, expected) => {
       const manager = new DatabaseManager(opts);
-      if (expected.dim) expect(manager.embeddingDimensions).toBe(expected.dim);
-      if (expected.conn !== undefined) expect(manager.dbConnection).toBeNull();
-      if (expected.path) expect(manager.dbPath).toBe(expected.path);
+      if (expected.dim) {
+        expect(manager.embeddingDimensions).toBe(expected.dim);
+      }
+      if (expected.conn !== undefined) {
+        expect(manager.dbConnection).toBeNull();
+      }
+      if (expected.path) {
+        expect(manager.dbPath).toBe(expected.path);
+      }
     });
   });
 
@@ -206,8 +212,12 @@ describe('DatabaseManager', () => {
       mockTable.countRows.mockResolvedValue(rows);
       const result = await dbManager.createAdaptiveVectorIndexes(mockTable, 'test', 'vector');
       expect(result.indexType).toBe(expectedType);
-      if (shouldCreate) expect(mockTable.createIndex).toHaveBeenCalled();
-      else expect(mockTable.createIndex).not.toHaveBeenCalled();
+      if (shouldCreate) {
+        expect(mockTable.createIndex).toHaveBeenCalled();
+      }
+      else {
+        expect(mockTable.createIndex).not.toHaveBeenCalled();
+      }
     });
 
     it('should handle index already exists error', async () => {
@@ -478,7 +488,9 @@ describe('DatabaseManager', () => {
       ['no summary found', ['project_summaries'], []],
     ])('should return null if %s', async (_, tables, records) => {
       mockDb.tableNames.mockResolvedValue(tables);
-      if (tables.length) mockQuery(records);
+      if (tables.length) {
+        mockQuery(records);
+      }
       expect(await dbManager.getProjectSummary('/test/project')).toBeNull();
     });
 
@@ -570,7 +582,8 @@ describe('DatabaseManager', () => {
       await dbManager.clearProjectEmbeddings('/test/project/deep');
       if (expectedLog === 'has project_path field') {
         expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining(expectedLog));
-      } else {
+      }
+      else {
         expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(expectedLog));
       }
     });
@@ -590,7 +603,8 @@ describe('DatabaseManager', () => {
       await dbManager.initializeTables();
       if (error.includes('already')) {
         expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining(expectedLog));
-      } else {
+      }
+      else {
         expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(expectedLog));
       }
     });
