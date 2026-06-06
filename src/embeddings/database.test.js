@@ -328,6 +328,20 @@ describe('DatabaseManager', () => {
       expect(mockTable.delete).toHaveBeenCalled();
     });
 
+    it('should query project-scoped records when project_path is available', async () => {
+      const queryChain = {
+        where: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([{ id: "record'1", project_path: "/test/it's/project/deep" }]),
+      };
+      mockDb.tableNames.mockResolvedValue(['file_embeddings']);
+      mockTable.query.mockReturnValue(queryChain);
+
+      await dbManager.clearProjectEmbeddings("/test/it's/project/deep");
+
+      expect(queryChain.where).toHaveBeenCalledWith("project_path = '/test/it''s/project/deep'");
+      expect(mockTable.delete).toHaveBeenCalledWith("id = 'record''1'");
+    });
+
     it('should handle non-existent database', async () => {
       fs.existsSync.mockReturnValue(false);
       expect(await dbManager.clearProjectEmbeddings('/test/project/deep')).toBe(true);

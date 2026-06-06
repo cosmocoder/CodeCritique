@@ -14,6 +14,7 @@ import * as llm from './llm.js';
 import { FILE_SELECTION_SYSTEM_PROMPT, PROJECT_SUMMARY_SYSTEM_PROMPT } from './prompt-cache.js';
 import { isDocumentationFile, isTestFile } from './utils/file-validation.js';
 import { verboseLog } from './utils/logging.js';
+import { escapeSqlString } from './utils/string-utils.js';
 
 // Consolidated file classification configuration
 const FILE_PATTERNS = {
@@ -377,6 +378,7 @@ export class ProjectAnalyzer {
 
     try {
       verboseLog({}, chalk.gray(`   📊 Using LanceDB hybrid search for project: ${projectPath}`));
+      const projectPathFilter = `project_path = '${escapeSqlString(projectPath)}'`;
 
       // Unified query function
       const queryFiles = async (config) => {
@@ -384,15 +386,11 @@ export class ProjectAnalyzer {
           let query = table.query().select(['path', 'name', 'content', 'type', 'language']);
 
           if (config.whereClause) {
-            query = query.where(`project_path = '${projectPath}' AND (${config.whereClause})`);
+            query = query.where(`${projectPathFilter} AND (${config.whereClause})`);
           }
           else if (config.terms) {
             // For term-based searches, query ALL files and sort by depth to prioritize shallow config files
-            const allFiles = await table
-              .query()
-              .select(['path', 'name', 'content', 'type', 'language'])
-              .where(`project_path = '${projectPath}'`)
-              .toArray(); // NO LIMIT - get all files
+            const allFiles = await table.query().select(['path', 'name', 'content', 'type', 'language']).where(projectPathFilter).toArray(); // NO LIMIT - get all files
 
             // Sort by path depth (shorter paths first) to prioritize config files
             allFiles.sort((a, b) => {
@@ -416,7 +414,7 @@ export class ProjectAnalyzer {
             });
           }
           else {
-            query = query.where(`project_path = '${projectPath}'`);
+            query = query.where(projectPathFilter);
           }
 
           return await query.limit(config.limit || 30).toArray();
@@ -655,7 +653,7 @@ Select files following the criteria in the system instructions.`;
       const records = await table
         .query()
         .select(['type', 'path', 'content_hash', 'project_path'])
-        .where(`project_path = '${projectPath.replace(/'/g, "''")}'`)
+        .where(`project_path = '${escapeSqlString(projectPath)}'`)
         .toArray();
 
       const hash = crypto.createHash('sha256');
