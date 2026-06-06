@@ -143,7 +143,6 @@ runs:
       working-directory: ${{ github.action_path }}
       env:
         GITHUB_TOKEN: ${{ github.token }}
-        GITHUB_OUTPUT: ${{ github.output }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         INPUT_CLEANUP_TYPE: ${{ inputs.cleanup-type }}
         INPUT_OLDER_THAN_DAYS: ${{ inputs.older-than-days }}
