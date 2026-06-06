@@ -23,6 +23,7 @@ import path from 'node:path';
 import * as lancedb from '@lancedb/lancedb';
 import { Field, FixedSizeList, Float32, Int32, Schema, Utf8 } from 'apache-arrow';
 import chalk from 'chalk';
+import { getTableSchema, schemaHasField } from '../utils/lancedb.js';
 import { debug, verboseLog } from '../utils/logging.js';
 import { isPathWithinProject } from '../utils/path-utils.js';
 import { escapeSqlString } from '../utils/string-utils.js';
@@ -275,6 +276,45 @@ export class DatabaseManager {
       console.error(chalk.red(`Error opening table ${tableName}: ${error.message}`), error);
       return null;
     }
+  }
+
+  /**
+   * Get embedding table statistics without initializing embedding models.
+   * @param {string|null} projectPath - Optional project path to filter by
+   * @returns {Promise<Object>} Embedding statistics
+   */
+  async getEmbeddingStats(projectPath = null) {
+    const stats = {
+      totalCount: 0,
+      dimensions: this.embeddingDimensions,
+      tables: {},
+    };
+
+    if (!fs.existsSync(this.dbPath)) {
+      return stats;
+    }
+
+    const db = await this.getDBConnection();
+    const tableNames = await db.tableNames();
+    const resolvedProjectPath = projectPath ? path.resolve(projectPath) : null;
+    const escapedProjectPath = resolvedProjectPath ? escapeSqlString(resolvedProjectPath) : null;
+
+    for (const tableName of [this.fileEmbeddingsTable, this.documentChunkTable, this.prCommentsTable]) {
+      if (!tableNames.includes(tableName)) {
+        stats.tables[tableName] = 0;
+        continue;
+      }
+
+      const table = await db.openTable(tableName);
+      const rowCount = escapedProjectPath
+        ? (await table.query().where(`project_path = '${escapedProjectPath}'`).toArray()).length
+        : await table.countRows();
+
+      stats.tables[tableName] = rowCount;
+      stats.totalCount += rowCount;
+    }
+
+    return stats;
   }
 
   // ============================================================================
@@ -653,13 +693,14 @@ export class DatabaseManager {
    */
   async _checkSchemaCompatibility(table, tableName, requiredField) {
     try {
-      const currentSchema = await table.schema;
-      if (currentSchema && currentSchema.fields) {
-        const hasRequiredField = currentSchema.fields.some((field) => field.name === requiredField);
-        if (!hasRequiredField) {
-          console.warn(chalk.yellow(`Table ${tableName} has old schema without ${requiredField}. Migration needed.`));
-          console.warn(chalk.yellow(`Please clear embeddings and regenerate them to use the new schema with project isolation.`));
-        }
+      const currentSchema = await getTableSchema(table);
+      if (!currentSchema?.fields) {
+        return;
+      }
+
+      if (!schemaHasField(currentSchema, requiredField)) {
+        console.warn(chalk.yellow(`Table ${tableName} has old schema without ${requiredField}. Migration needed.`));
+        console.warn(chalk.yellow(`Please clear embeddings and regenerate them to use the new schema with project isolation.`));
       }
     }
     catch (schemaError) {
@@ -676,18 +717,19 @@ export class DatabaseManager {
    */
   async _validateTableHasProjectPath(table, tableName) {
     try {
-      const currentSchema = await table.schema;
-      if (currentSchema && currentSchema.fields) {
-        const hasProjectPath = currentSchema.fields.some((field) => field.name === 'project_path');
-        if (!hasProjectPath) {
-          throw new Error(
-            `Table ${tableName} does not have project_path field. Cannot perform project-specific cleanup. Please regenerate embeddings to use the new schema with project isolation.`
-          );
-        }
+      const currentSchema = await getTableSchema(table);
+      if (!currentSchema?.fields) {
+        console.warn(chalk.yellow(`Table ${tableName} has no readable schema, skipping validation`));
+        return;
+      }
+
+      if (schemaHasField(currentSchema, 'project_path')) {
         verboseLog({}, chalk.green(`✓ Table ${tableName} has project_path field for proper isolation`));
       }
       else {
-        console.warn(chalk.yellow(`Table ${tableName} has no readable schema, skipping validation`));
+        throw new Error(
+          `Table ${tableName} does not have project_path field. Cannot perform project-specific cleanup. Please regenerate embeddings to use the new schema with project isolation.`
+        );
       }
     }
     catch (schemaError) {

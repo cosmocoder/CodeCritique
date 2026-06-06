@@ -86,6 +86,7 @@ export default [
       ...vitest.configs.recommended.rules,
       'no-extend-native': 0,
       'require-atomic-updates': 0,
+      'vitest/no-conditional-expect': 'off',
     },
   },
 

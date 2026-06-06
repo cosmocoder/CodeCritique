@@ -262,6 +262,15 @@ class EmbeddingsSystem {
   }
 
   /**
+   * Get embedding statistics without initializing embedding models.
+   * @param {string|null} projectPath - Optional project path
+   * @returns {Promise<Object>} Embedding statistics
+   */
+  async getStats(projectPath = null) {
+    return this.databaseManager.getEmbeddingStats(projectPath);
+  }
+
+  /**
    * Get project embeddings (compatibility method)
    * @param {string} projectPath - Project path
    * @returns {Object}
@@ -274,6 +283,7 @@ class EmbeddingsSystem {
       components: this.components,
       initialized: this.initialized,
       config: this.config,
+      getStats: () => this.getStats(projectPath),
     };
   }
 
@@ -329,7 +339,7 @@ class EmbeddingsSystem {
    * @returns {Promise<import('@lancedb/lancedb').Table|null>} PR comments table or null on error
    */
   async getPRCommentsTable() {
-    await this.initialize();
+    await this.databaseManager.getDBConnection();
     return this.databaseManager.getTable(this.databaseManager.prCommentsTable);
   }
 
@@ -338,7 +348,7 @@ class EmbeddingsSystem {
    * @returns {Promise<void>}
    */
   async updatePRCommentsIndex() {
-    await this.initialize();
+    await this.databaseManager.getDBConnection();
     return this.databaseManager.updatePRCommentsIndex();
   }
 

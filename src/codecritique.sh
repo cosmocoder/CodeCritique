@@ -6,7 +6,7 @@
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then
     echo "Error: Node.js is required but not installed."
-    echo "Please install Node.js v22.0.0 or higher: https://nodejs.org/"
+    echo "Please install Node.js v24.15.0 or higher: https://nodejs.org/"
     exit 1
 fi
 

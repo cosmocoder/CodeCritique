@@ -246,18 +246,22 @@ describe('EmbeddingsSystem', () => {
   });
 
   describe('getPRCommentsTable', () => {
-    it('should initialize and get PR comments table', async () => {
+    it('should get PR comments table without initializing models', async () => {
       await system.getPRCommentsTable();
 
+      expect(system.databaseManager.getDBConnection).toHaveBeenCalled();
       expect(system.databaseManager.getTable).toHaveBeenCalledWith('pr_comments');
+      expect(system.modelManager.initialize).not.toHaveBeenCalled();
     });
   });
 
   describe('updatePRCommentsIndex', () => {
-    it('should initialize and update PR comments index', async () => {
+    it('should update PR comments index without initializing models', async () => {
       await system.updatePRCommentsIndex();
 
+      expect(system.databaseManager.getDBConnection).toHaveBeenCalled();
       expect(system.databaseManager.updatePRCommentsIndex).toHaveBeenCalled();
+      expect(system.modelManager.initialize).not.toHaveBeenCalled();
     });
   });
 
@@ -291,6 +295,16 @@ describe('EmbeddingsSystem', () => {
       expect(result.system).toBe(system);
       expect(result.projectPath).toBe('/project');
       expect(result.components).toBeDefined();
+    });
+
+    it('should expose project-scoped stats', async () => {
+      system.databaseManager.getEmbeddingStats = vi.fn().mockResolvedValue({ totalCount: 0 });
+
+      const result = system.getProjectEmbeddings('/project');
+      const stats = await result.getStats();
+
+      expect(system.databaseManager.getEmbeddingStats).toHaveBeenCalledWith('/project');
+      expect(stats).toEqual({ totalCount: 0 });
     });
   });
 
