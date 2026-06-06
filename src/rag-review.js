@@ -230,7 +230,17 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
     verboseLog(verbose, chalk.gray(`Base branch: ${baseBranch}, Target branch: ${targetBranch}`));
 
     const prFiles = [];
-    for (const filePath of filesToReview) {
+    if (options.preloadedPRFiles?.length > 0) {
+      prFiles.push(
+        ...options.preloadedPRFiles.map((file) => ({
+          ...file,
+          baseBranch: file.baseBranch || baseBranch,
+          targetBranch: file.targetBranch || targetBranch,
+        }))
+      );
+    }
+
+    for (const filePath of options.preloadedPRFiles?.length > 0 ? [] : filesToReview) {
       try {
         // Check if the file should be processed before fetching its content from git
         if (!shouldProcessFile(filePath, '', options)) {
@@ -596,6 +606,7 @@ async function reviewPRChunk(chunk, sharedContext, options, chunkNumber, totalCh
 
   // Skip chunking decision for chunk reviews to prevent infinite recursion
   const skipChunkingOptions = { ...chunkOptions, skipChunking: true };
+  skipChunkingOptions.preloadedPRFiles = chunk.files;
 
   return await reviewPullRequestWithCrossFileContext(chunkFilePaths, skipChunkingOptions);
 }
