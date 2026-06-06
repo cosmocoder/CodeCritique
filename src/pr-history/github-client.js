@@ -69,10 +69,12 @@ export class GitHubAPIClient {
       await this.octokit.repos.get({ owner, repo });
       this.log(`✓ Token has access to ${owner}/${repo}`);
       return true;
-    } catch (error) {
+    }
+    catch (error) {
       if (error.status === 403) {
         throw new Error(`Token lacks permission to access repository ${owner}/${repo}`);
-      } else if (error.status === 404) {
+      }
+      else if (error.status === 404) {
         throw new Error(`Repository ${owner}/${repo} not found or not accessible`);
       }
       throw error;
@@ -93,7 +95,8 @@ export class GitHubAPIClient {
 
       this.log('No previous analysis found');
       return null;
-    } catch (error) {
+    }
+    catch (error) {
       this.log(`Error getting last analysis date: ${error.message}`, 'warn');
       return null;
     }
@@ -158,7 +161,8 @@ export class GitHubAPIClient {
         lastDate: lastPRDate,
         totalProcessed: progress.totalProcessed || 0,
       };
-    } catch (error) {
+    }
+    catch (error) {
       this.log(`Error loading resume data: ${error.message}`, 'warn');
       return null;
     }
@@ -258,11 +262,13 @@ export class GitHubAPIClient {
         if (response.data.length < DEFAULT_PER_PAGE) {
           hasMore = false;
           this.log('Reached end of PR list');
-        } else if (limit && allPRs.length >= limit) {
+        }
+        else if (limit && allPRs.length >= limit) {
           allPRs = allPRs.slice(0, limit);
           hasMore = false;
           this.log(`Reached limit of ${limit} PRs`);
-        } else if (effectiveOptions.since && prs.length === 0 && response.data.length > 0) {
+        }
+        else if (effectiveOptions.since && prs.length === 0 && response.data.length > 0) {
           // If we're using since filter and getting 0 results after filtering, we've likely reached the date boundary
           hasMore = false;
           this.log('Reached date boundary (no PRs match criteria), stopping fetch');
@@ -309,7 +315,8 @@ export class GitHubAPIClient {
 
         // Rate limiting
         await this.respectRateLimit();
-      } catch (error) {
+      }
+      catch (error) {
         this.log(`Error fetching page ${page}: ${error.message}`, 'error');
         throw error;
       }
@@ -415,7 +422,8 @@ export class GitHubAPIClient {
         reviews: reviews.data,
         files: files.data,
       };
-    } catch (error) {
+    }
+    catch (error) {
       this.log(`Error fetching details for PR #${prNumber}: ${error.message}`, 'error');
       throw error;
     }
@@ -431,7 +439,8 @@ export class GitHubAPIClient {
 
       const response = await this.callWithRetry(() => this.octokit.pulls.listReviewComments({ owner, repo, pull_number: prNumber }));
       return response.data;
-    } catch (error) {
+    }
+    catch (error) {
       this.log(`Error fetching review comments for PR #${prNumber}: ${error.message}`, 'error');
       throw error;
     }
@@ -447,7 +456,8 @@ export class GitHubAPIClient {
 
       const response = await this.callWithRetry(() => this.octokit.issues.listComments({ owner, repo, issue_number: prNumber }));
       return response.data;
-    } catch (error) {
+    }
+    catch (error) {
       this.log(`Error fetching issue comments for PR #${prNumber}: ${error.message}`, 'error');
       throw error;
     }
@@ -463,7 +473,8 @@ export class GitHubAPIClient {
 
       const response = await this.callWithRetry(() => this.octokit.pulls.listFiles({ owner, repo, pull_number: prNumber }));
       return response.data;
-    } catch (error) {
+    }
+    catch (error) {
       this.log(`Error fetching files for PR #${prNumber}: ${error.message}`, 'error');
       throw error;
     }
@@ -485,14 +496,16 @@ export class GitHubAPIClient {
         }
 
         return result;
-      } catch (error) {
+      }
+      catch (error) {
         lastError = error;
 
         if (this.isRetryableError(error) && attempt < maxRetries) {
           const delay = this.calculateBackoffDelay(attempt, error);
           this.log(`Attempt ${attempt} failed, retrying in ${delay}ms: ${error.message}`, 'warn');
           await this.sleep(delay);
-        } else {
+        }
+        else {
           break;
         }
       }
@@ -579,7 +592,8 @@ export class GitHubAPIClient {
       const progress = JSON.parse(progressData);
       this.log(`Resuming from page ${progress.lastPage || 1}`);
       return progress;
-    } catch {
+    }
+    catch {
       this.log('No previous progress found, starting fresh');
       return {};
     }
@@ -596,7 +610,8 @@ export class GitHubAPIClient {
     try {
       await fs.mkdir(path.dirname(this.resumeFile), { recursive: true });
       await fs.writeFile(this.resumeFile, JSON.stringify(progress, null, 2));
-    } catch (error) {
+    }
+    catch (error) {
       this.log(`Failed to save progress: ${error.message}`, 'error');
     }
   }

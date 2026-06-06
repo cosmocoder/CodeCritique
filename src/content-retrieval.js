@@ -93,7 +93,8 @@ export class ContentRetriever {
           try {
             await fs.promises.access(absolutePath, fs.constants.F_OK);
             return { index, exists: true };
-          } catch {
+          }
+          catch {
             debug(`Filtering out non-existent project file: ${resultPath}`);
             return { index, exists: false };
           }
@@ -156,7 +157,8 @@ export class ContentRetriever {
           query = query.where(`project_path = '${escapeSqlString(resolvedProjectPath)}'`);
           debug(`Filtering documentation by project_path: ${resolvedProjectPath}`);
         }
-      } catch (schemaError) {
+      }
+      catch (schemaError) {
         debug(`Could not check schema for project_path field: ${schemaError.message}`);
       }
 
@@ -174,9 +176,11 @@ export class ContentRetriever {
         let similarity;
         if (result._distance !== undefined) {
           similarity = Math.max(0, Math.min(1, 1 - result._distance));
-        } else if (result._score !== undefined) {
+        }
+        else if (result._score !== undefined) {
           similarity = Math.max(0, Math.min(1, result._score));
-        } else {
+        }
+        else {
           similarity = 0.5;
         }
 
@@ -286,7 +290,8 @@ export class ContentRetriever {
                     // Use pre-computed context for generic documents (README, RUNBOOK, etc.)
                     context = getGenericDocumentContext(originalPath, docH1);
                     debug(`[FAST-PATH] Using pre-computed context for generic document: ${originalPath}`);
-                  } else {
+                  }
+                  else {
                     // Use the expensive inference for non-generic documents
                     context = await inferContextFromDocumentContent(
                       originalPath,
@@ -297,7 +302,8 @@ export class ContentRetriever {
                   }
 
                   return context;
-                } catch (error) {
+                }
+                catch (error) {
                   debug(`[ERROR] Failed to get context for ${originalPath}: ${error.message}`);
                   // Return a fallback context to avoid breaking the pipeline
                   return {
@@ -367,7 +373,8 @@ export class ContentRetriever {
                   contextMatchBonus += MODERATE_BOOST_TECH_MATCH;
                 }
               }
-            } else if (queryContextForReranking.area !== 'GeneralJS_TS') {
+            }
+            else if (queryContextForReranking.area !== 'GeneralJS_TS') {
               contextMatchBonus += HEAVY_PENALTY_AREA_MISMATCH;
             }
           }
@@ -420,7 +427,8 @@ export class ContentRetriever {
       verboseLog(options, chalk.green(`Returning ${finalResults.length} documentation results`));
 
       return finalResults;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error in findRelevantDocs: ${error.message}`), error);
       throw new EmbeddingError(`Documentation search failed: ${error.message}`);
     }
@@ -477,7 +485,8 @@ export class ContentRetriever {
           // Only include test files
           conditions.push(`(path LIKE '%.test.%' OR path LIKE '%.spec.%' OR path LIKE '%_test.py' OR path LIKE 'test_%.py')`);
           verboseLog(options, chalk.blue(`Filtering to include only test files.`));
-        } else {
+        }
+        else {
           // Exclude test files
           conditions.push(
             `(path NOT LIKE '%.test.%' AND path NOT LIKE '%.spec.%' AND path NOT LIKE '%_test.py' AND path NOT LIKE 'test_%.py')`
@@ -519,7 +528,8 @@ export class ContentRetriever {
             debug(`Filtering by project_path: ${resolvedProjectPath}`);
           }
         }
-      } catch (schemaError) {
+      }
+      catch (schemaError) {
         debug(`Could not check schema for project_path field: ${schemaError.message}`);
         // Continue without project_path filtering in query
       }
@@ -548,10 +558,12 @@ export class ContentRetriever {
           // Vector search distance (0 = perfect match, higher = less similar)
           // Apply more precise normalization to avoid all scores being 1.000
           similarity = Math.max(0, Math.min(1, Math.exp(-result._distance * 2)));
-        } else if (result._score !== undefined) {
+        }
+        else if (result._score !== undefined) {
           // FTS or hybrid score - normalize to 0-1 range with better scaling
           similarity = Math.max(0, Math.min(1, result._score / Math.max(result._score, 1)));
-        } else {
+        }
+        else {
           // Fallback
           similarity = 0.5;
         }
@@ -612,7 +624,8 @@ export class ContentRetriever {
               }
             }
           }
-        } catch (error) {
+        }
+        catch (error) {
           console.warn(chalk.yellow(`Project structure inclusion failed: ${error.message}`));
         }
       }
@@ -625,7 +638,8 @@ export class ContentRetriever {
 
       verboseLog(options, chalk.green(`Returning ${finalResults.length} optimized hybrid search results`));
       return finalResults;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error in optimized findSimilarCode: ${error.message}`), error);
       return [];
     }
@@ -680,7 +694,8 @@ export class ContentRetriever {
       };
 
       verboseLog({}, chalk.green('ContentRetriever cleanup complete'));
-    } finally {
+    }
+    finally {
       this.cleaningUp = false;
     }
   }

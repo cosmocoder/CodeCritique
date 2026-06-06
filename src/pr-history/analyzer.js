@@ -206,7 +206,8 @@ export class PRHistoryAnalyzer {
       verboseLog(verbose, chalk.green(`Processed ${results.total_prs} PRs with ${results.total_comments} comments`));
 
       return results;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error analyzing repository ${repository}: ${error.message}`));
       this.progress.addError(error, 'Repository analysis');
       this.progress.setStatus('failed');
@@ -264,7 +265,8 @@ export class PRHistoryAnalyzer {
       });
 
       return prs.filter((pr) => pr.merged_at); // Ensure only merged PRs
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error fetching PRs: ${error.message}`));
       this.progress.addError(error, 'Fetching PRs');
       throw error;
@@ -308,7 +310,8 @@ export class PRHistoryAnalyzer {
         return !shouldSkip;
       });
       verboseLog(verbose, chalk.green(`Skipping ${skippedPRs} already processed PRs, processing ${prsToProcess.length} new PRs`));
-    } else {
+    }
+    else {
       verboseLog(verbose, chalk.blue(`No previously processed PRs found, processing all ${prs.length} PRs`));
     }
 
@@ -361,7 +364,8 @@ export class PRHistoryAnalyzer {
           }
 
           return prComments;
-        } catch (error) {
+        }
+        catch (error) {
           console.error(chalk.red(`Error processing PR #${pr.number}: ${error.message}`));
           this.progress.addError(error, `PR #${pr.number}`);
           return [];
@@ -456,7 +460,8 @@ export class PRHistoryAnalyzer {
       // Process comments using comment processor
       const processedComments = await this.commentProcessor.processBatch(allComments, prContext);
       return processedComments;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error processing PR #${pr.number}: ${error.message}`));
       throw error;
     }
@@ -496,7 +501,8 @@ export class PRHistoryAnalyzer {
             percentage: safeStats.total_comments > 0 ? ((count / safeStats.total_comments) * 100).toFixed(1) : '0.0',
           });
         }
-      } catch (error) {
+      }
+      catch (error) {
         console.warn(chalk.yellow(`Error processing comment type patterns: ${error.message}`));
       }
 
@@ -510,7 +516,8 @@ export class PRHistoryAnalyzer {
             percentage: safeStats.total_comments > 0 ? ((count / safeStats.total_comments) * 100).toFixed(1) : '0.0',
           });
         }
-      } catch (error) {
+      }
+      catch (error) {
         console.warn(chalk.yellow(`Error processing issue category patterns: ${error.message}`));
       }
 
@@ -524,7 +531,8 @@ export class PRHistoryAnalyzer {
             percentage: safeStats.total_comments > 0 ? ((count / safeStats.total_comments) * 100).toFixed(1) : '0.0',
           });
         }
-      } catch (error) {
+      }
+      catch (error) {
         console.warn(chalk.yellow(`Error processing severity patterns: ${error.message}`));
       }
 
@@ -533,7 +541,8 @@ export class PRHistoryAnalyzer {
       try {
         const repoValues = Object.values(safeStats.repositories);
         totalPRs = repoValues.length > 0 ? Math.max(...repoValues) : 0;
-      } catch (error) {
+      }
+      catch (error) {
         console.warn(chalk.yellow(`Error calculating total PRs: ${error.message}`));
         totalPRs = 0;
       }
@@ -545,7 +554,8 @@ export class PRHistoryAnalyzer {
           .sort(([, a], [, b]) => b - a)
           .slice(0, 10)
           .map(([author, count]) => ({ author, count }));
-      } catch (error) {
+      }
+      catch (error) {
         console.warn(chalk.yellow(`Error calculating top authors: ${error.message}`));
         topAuthors = [];
       }
@@ -561,7 +571,8 @@ export class PRHistoryAnalyzer {
         patterns,
         analysis_date: new Date().toISOString(),
       };
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error getting analysis results: ${error.message}`));
       return {
         repository,

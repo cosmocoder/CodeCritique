@@ -48,7 +48,9 @@ export default async ({ github, context, core }) => {
     console.log(`💬 Processing review results for PR #${context.issue.number}`);
 
     const analyzeFeedback = async (commentId, commentBody = '') => {
-      if (!trackFeedback) return null;
+      if (!trackFeedback) {
+        return null;
+      }
 
       try {
         // Determine if this is a review comment or issue comment
@@ -95,7 +97,8 @@ export default async ({ github, context, core }) => {
               c.user.login !== 'github-actions[bot]' &&
               dismissiveKeywords.some((keyword) => c.body.toLowerCase().includes(keyword))
           );
-        } else {
+        }
+        else {
           // For issue comments, find replies within 5 comments after the AI comment
           const commentIndex = allComments.data.findIndex((c) => c.id === commentId);
           const potentialReplies = allComments.data.slice(commentIndex + 1, commentIndex + 6);
@@ -171,12 +174,15 @@ export default async ({ github, context, core }) => {
               });
 
               console.log(`✅ Successfully resolved conversation thread for comment ${commentId}`);
-            } else if (thread && thread.isResolved) {
+            }
+            else if (thread && thread.isResolved) {
               console.log(`ℹ️ Conversation thread for comment ${commentId} is already resolved`);
-            } else {
+            }
+            else {
               console.log(`⚠️ Could not find review thread for comment ${commentId}`);
             }
-          } catch (resolveError) {
+          }
+          catch (resolveError) {
             console.log(`⚠️ Could not auto-resolve conversation for comment ${commentId}: ${resolveError.message}`);
           }
         }
@@ -194,14 +200,17 @@ export default async ({ github, context, core }) => {
             positiveReactions > negativeReactions ? 'positive' : negativeReactions > positiveReactions ? 'negative' : 'neutral',
           contextAdded: hasDismissiveFeedback,
         };
-      } catch (error) {
+      }
+      catch (error) {
         console.log(`⚠️ Error analyzing feedback for comment ${commentId}: ${error.message}`);
         return null;
       }
     };
 
     const saveFeedbackData = async (feedbackData) => {
-      if (!trackFeedback || Object.keys(feedbackData).length === 0) return;
+      if (!trackFeedback || Object.keys(feedbackData).length === 0) {
+        return;
+      }
 
       try {
         // Create feedback report
@@ -244,7 +253,8 @@ export default async ({ github, context, core }) => {
         core.setOutput('feedback-report-path', uploadPath);
 
         return feedbackReport;
-      } catch (error) {
+      }
+      catch (error) {
         console.log(`⚠️ Error saving feedback data: ${error.message}`);
         core.setOutput('feedback-artifact-uploaded', 'false');
         return null;
@@ -304,7 +314,8 @@ export default async ({ github, context, core }) => {
       if (botComment) {
         existingSummaryCommentId = botComment.id;
         console.log(`🔄 Found existing summary comment ID: ${existingSummaryCommentId}`);
-      } else {
+      }
+      else {
         console.log('➕ No existing summary comment found, will create new one');
       }
     }
@@ -363,7 +374,8 @@ export default async ({ github, context, core }) => {
         if (hasUserInteraction) {
           console.log(`📌 Preserving comment ${comment.id} due to user feedback`);
           preservedCount++;
-        } else {
+        }
+        else {
           // No user interaction - safe to delete
           try {
             await github.rest.pulls.deleteReviewComment({
@@ -372,7 +384,8 @@ export default async ({ github, context, core }) => {
               comment_id: comment.id,
             });
             deletedCount++;
-          } catch (deleteError) {
+          }
+          catch (deleteError) {
             console.log(`⚠️ Could not delete comment ${comment.id}: ${deleteError.message}`);
           }
         }
@@ -412,7 +425,8 @@ ${uniqueCommentId}`;
           body: summaryBody,
         });
         console.log('✅ Updated existing summary comment');
-      } else {
+      }
+      else {
         console.log('📋 Creating new summary comment...');
         await github.rest.issues.createComment({
           issue_number: context.issue.number,
@@ -439,7 +453,9 @@ ${uniqueCommentId}`;
           break;
         }
 
-        if (!fileDetail.review?.issues) continue;
+        if (!fileDetail.review?.issues) {
+          continue;
+        }
 
         // Convert absolute path to relative path
         let relativePath = fileDetail.filePath;
@@ -458,7 +474,9 @@ ${uniqueCommentId}`;
         console.log(`📁 Processing ${fileDetail.filePath} -> ${relativePath}`);
 
         for (const issue of fileDetail.review.issues) {
-          if (commentsPosted >= maxComments) break;
+          if (commentsPosted >= maxComments) {
+            break;
+          }
 
           // Skip similar issues that received negative feedback
           if (
@@ -515,7 +533,8 @@ ${uniqueCommentId}`;
 
             commentsPosted++;
             console.log(`✅ Posted inline comment for ${relativePath}:${lineNum}`);
-          } catch (error) {
+          }
+          catch (error) {
             // If the line is not in the diff, try posting a file-level comment instead
             if (error.status === 422) {
               console.log(`⚠️ Line ${lineNum} is not within the PR diff, trying file-level comment with code snippet...`);
@@ -577,7 +596,8 @@ ${uniqueCommentId}`;
 
                     codeSnippet = `\n\n**Code at line ${lineNum}:**\n\`\`\`${lang}\n${formattedSnippet}\n\`\`\``;
                   }
-                } catch (fetchError) {
+                }
+                catch (fetchError) {
                   console.log(`⚠️ Could not fetch file content for code snippet: ${fetchError.message}`);
                 }
 
@@ -597,12 +617,15 @@ ${uniqueCommentId}`;
 
                 commentsPosted++;
                 console.log(`✅ Posted file-level comment for ${relativePath} (referencing line ${lineNum})`);
-              } catch (fileError) {
+              }
+              catch (fileError) {
                 console.log(`❌ Failed to post file-level comment for ${relativePath}: ${fileError.message}`);
               }
-            } else if (error.status === 404) {
+            }
+            else if (error.status === 404) {
               console.log(`❌ Skipped comment for ${relativePath}:${lineNum} - File or commit not found in PR`);
-            } else {
+            }
+            else {
               console.log(`❌ Skipped comment for ${relativePath}:${lineNum} - ${error.message}`);
             }
           }
@@ -613,7 +636,8 @@ ${uniqueCommentId}`;
 
       // Set output for GitHub Actions
       core.setOutput('comments-posted', commentsPosted.toString());
-    } else {
+    }
+    else {
       console.log('⏭️ No inline comments to post');
       core.setOutput('comments-posted', '0');
     }
@@ -634,7 +658,8 @@ ${uniqueCommentId}`;
     }
 
     console.log('✅ Comment posting completed');
-  } catch (error) {
+  }
+  catch (error) {
     console.error('❌ Error in comment posting script:', error.message);
     core.setFailed(`Comment posting failed: ${error.message}`);
   }

@@ -27,7 +27,9 @@ import { debug } from './logging.js';
 export function extractMarkdownChunks(filePath, content, relativePath) {
   const chunks = [];
   let documentH1 = null;
-  if (!content || typeof content !== 'string') return { chunks, documentH1 };
+  if (!content || typeof content !== 'string') {
+    return { chunks, documentH1 };
+  }
 
   const lines = content.split('\n');
   let currentChunkLines = [];
@@ -60,7 +62,8 @@ export function extractMarkdownChunks(filePath, content, relativePath) {
         documentH1 = h1Match[1].trim();
         h1Found = true;
         debug(`[extractMarkdownChunks] H1 FOUND for ${filePath}: "${documentH1}" on line ${i + 1}`);
-      } else if (filePath.includes('README.md') || filePath.includes('RUNBOOK.md')) {
+      }
+      else if (filePath.includes('README.md') || filePath.includes('RUNBOOK.md')) {
         if (linesProcessedForH1 <= 5 && trimmedLine.startsWith('#')) {
           // If it starts with # but didn't match
           debug(`[extractMarkdownChunks] File: ${filePath}, Line ${i + 1}: Starts with # but H1Regex DID NOT match "${trimmedLine}"`);
@@ -85,7 +88,8 @@ export function extractMarkdownChunks(filePath, content, relativePath) {
       currentH2H3Heading = h2h3Match[2].trim();
       currentChunkLines = [line]; // Include H2/H3 heading line in the new chunk's content
       chunkStartLine = i + 1;
-    } else {
+    }
+    else {
       // Not an H1 or H2/H3 heading line (or H1 already found), add to current chunk
       // This also correctly captures content before the first H2/H3 heading (under an H1 or if no H1).
       currentChunkLines.push(line);

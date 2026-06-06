@@ -447,7 +447,8 @@ describe('FileProcessor', () => {
       const result = await processor.processBatchEmbeddings(['/test/file.js'], { baseDir: '/test' });
       if (errorMsg === 'legacy format') {
         expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(expectedLog));
-      } else {
+      }
+      else {
         expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(expectedLog));
       }
       expect(result.processed).toBeGreaterThanOrEqual(0);
@@ -503,7 +504,9 @@ describe('FileProcessor', () => {
         }),
       });
       mockDatabaseManager.getTable.mockImplementation((tableName) => {
-        if (tableName === 'document_chunk_embeddings') return Promise.resolve(docMockTable);
+        if (tableName === 'document_chunk_embeddings') {
+          return Promise.resolve(docMockTable);
+        }
         return Promise.resolve(mockTable);
       });
       setupFileSystemMocks('# Title\n\nChunk 1');
@@ -512,8 +515,12 @@ describe('FileProcessor', () => {
 
     it('should handle document chunk table not found', async () => {
       mockDatabaseManager.getTable.mockImplementation((tableName) => {
-        if (tableName === 'file_embeddings') return Promise.resolve(mockTable);
-        if (tableName === 'document_chunk_embeddings') return Promise.resolve(null);
+        if (tableName === 'file_embeddings') {
+          return Promise.resolve(mockTable);
+        }
+        if (tableName === 'document_chunk_embeddings') {
+          return Promise.resolve(null);
+        }
         return Promise.resolve(mockTable);
       });
       setupFileSystemMocks('# Title');
@@ -528,7 +535,9 @@ describe('FileProcessor', () => {
       });
       const docMockTable = createMockTable();
       mockDatabaseManager.getTable.mockImplementation((tableName) => {
-        if (tableName === 'document_chunk_embeddings') return Promise.resolve(docMockTable);
+        if (tableName === 'document_chunk_embeddings') {
+          return Promise.resolve(docMockTable);
+        }
         return Promise.resolve(mockTable);
       });
       setupFileSystemMocks('# Title\n\nContent');
@@ -546,7 +555,9 @@ describe('FileProcessor', () => {
       });
       const docMockTable = createMockTable({ optimize: vi.fn().mockRejectedValue(new Error('legacy format')) });
       mockDatabaseManager.getTable.mockImplementation((tableName) => {
-        if (tableName === 'document_chunk_embeddings') return Promise.resolve(docMockTable);
+        if (tableName === 'document_chunk_embeddings') {
+          return Promise.resolve(docMockTable);
+        }
         return Promise.resolve(mockTable);
       });
       setupFileSystemMocks('# Title\n\nContent');
@@ -559,7 +570,9 @@ describe('FileProcessor', () => {
 
     it('should handle document chunk processing errors', async () => {
       fs.statSync.mockImplementation((filePath) => {
-        if (filePath.includes('error')) throw new Error('Stat error');
+        if (filePath.includes('error')) {
+          throw new Error('Stat error');
+        }
         return { size: 1000, mtime: new Date() };
       });
       fs.promises.readFile.mockResolvedValue('# Title');

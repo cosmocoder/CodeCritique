@@ -68,7 +68,8 @@ export async function loadFeedbackData(feedbackPath, options = {}) {
           totalItems += itemCount;
           verboseLog(verbose, chalk.cyan(`📋 Loaded feedback from ${file}: ${itemCount} items`));
         }
-      } catch (parseError) {
+      }
+      catch (parseError) {
         console.warn(chalk.yellow(`⚠️ Error parsing feedback file ${file}: ${parseError.message}`));
       }
     }
@@ -79,7 +80,8 @@ export async function loadFeedbackData(feedbackPath, options = {}) {
     }
 
     return {};
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red(`❌ Error loading feedback data: ${error.message}`));
     return {};
   }
@@ -112,7 +114,8 @@ export async function initializeSemanticSimilarity() {
     semanticSimilarityInitialized = true;
     semanticSimilarityAvailable = true;
     verboseLog({}, chalk.green('[FeedbackLoader] Semantic similarity initialized using embeddings system'));
-  } catch (error) {
+  }
+  catch (error) {
     console.warn(chalk.yellow(`[FeedbackLoader] Semantic similarity initialization failed: ${error.message}`));
     semanticSimilarityAvailable = false;
   }
@@ -154,7 +157,8 @@ async function calculateSemanticSimilarity(text1, text2) {
     const similarity = calculateCosineSimilarity(embedding1, embedding2);
     // Cosine similarity ranges from -1 to 1, normalize to 0-1
     return (similarity + 1) / 2;
-  } catch (error) {
+  }
+  catch (error) {
     console.warn(chalk.yellow(`[FeedbackLoader] Semantic similarity calculation failed: ${error.message}`));
     return null;
   }
@@ -207,7 +211,9 @@ export async function shouldSkipSimilarIssue(issueDescription, feedbackData, opt
 
   // Check similarity with dismissed issues
   for (const dismissed of dismissedIssues) {
-    if (!dismissed.originalIssue) continue;
+    if (!dismissed.originalIssue) {
+      continue;
+    }
 
     let similarity;
     let similarityMethod;
@@ -222,7 +228,8 @@ export async function shouldSkipSimilarIssue(issueDescription, feedbackData, opt
         similarity = calculateWordSimilarity(issueDescription, dismissed.originalIssue);
         similarityMethod = 'word-based';
       }
-    } else {
+    }
+    else {
       // Use word-based similarity
       similarity = calculateWordSimilarity(issueDescription, dismissed.originalIssue);
       similarityMethod = 'word-based';
@@ -297,7 +304,9 @@ export async function calculateIssueSimilarity(text1, text2, options = {}) {
  * @returns {number} Similarity score (0-1)
  */
 export function calculateWordSimilarity(text1, text2) {
-  if (!text1 || !text2) return 0;
+  if (!text1 || !text2) {
+    return 0;
+  }
 
   // Normalize and tokenize
   const normalize = (text) =>
@@ -310,7 +319,9 @@ export function calculateWordSimilarity(text1, text2) {
   const words1 = new Set(normalize(text1));
   const words2 = new Set(normalize(text2));
 
-  if (words1.size === 0 || words2.size === 0) return 0;
+  if (words1.size === 0 || words2.size === 0) {
+    return 0;
+  }
 
   // Calculate Jaccard similarity (intersection over union)
   const intersection = [...words1].filter((word) => words2.has(word)).length;

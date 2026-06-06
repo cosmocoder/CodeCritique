@@ -222,7 +222,8 @@ describe('post-comments.js', () => {
         // The path should be converted from /home/runner/_work/test-repo/test-repo/src/utils.js
         // to src/utils.js
         expect(pathsUsed).toContain('src/utils.js');
-      } else {
+      }
+      else {
         // If feedback filtering skipped all issues, verify the function ran without error
         expect(mockCore.setFailed).not.toHaveBeenCalled();
       }
@@ -405,7 +406,8 @@ describe('post-comments.js', () => {
       const calls = mockGithub.rest.pulls.createReviewComment.mock.calls;
       if (calls.length > 0) {
         expect(calls[0][0].body).toContain('🚨');
-      } else {
+      }
+      else {
         // If feedback filtering skipped the issue, verify the function ran without error
         expect(mockCore.setFailed).not.toHaveBeenCalled();
       }
@@ -432,7 +434,8 @@ describe('post-comments.js', () => {
       const calls = mockGithub.rest.pulls.createReviewComment.mock.calls;
       if (calls.length > 0) {
         expect(calls[0][0].body).toContain('⚠️');
-      } else {
+      }
+      else {
         // If feedback filtering skipped the issue, verify the function ran without error
         expect(mockCore.setFailed).not.toHaveBeenCalled();
       }
@@ -459,7 +462,8 @@ describe('post-comments.js', () => {
       const calls = mockGithub.rest.pulls.createReviewComment.mock.calls;
       if (calls.length > 0) {
         expect(calls[0][0].body).toContain('💡');
-      } else {
+      }
+      else {
         // If feedback filtering skipped the issue, verify the function ran without error
         expect(mockCore.setFailed).not.toHaveBeenCalled();
       }
@@ -677,7 +681,9 @@ describe('post-comments.js', () => {
 
     it('should create feedback directory if it does not exist', async () => {
       fs.existsSync.mockImplementation((filepath) => {
-        if (filepath.includes('.ai-feedback')) return false;
+        if (filepath.includes('.ai-feedback')) {
+          return false;
+        }
         return true;
       });
 
@@ -797,7 +803,8 @@ describe('post-comments.js', () => {
       const calls = mockGithub.rest.pulls.createReviewComment.mock.calls;
       if (calls.length > 0) {
         expect(calls[0][0].path).toBe('src/simple.js');
-      } else {
+      }
+      else {
         // If feedback filtering skipped the issue, verify the function ran without error
         expect(mockCore.setFailed).not.toHaveBeenCalled();
       }
@@ -824,7 +831,8 @@ describe('post-comments.js', () => {
       const calls = mockGithub.rest.pulls.createReviewComment.mock.calls;
       if (calls.length > 0) {
         expect(calls[0][0].path).toBe('src/leading.js');
-      } else {
+      }
+      else {
         // If feedback filtering skipped the issue, verify the function ran without error
         expect(mockCore.setFailed).not.toHaveBeenCalled();
       }
@@ -861,7 +869,8 @@ describe('post-comments.js', () => {
       if (calls.length > 0) {
         expect(calls[0][0].body).toContain('**Suggestion:**');
         expect(calls[0][0].body).toContain('Change let to const');
-      } else {
+      }
+      else {
         // If feedback filtering skipped the issue, verify the function ran without error
         expect(mockCore.setFailed).not.toHaveBeenCalled();
       }
@@ -894,7 +903,8 @@ describe('post-comments.js', () => {
       const calls = mockGithub.rest.pulls.createReviewComment.mock.calls;
       if (calls.length > 0) {
         expect(calls[0][0].body).not.toContain('**Suggestion:**');
-      } else {
+      }
+      else {
         // If feedback filtering skipped the issue, verify the function ran without error
         expect(mockCore.setFailed).not.toHaveBeenCalled();
       }
@@ -910,7 +920,8 @@ describe('post-comments.js', () => {
       if (calls.length > 0) {
         expect(calls[0][0].body).toContain('React with 👍/👎');
         expect(calls[0][0].body).toContain('false positive');
-      } else {
+      }
+      else {
         // If feedback filtering skipped the issue, verify the function ran without error
         expect(mockCore.setFailed).not.toHaveBeenCalled();
       }
@@ -929,7 +940,8 @@ describe('post-comments.js', () => {
       const inlineCalls = mockGithub.rest.pulls.createReviewComment.mock.calls;
       if (inlineCalls.length > 0) {
         expect(inlineCalls[0][0].body).toContain('<!-- codecritique-review-action -->');
-      } else {
+      }
+      else {
         // If feedback filtering skipped inline comments, that's OK - summary was checked
         expect(mockCore.setFailed).not.toHaveBeenCalled();
       }

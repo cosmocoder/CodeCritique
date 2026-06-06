@@ -73,7 +73,8 @@ async function reviewFile(filePath, options = {}) {
 
     // If analysis failed, return the error
     return analyzeResult;
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red(`Error reviewing file ${filePath}:`), error.message);
     return {
       success: false,
@@ -143,7 +144,8 @@ async function reviewFiles(filePaths, options = {}) {
       results: validResults, // Return array of individual file results
       message: finalMessage,
     };
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red(`Error reviewing multiple files: ${error.message}`));
     console.error(error.stack);
     return {
@@ -186,7 +188,8 @@ async function reviewPullRequest(changedFilePaths, options = {}) {
 
     // Use enhanced PR review with cross-file context
     return await reviewPullRequestWithCrossFileContext(filesToReview, options);
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red(`Error reviewing pull request files: ${error.message}`));
     console.error(error.stack);
     return {
@@ -263,7 +266,8 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
           baseBranch,
           targetBranch,
         });
-      } catch (error) {
+      }
+      catch (error) {
         console.warn(chalk.yellow(`Error processing file ${filePath}: ${error.message}`));
       }
     }
@@ -429,7 +433,8 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
           },
         },
       };
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error in holistic PR review: ${error.message}`));
 
       // Fallback to individual file review if holistic review fails
@@ -469,7 +474,8 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
 
             const result = await runAnalysis(file.filePath, enhancedOptions);
             return result;
-          } catch (error) {
+          }
+          catch (error) {
             console.error(chalk.red(`Error reviewing ${file.filePath}: ${error.message}`));
             return {
               filePath: file.filePath,
@@ -496,7 +502,8 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
         },
       };
     }
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red(`Error in enhanced PR review: ${error.message}`));
     return {
       success: false,

@@ -70,7 +70,8 @@ export class CustomDocumentProcessor {
       const headerMatch = content.match(/^#\s+(.+)$/m);
       if (headerMatch) {
         documentTitle = headerMatch[1].trim();
-      } else {
+      }
+      else {
         // If no header found, try to extract filename from title like "instruction:./FILENAME.md"
         const filePathMatch = title.match(/:\.\/([^/]+)\.([a-zA-Z]+)$/);
         if (filePathMatch) {
@@ -88,7 +89,9 @@ export class CustomDocumentProcessor {
 
       for (let i = 0; i < sections.length; i++) {
         const section = sections[i].trim();
-        if (!section) continue;
+        if (!section) {
+          continue;
+        }
 
         // Check if adding this section would exceed max chunk size
         if (currentChunk.length + section.length > maxChunkSize && currentChunk.length > minChunkSize) {
@@ -108,7 +111,8 @@ export class CustomDocumentProcessor {
 
           chunkIndex++;
           currentChunk = section;
-        } else {
+        }
+        else {
           // Add section to current chunk
           currentChunk += (currentChunk ? '\n\n' : '') + section;
         }
@@ -142,7 +146,8 @@ export class CustomDocumentProcessor {
 
       verboseLog({}, chalk.gray(`  Chunked document "${documentTitle}" into ${chunks.length} chunks`));
       return chunks;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error chunking document: ${error.message}`));
       throw new EmbeddingError(`Document chunking failed: ${error.message}`);
     }
@@ -195,7 +200,8 @@ export class CustomDocumentProcessor {
                 project_path: path.resolve(projectPath),
                 created_at: new Date().toISOString(),
               };
-            } else {
+            }
+            else {
               console.error(chalk.red(`Error generating embedding for chunk ${chunk.id}: batch processing failed`));
               return null;
             }
@@ -207,7 +213,8 @@ export class CustomDocumentProcessor {
 
           verboseLog({}, chalk.gray(`    Generated embeddings for ${validChunks.length}/${chunks.length} chunks`));
           this.performanceMetrics.embeddingsCalculated += validChunks.length;
-        } catch (error) {
+        }
+        catch (error) {
           console.error(chalk.red(`Error in batch embedding generation for document ${doc.title}: ${error.message}`));
           // Fallback to individual processing for this document
           verboseLog({}, chalk.yellow(`    Falling back to individual processing for ${doc.title}`));
@@ -225,7 +232,8 @@ export class CustomDocumentProcessor {
                   project_path: path.resolve(projectPath),
                   created_at: new Date().toISOString(),
                 };
-              } catch (error) {
+              }
+              catch (error) {
                 console.error(chalk.red(`Error generating embedding for chunk ${chunk.id}: ${error.message}`));
                 return null;
               }
@@ -254,7 +262,8 @@ export class CustomDocumentProcessor {
 
       verboseLog({}, chalk.green(`Successfully processed ${allChunks.length} custom document chunks (${Date.now() - startTime}ms)`));
       return allChunks;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error processing custom documents: ${error.message}`));
       throw new EmbeddingError(`Custom document processing failed: ${error.message}`);
     }
@@ -327,7 +336,8 @@ export class CustomDocumentProcessor {
       }
 
       return filteredResults;
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error searching custom document chunks: ${error.message}`));
       throw new EmbeddingError(`Custom document search failed: ${error.message}`);
     }
@@ -360,7 +370,8 @@ export class CustomDocumentProcessor {
 
       debug(`[getExistingChunks] No existing chunks found for project: ${resolvedProjectPath}`);
       return [];
-    } catch (error) {
+    }
+    catch (error) {
       debug(`[getExistingChunks] Error checking existing chunks: ${error.message}`);
       return [];
     }
@@ -419,7 +430,8 @@ export class CustomDocumentProcessor {
               contextMatchBonus += MODERATE_BOOST_TECH_MATCH;
             }
           }
-        } else if (queryArea !== 'GeneralJS_TS') {
+        }
+        else if (queryArea !== 'GeneralJS_TS') {
           contextMatchBonus += HEAVY_PENALTY_AREA_MISMATCH;
         }
       }
@@ -505,7 +517,8 @@ export class CustomDocumentProcessor {
             this.h1EmbeddingCache.set(docTitlesToCalculate[i], titleEmbeddings[i]);
           }
         }
-      } catch (error) {
+      }
+      catch (error) {
         debug(`[OPTIMIZATION] Error in batch title embedding calculation: ${error.message}`);
         // Continue without title embeddings
       }
@@ -522,7 +535,8 @@ export class CustomDocumentProcessor {
       this.customDocumentChunks.delete(resolvedProjectPath);
       this.cacheManager.customDocumentChunks.delete(resolvedProjectPath);
       verboseLog({}, chalk.green(`Cleared custom document chunks for project: ${resolvedProjectPath}`));
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`Error clearing project chunks: ${error.message}`));
     }
   }
@@ -590,7 +604,8 @@ export class CustomDocumentProcessor {
       };
 
       verboseLog({}, chalk.green('CustomDocumentProcessor cleanup complete'));
-    } finally {
+    }
+    finally {
       this.cleaningUp = false;
     }
   }

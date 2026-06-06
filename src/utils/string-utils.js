@@ -17,7 +17,9 @@
  * slugify('  Multiple   Spaces  '); // 'multiple-spaces'
  */
 export function slugify(text) {
-  if (!text) return '';
+  if (!text) {
+    return '';
+  }
   return text
     .toString()
     .toLowerCase()
@@ -46,7 +48,9 @@ export function slugify(text) {
  * addLineNumbers(''); // ''
  */
 export function addLineNumbers(content) {
-  if (!content) return '';
+  if (!content) {
+    return '';
+  }
   const lines = content.split('\n');
   const padding = String(lines.length).length;
   return lines.map((line, i) => `${String(i + 1).padStart(padding)} | ${line}`).join('\n');

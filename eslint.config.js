@@ -43,6 +43,8 @@ export default [
         },
       ],
       'no-process-env': 0,
+      'brace-style': ['error', 'stroustrup', { allowSingleLine: false }],
+      curly: ['error', 'all'],
       'no-restricted-syntax': [
         'error',
         {

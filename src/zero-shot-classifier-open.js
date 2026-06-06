@@ -105,7 +105,9 @@ class OpenZeroShotClassifier {
    */
   async initialize() {
     // If already initialized, return immediately
-    if (this.isInitialized) return;
+    if (this.isInitialized) {
+      return;
+    }
 
     // If currently initializing, wait for the existing initialization
     if (this.initializationPromise) {
@@ -117,7 +119,8 @@ class OpenZeroShotClassifier {
 
     try {
       await this.initializationPromise;
-    } finally {
+    }
+    finally {
       // Clean up the promise after initialization (success or failure)
       this.initializationPromise = null;
     }
@@ -133,7 +136,8 @@ class OpenZeroShotClassifier {
 
       this.isInitialized = true;
       verboseLog({}, '✓ Open-ended zero-shot classifier initialized successfully');
-    } catch (error) {
+    }
+    catch (error) {
       console.error('Error initializing classifier:', error);
       this.isInitialized = false;
       throw error;
@@ -174,7 +178,8 @@ class OpenZeroShotClassifier {
       for (const value of Object.values(obj)) {
         if (Array.isArray(value)) {
           value.forEach((tech) => techs.add(tech.toLowerCase()));
-        } else if (typeof value === 'object') {
+        }
+        else if (typeof value === 'object') {
           addTechsFromObject(value);
         }
       }
@@ -234,7 +239,9 @@ class OpenZeroShotClassifier {
         const word = words[i].replace(/[.,;:!?'"()[\]{}]/g, '');
 
         // Skip if it's a common word
-        if (this.commonWords.has(word.toLowerCase())) continue;
+        if (this.commonWords.has(word.toLowerCase())) {
+          continue;
+        }
 
         // Check if word is capitalized and not at sentence start
         if (i > 0 && /^[A-Z][a-zA-Z]+/.test(word) && word.length > 2 && word.length < 20) {
@@ -302,7 +309,8 @@ class OpenZeroShotClassifier {
 
       this.cache.set(cacheKey, classifications);
       return classifications;
-    } catch (error) {
+    }
+    catch (error) {
       console.error('Error in technology classification:', error);
       return [];
     }
@@ -368,7 +376,8 @@ class OpenZeroShotClassifier {
 
       this.cache.set(cacheKey, classifications);
       return classifications;
-    } catch (error) {
+    }
+    catch (error) {
       console.error('Error in domain classification:', error);
       return [];
     }

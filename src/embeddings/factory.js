@@ -133,7 +133,8 @@ class EmbeddingsSystem {
       this.initialized = true;
       this.initializing = false;
       verboseLog({}, chalk.green('[EmbeddingsSystem] System initialized successfully'));
-    } catch (error) {
+    }
+    catch (error) {
       this.initializing = false;
       this.initializationPromise = null;
       throw error;
@@ -155,7 +156,8 @@ class EmbeddingsSystem {
       await this.modelManager.initialize();
 
       verboseLog({}, chalk.green('[EmbeddingsSystem] All components initialized successfully'));
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`[EmbeddingsSystem] Initialization failed: ${error.message}`));
       throw new EmbeddingError(`System initialization failed: ${error.message}`, 'SYSTEM_INITIALIZATION_FAILED', error);
     }
@@ -407,10 +409,12 @@ class EmbeddingsSystem {
       this.initializationPromise = null;
 
       verboseLog({}, chalk.green('[EmbeddingsSystem] System cleanup completed'));
-    } catch (error) {
+    }
+    catch (error) {
       console.error(chalk.red(`[EmbeddingsSystem] Error during cleanup: ${error.message}`));
       throw error;
-    } finally {
+    }
+    finally {
       this.cleaningUp = false;
     }
   }

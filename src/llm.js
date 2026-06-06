@@ -27,7 +27,9 @@ let anthropic = null;
  * @returns {Anthropic} The Anthropic client
  */
 function getAnthropicClient() {
-  if (anthropic) return anthropic;
+  if (anthropic) {
+    return anthropic;
+  }
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error('ANTHROPIC_API_KEY is required for analysis. Set it in env or .env before running analyze.');
@@ -127,14 +129,16 @@ async function sendPromptToClaude(prompt, options = {}) {
         usage: response.usage,
         json: toolUse.input,
       };
-    } else {
+    }
+    else {
       return {
         content: response.content[0]?.text || '',
         model: response.model,
         usage: response.usage,
       };
     }
-  } catch (error) {
+  }
+  catch (error) {
     console.error(chalk.red(`Error sending prompt to Claude: ${error.message}`));
     throw error;
   }
