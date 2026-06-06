@@ -12,8 +12,31 @@ vi.mock('node:fs', () => ({
   },
 }));
 
+const mockCreateHash = vi.hoisted(() =>
+  vi.fn(() => {
+    let content = '';
+    const hash = {
+      update: vi.fn((value) => {
+        content += String(value);
+        return hash;
+      }),
+      digest: vi.fn(() => {
+        if (content === 'const x = 1;') {
+          return 'abc12345';
+        }
+        let total = 0;
+        for (let i = 0; i < content.length; i += 1) {
+          total = (total + content.charCodeAt(i) * (i + 1)) % 0xffffffff;
+        }
+        return total.toString(16).padStart(8, '0');
+      }),
+    };
+    return hash;
+  })
+);
+
 vi.mock('node:crypto', () => ({
-  createHash: vi.fn(() => ({ update: vi.fn().mockReturnThis(), digest: vi.fn().mockReturnValue('abc12345') })),
+  createHash: mockCreateHash,
 }));
 
 vi.mock('../utils/file-validation.js', () => ({
@@ -47,6 +70,17 @@ const createDirEntry = (name, isDir = false) => ({
   isDirectory: () => isDir,
   isFile: () => !isDir,
 });
+
+const mockHashFor = (content) => {
+  if (content === 'const x = 1;') {
+    return 'abc12345';
+  }
+  let total = 0;
+  for (let i = 0; i < content.length; i += 1) {
+    total = (total + content.charCodeAt(i) * (i + 1)) % 0xffffffff;
+  }
+  return total.toString(16).padStart(8, '0').slice(0, 8);
+};
 
 // ============================================================================
 // Tests
@@ -388,6 +422,23 @@ describe('FileProcessor', () => {
       const result = await processor.processBatchEmbeddings(['/test/file.js'], { baseDir: '/test' });
       expect(result.skipped).toBeGreaterThan(0);
       expect(mockModelManager.calculateEmbeddingBatch).not.toHaveBeenCalled();
+    });
+
+    it('should process long files when content changes beyond the embedding truncation window', async () => {
+      const unchangedPrefix = Array.from({ length: 1000 }, (_, i) => `const x${i} = ${i};`).join('\n');
+      const changedRawContent = `${unchangedPrefix}\nconst changedTail = true;`;
+      const oldTruncatedContent = `${unchangedPrefix}\n... (truncated from 1001 lines)`;
+
+      setupFileSystemMocks(changedRawContent);
+      mockTable.query.mockReturnValue({
+        where: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([{ id: 'old-record', path: 'file.js', content_hash: mockHashFor(oldTruncatedContent) }]),
+      });
+
+      const result = await processor.processBatchEmbeddings(['/test/file.js'], { baseDir: '/test', maxLines: 1000 });
+
+      expect(result.processed).toBeGreaterThan(0);
+      expect(mockModelManager.calculateEmbeddingBatch).toHaveBeenCalled();
     });
 
     it('should delete old version when content hash differs', async () => {

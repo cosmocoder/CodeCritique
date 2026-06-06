@@ -555,7 +555,7 @@ export class FileProcessor {
           }
 
           candidate.embeddingContent = embeddingContent;
-          candidate.contentHash = createShortHash(embeddingContent);
+          candidate.contentHash = createShortHash(rawContent);
           sharedState.liveFilePaths.add(candidate.relativePath);
 
           const unchangedRecord = candidate.existingRecords.find((record) => record.content_hash === candidate.contentHash);
