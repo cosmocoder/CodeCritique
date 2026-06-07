@@ -31,6 +31,7 @@ import { reviewFile, reviewFiles, reviewPullRequest } from './rag-review.js';
 import { execGitSafe } from './utils/command.js';
 import { ensureBranchExists, findBaseBranch } from './utils/git.js';
 import { verboseLog } from './utils/logging.js';
+import { collectPRLevelFindings, getFileLevelIssueCount, hasPRLevelFindings } from './utils/review-results.js';
 
 // Create a default embeddings system instance
 const embeddingsSystem = getDefaultEmbeddingsSystem();
@@ -424,7 +425,7 @@ async function runCodeReview(options) {
         // Determine output function based on format option
         const outputFn = options.output === 'json' ? outputJson : options.output === 'markdown' ? outputMarkdown : outputText;
         // Pass the detailed results array to the output function
-        outputFn(reviewResult.results, options);
+        outputFn(reviewResult.results, options, reviewResult);
         console.log(chalk.bold.green(`\nAnalysis complete for ${operationDescription}! (${duration}s)`));
       }
       else {
@@ -435,7 +436,7 @@ async function runCodeReview(options) {
         // Still output empty results if outputFile is specified (for CI/CD pipelines)
         if (options.outputFile) {
           const outputFn = options.output === 'json' ? outputJson : options.output === 'markdown' ? outputMarkdown : outputText;
-          outputFn([], options);
+          outputFn([], options, reviewResult);
           console.log(chalk.yellow(`Empty results written to: ${options.outputFile}`));
         }
 
@@ -1013,14 +1014,20 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
  *
  * @param {Array<Object>} reviewResults - Array of individual file review results
  * @param {Object} options - Command line options
+ * @param {Object} aggregateResult - Full review result with PR-level context
  */
-function outputJson(reviewResults, options) {
+function outputJson(reviewResults, options, aggregateResult = {}) {
+  const prLevelFindings = collectPRLevelFindings(reviewResults, aggregateResult);
+  const fileLevelIssues = getFileLevelIssueCount(reviewResults);
+
   // Structure the output to be informative
   const output = {
     summary: {
       totalFilesReviewed: reviewResults.length,
       filesWithIssues: reviewResults.filter((r) => r.success && !r.skipped && r.results?.issues?.length > 0).length,
-      totalIssues: reviewResults.reduce((sum, r) => sum + (r.results?.issues?.length || 0), 0),
+      totalIssues: fileLevelIssues + prLevelFindings.issues.length,
+      fileLevelIssues,
+      prLevelIssues: prLevelFindings.issues.length,
       issuesWithCodeSuggestions: reviewResults.reduce((sum, r) => {
         if (!r.success || r.skipped || !r.results?.issues) {
           return sum;
@@ -1049,6 +1056,10 @@ function outputJson(reviewResults, options) {
     }),
   };
 
+  if (hasPRLevelFindings(prLevelFindings)) {
+    output.prLevelFindings = prLevelFindings;
+  }
+
   const jsonOutput = JSON.stringify(output, null, 2);
 
   // If output-file is specified, write to file instead of stdout
@@ -1067,13 +1078,15 @@ function outputJson(reviewResults, options) {
  *
  * @param {Array<Object>} reviewResults - Array of individual file review results
  * @param {Object} options - Command line options
+ * @param {Object} aggregateResult - Full review result with PR-level context
  */
-function outputMarkdown(reviewResults, options) {
+function outputMarkdown(reviewResults, options, aggregateResult = {}) {
   const totalFiles = reviewResults.length;
   const filesWithIssues = reviewResults.filter((r) => r.success && !r.skipped && r.results?.issues?.length > 0).length;
-  const totalIssues = reviewResults.reduce((sum, r) => sum + (r.results?.issues?.length || 0), 0);
   const skippedFiles = reviewResults.filter((r) => r.skipped).length;
   const errorFiles = reviewResults.filter((r) => !r.success).length;
+  const prLevelFindings = collectPRLevelFindings(reviewResults, aggregateResult);
+  const totalIssues = getFileLevelIssueCount(reviewResults) + prLevelFindings.issues.length;
 
   const lines = [
     '# AI Code Review Results (RAG Approach)',
@@ -1091,6 +1104,8 @@ function outputMarkdown(reviewResults, options) {
   if (errorFiles > 0) {
     lines.push(`- **Errors:** ${errorFiles}`);
   }
+
+  appendPRLevelFindingsMarkdown(lines, prLevelFindings);
 
   lines.push('', '## Detailed Review per File', '');
 
@@ -1157,13 +1172,15 @@ function outputMarkdown(reviewResults, options) {
  *
  * @param {Array<Object>} reviewResults - Array of individual file review results
  * @param {Object} cliOptions - Command line options
+ * @param {Object} aggregateResult - Full review result with PR-level context
  */
-function outputText(reviewResults, cliOptions) {
+function outputText(reviewResults, cliOptions, aggregateResult = {}) {
   const totalFiles = reviewResults.length;
   const filesWithIssues = reviewResults.filter((r) => r.success && !r.skipped && r.results?.issues?.length > 0).length;
-  const totalIssues = reviewResults.reduce((sum, r) => sum + (r.results?.issues?.length || 0), 0);
   const skippedFiles = reviewResults.filter((r) => r.skipped).length;
   const errorFiles = reviewResults.filter((r) => !r.success).length;
+  const prLevelFindings = collectPRLevelFindings(reviewResults, aggregateResult);
+  const totalIssues = getFileLevelIssueCount(reviewResults) + prLevelFindings.issues.length;
 
   console.log(chalk.bold.blue('\n===== AI Code Review Summary ====='));
   console.log(`Files Analyzed: ${chalk.bold(totalFiles)}`);
@@ -1176,6 +1193,8 @@ function outputText(reviewResults, cliOptions) {
     console.log(`Errors: ${chalk.red(errorFiles)}`);
   }
   console.log(chalk.bold.blue('================================================'));
+
+  outputPRLevelFindingsText(prLevelFindings);
 
   reviewResults.forEach((fileResult) => {
     if (!fileResult.success) {
@@ -1228,6 +1247,68 @@ function outputText(reviewResults, cliOptions) {
 
     console.log(chalk.gray(`========================================${'='.repeat(fileResult.filePath.length)}`));
   });
+}
+
+function appendPRLevelFindingsMarkdown(lines, prLevelFindings) {
+  if (!hasPRLevelFindings(prLevelFindings)) {
+    return;
+  }
+
+  lines.push('', '## PR-Level Findings', '');
+
+  if (prLevelFindings.summary) {
+    lines.push(`**Summary:** ${prLevelFindings.summary}`, '');
+  }
+
+  for (const issue of prLevelFindings.issues) {
+    const severity = issue.severity || 'info';
+    const severityEmoji = getSeverityEmoji(severity);
+    lines.push(`- **[${severity.toUpperCase()}] ${severityEmoji}** ${issue.description}`);
+    if (issue.files?.length > 0) {
+      lines.push(`  - Affected files: ${issue.files.join(', ')}`);
+    }
+    if (issue.suggestion) {
+      lines.push(`  - Suggestion: ${issue.suggestion}`);
+    }
+  }
+
+  if (prLevelFindings.recommendations.length > 0) {
+    lines.push('', '**Recommendations:**', '');
+    for (const recommendation of prLevelFindings.recommendations) {
+      lines.push(`- ${recommendation}`);
+    }
+  }
+}
+
+function outputPRLevelFindingsText(prLevelFindings) {
+  if (!hasPRLevelFindings(prLevelFindings)) {
+    return;
+  }
+
+  console.log(chalk.bold.underline('\n===== PR-Level Findings ====='));
+  if (prLevelFindings.summary) {
+    console.log(chalk.bold.cyan(`Summary: ${prLevelFindings.summary}`));
+  }
+
+  for (const issue of prLevelFindings.issues) {
+    const severity = issue.severity || 'info';
+    const severityColor = getSeverityColor(severity);
+    console.log(`  ${severityColor(`[${severity.toUpperCase()}]`)} ${issue.description}`);
+    if (issue.files?.length > 0) {
+      console.log(`    Affected files: ${issue.files.join(', ')}`);
+    }
+    if (issue.suggestion) {
+      console.log(`    ${chalk.green(`Suggestion: ${issue.suggestion}`)}`);
+    }
+    console.log('');
+  }
+
+  if (prLevelFindings.recommendations.length > 0) {
+    console.log(chalk.bold.yellow('Recommendations:'));
+    for (const recommendation of prLevelFindings.recommendations) {
+      console.log(`  - ${recommendation}`);
+    }
+  }
 }
 
 // --- Severity Helpers (Remain Unchanged) --- //
