@@ -7,6 +7,44 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { shouldSkipSimilarIssue, loadFeedbackData } from '../../../src/feedback-loader.js';
 
+function formatPRLevelFindings(prLevelFindings = {}) {
+  const summary = prLevelFindings.summary || '';
+  const issues = Array.isArray(prLevelFindings.issues) ? prLevelFindings.issues : [];
+  const recommendations = Array.isArray(prLevelFindings.recommendations) ? prLevelFindings.recommendations : [];
+
+  if (!summary && issues.length === 0 && recommendations.length === 0) {
+    return '';
+  }
+
+  const lines = ['### 🔎 PR-level findings', ''];
+
+  if (summary) {
+    lines.push(summary, '');
+  }
+
+  for (const [index, issue] of issues.entries()) {
+    const severity = issue.severity || 'info';
+    lines.push(`**${index + 1}. [${severity}] ${issue.description}**`);
+    if (issue.files?.length > 0) {
+      lines.push(`- Affected files: ${issue.files.join(', ')}`);
+    }
+    if (issue.suggestion) {
+      lines.push(`- Suggestion: ${issue.suggestion}`);
+    }
+    lines.push('');
+  }
+
+  if (recommendations.length > 0) {
+    lines.push('**Recommendations:**');
+    for (const recommendation of recommendations) {
+      lines.push(`- ${recommendation}`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n').trim();
+}
+
 /**
  * Main function for posting CodeCritique review comments to GitHub Pull Requests.
  *
@@ -284,6 +322,8 @@ export default async ({ github, context, core }) => {
     console.log('✅ JSON file is valid');
 
     const totalIssues = reviewData.summary?.totalIssues || 0;
+    const prLevelFindingsSection = formatPRLevelFindings(reviewData.prLevelFindings);
+    const hasReviewFindings = totalIssues > 0 || Boolean(prLevelFindingsSection);
 
     console.log(`📊 Parsing results: ${totalIssues} issues found`);
 
@@ -403,15 +443,16 @@ export default async ({ github, context, core }) => {
 **Issues Found:** ${totalIssues}
 
 ${
-  totalIssues > 0
+  hasReviewFindings
     ? `### 📋 Review Results
 
-The AI has identified potential improvements in your code. Please review the inline comments for detailed feedback.`
+The AI has identified review findings or recommendations. PR-level findings are listed below when available, and file-specific findings may appear as inline comments.`
     : `### ✅ No Issues Found
 
 Great job! The AI review didn't identify any significant issues with your changes.`
 }
 
+${prLevelFindingsSection ? `${prLevelFindingsSection}\n\n` : ''}
 *Review was enhanced with codebase context using cached embeddings.*
 
 ${uniqueCommentId}`;

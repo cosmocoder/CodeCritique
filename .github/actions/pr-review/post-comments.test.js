@@ -781,6 +781,62 @@ describe('post-comments.js', () => {
     });
   });
 
+  describe('PR-level findings', () => {
+    it('should include PR-level findings in the summary comment without posting inline comments', async () => {
+      const prLevelOnlyIssue = {
+        summary: { totalFilesReviewed: 2, totalIssues: 1, fileLevelIssues: 0, prLevelIssues: 1 },
+        prLevelFindings: {
+          summary: 'The PR updates a shared state flow across multiple files.',
+          issues: [
+            {
+              description: 'State updates are inconsistent across files',
+              severity: 'high',
+              files: ['src/a.js', 'src/b.js'],
+              suggestion: 'Use the shared state updater in both files.',
+            },
+          ],
+          recommendations: ['Add a regression test for the shared flow'],
+        },
+        details: [],
+      };
+
+      fs.readFileSync.mockReturnValue(JSON.stringify(prLevelOnlyIssue));
+
+      await postComments({ github: mockGithub, context: mockContext, core: mockCore });
+
+      const createCommentCall = mockGithub.rest.issues.createComment.mock.calls[0][0];
+      expect(createCommentCall.body).toContain('PR-level findings');
+      expect(createCommentCall.body).toContain('The PR updates a shared state flow across multiple files.');
+      expect(createCommentCall.body).toContain('State updates are inconsistent across files');
+      expect(createCommentCall.body).toContain('Affected files: src/a.js, src/b.js');
+      expect(createCommentCall.body).toContain('Add a regression test for the shared flow');
+      expect(mockGithub.rest.pulls.createReviewComment).not.toHaveBeenCalled();
+    });
+
+    it('should avoid the no-issues message when PR-level notes have no counted issues', async () => {
+      const prLevelNotesOnly = {
+        summary: { totalFilesReviewed: 2, totalIssues: 0, fileLevelIssues: 0, prLevelIssues: 0 },
+        prLevelFindings: {
+          summary: 'The PR changes an integration flow that depends on shared state.',
+          issues: [],
+          recommendations: ['Add a regression test for the shared flow'],
+        },
+        details: [],
+      };
+
+      fs.readFileSync.mockReturnValue(JSON.stringify(prLevelNotesOnly));
+
+      await postComments({ github: mockGithub, context: mockContext, core: mockCore });
+
+      const createCommentCall = mockGithub.rest.issues.createComment.mock.calls[0][0];
+      expect(createCommentCall.body).toContain('Review Results');
+      expect(createCommentCall.body).not.toContain('No Issues Found');
+      expect(createCommentCall.body).toContain('The PR changes an integration flow that depends on shared state.');
+      expect(createCommentCall.body).toContain('Add a regression test for the shared flow');
+      expect(mockGithub.rest.pulls.createReviewComment).not.toHaveBeenCalled();
+    });
+  });
+
   describe('path conversion edge cases', () => {
     it('should handle paths without runner prefix', async () => {
       const simplePathIssue = {
