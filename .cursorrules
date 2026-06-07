@@ -18,7 +18,7 @@ CodeCritique is an AI-powered code review tool that:
 
 ## Tech Stack
 
-- **Runtime**: Node.js >= 24.15.0
+- **Runtime**: Node.js >= 24
 - **Language**: JavaScript (ES modules)
 - **Testing**: Vitest
 - **Storage**: LanceDB (vectors)

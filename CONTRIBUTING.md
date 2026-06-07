@@ -43,8 +43,9 @@ Thank you for your interest in contributing to CodeCritique! This document provi
 
 ### Prerequisites
 
-- Node.js >= 24.15.0
-- npm >= 11.12.1
+- Node.js 24 or newer
+- npm 11 or newer
+- Maintainer tooling is pinned with Volta to Node.js 24.15.0 and npm 11.12.1.
 - Git (for diff-based analysis)
 - Anthropic API key (for LLM analysis features)
 
