@@ -28,7 +28,7 @@ import { FASTEMBED_CACHE_DIR } from './constants.js';
 import { createModelInitializationError, createEmbeddingGenerationError } from './errors.js';
 
 // Load environment variables
-dotenv.config();
+dotenv.config({ quiet: true });
 
 // ============================================================================
 // MODEL MANAGER CLASS
