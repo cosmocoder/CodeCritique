@@ -10,7 +10,7 @@ For comprehensive guidelines, see **AGENTS.md** in the project root.
 
 - **Type**: CLI Tool (AI-powered code review)
 - **Language**: JavaScript with ES modules
-- **Runtime**: Node.js >= 24.15.0
+- **Runtime**: Node.js >= 24
 - **Testing**: Vitest with global test APIs
 
 ## Essential Rules
