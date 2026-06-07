@@ -1,4 +1,5 @@
 import { debug, verboseLog, isDebugEnabled, isVerboseEnabled } from './logging.js';
+import { configureCleanStdoutForDataOutput, resetCleanStdoutForDataOutput } from './stdout.js';
 
 describe('logging', () => {
   let originalEnv;
@@ -13,6 +14,7 @@ describe('logging', () => {
   afterEach(() => {
     process.env = originalEnv;
     process.argv = originalArgv;
+    resetCleanStdoutForDataOutput();
   });
 
   describe('debug', () => {
@@ -59,6 +61,16 @@ describe('logging', () => {
       debug('Test');
 
       expect(console.log).toHaveBeenCalledWith(expect.stringContaining('[DEBUG]'));
+    });
+
+    it('should write debug diagnostics to stderr when stdout is reserved for JSON', () => {
+      process.env.DEBUG = 'true';
+      configureCleanStdoutForDataOutput({ output: 'json' });
+
+      debug('Debug message');
+
+      expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('Debug message'));
+      expect(console.error).toHaveBeenCalledWith(expect.stringContaining('Debug message'));
     });
   });
 
@@ -121,6 +133,15 @@ describe('logging', () => {
       verboseLog({ verbose: true }, 'Option verbose message');
 
       expect(console.log).toHaveBeenCalledWith('Option verbose message');
+    });
+
+    it('should write verbose diagnostics to stderr when stdout is reserved for JSON', () => {
+      configureCleanStdoutForDataOutput({ output: 'json' });
+
+      verboseLog({ verbose: true }, 'Option verbose message');
+
+      expect(console.log).not.toHaveBeenCalledWith('Option verbose message');
+      expect(console.error).toHaveBeenCalledWith('Option verbose message');
     });
 
     it('should not log when only DEBUG is set', () => {

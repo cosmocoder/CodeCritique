@@ -30,8 +30,9 @@ import { ProjectAnalyzer } from './project-analyzer.js';
 import { reviewFile, reviewFiles, reviewPullRequest } from './rag-review.js';
 import { execGitSafe } from './utils/command.js';
 import { ensureBranchExists, findBaseBranch } from './utils/git.js';
-import { verboseLog } from './utils/logging.js';
+import { diagnosticLog, isDebugEnabled, isVerboseEnabled, verboseLog } from './utils/logging.js';
 import { collectPRLevelFindings, getFileLevelIssueCount, hasPRLevelFindings } from './utils/review-results.js';
+import { configureCleanStdoutForDataOutput, isBrokenStdoutPipeError, writeStdout } from './utils/stdout.js';
 
 // Create a default embeddings system instance
 const embeddingsSystem = getDefaultEmbeddingsSystem();
@@ -213,7 +214,7 @@ else {
 
 // Register process event handlers for cleanup (embeddings cleanup primarily)
 process.on('SIGINT', async () => {
-  console.log(chalk.yellow('\nReceived SIGINT. Attempting graceful shutdown...'));
+  diagnosticLog(chalk.yellow('\nReceived SIGINT. Attempting graceful shutdown...'));
   // Set a timeout to force exit if cleanup hangs
   const forceExitTimeout = setTimeout(() => {
     console.error(chalk.red('Cleanup timed out after 10 seconds. Forcing exit...'));
@@ -221,23 +222,23 @@ process.on('SIGINT', async () => {
   }, 10000); // 10 seconds timeout
 
   try {
-    console.log(chalk.cyan('SIGINT handler: Attempting embeddingsSystem.cleanup()...'));
+    diagnosticLog(chalk.cyan('SIGINT handler: Attempting embeddingsSystem.cleanup()...'));
     await embeddingsSystem.cleanup();
-    console.log(chalk.green('embeddingsSystem.cleanup() completed.'));
+    diagnosticLog(chalk.green('embeddingsSystem.cleanup() completed.'));
     clearTimeout(forceExitTimeout); // Cleanup finished, clear the timeout
-    console.log(chalk.cyan('SIGINT handler: Exiting normally (code 0).'));
+    diagnosticLog(chalk.cyan('SIGINT handler: Exiting normally (code 0).'));
     process.exit(0); // Exit normally
   }
   catch (err) {
     console.error(chalk.red('Error during embeddingsSystem.cleanup():'), err.message);
     clearTimeout(forceExitTimeout);
-    console.log(chalk.cyan('SIGINT handler: Exiting after error (code 1).'));
+    diagnosticLog(chalk.cyan('SIGINT handler: Exiting after error (code 1).'));
     process.exit(1); // Exit with error code
   }
 });
 
 process.on('SIGTERM', async () => {
-  console.log(chalk.yellow('\nReceived SIGTERM. Attempting graceful shutdown...'));
+  diagnosticLog(chalk.yellow('\nReceived SIGTERM. Attempting graceful shutdown...'));
   // Set a timeout to force exit if cleanup hangs
   const forceExitTimeout = setTimeout(() => {
     console.error(chalk.red('Cleanup timed out after 10 seconds. Forcing exit...'));
@@ -245,17 +246,17 @@ process.on('SIGTERM', async () => {
   }, 10000);
 
   try {
-    console.log(chalk.cyan('SIGTERM handler: Attempting embeddingsSystem.cleanup()...'));
+    diagnosticLog(chalk.cyan('SIGTERM handler: Attempting embeddingsSystem.cleanup()...'));
     await embeddingsSystem.cleanup();
-    console.log(chalk.green('embeddingsSystem.cleanup() completed.'));
+    diagnosticLog(chalk.green('embeddingsSystem.cleanup() completed.'));
     clearTimeout(forceExitTimeout); // Cleanup finished, clear the timeout
-    console.log(chalk.cyan('SIGTERM handler: Exiting normally (code 0).'));
+    diagnosticLog(chalk.cyan('SIGTERM handler: Exiting normally (code 0).'));
     process.exit(0); // Exit normally
   }
   catch (err) {
     console.error(chalk.red('Error during embeddingsSystem.cleanup():'), err.message);
     clearTimeout(forceExitTimeout);
-    console.log(chalk.cyan('SIGTERM handler: Exiting after error (code 1).'));
+    diagnosticLog(chalk.cyan('SIGTERM handler: Exiting after error (code 1).'));
     process.exit(1); // Exit with error code
   }
 });
@@ -263,7 +264,7 @@ process.on('SIGTERM', async () => {
 // Ensure cleanup on normal exit
 process.on('exit', () => {
   // Note: Async cleanup might not fully complete here
-  console.log(chalk.cyan('Exiting...'));
+  diagnosticLog(chalk.cyan('Exiting...'));
 });
 
 // REMOVED: Old options processing logic for ignore/severity
@@ -273,6 +274,7 @@ process.on('exit', () => {
 
 // Main function to run the code review (Refactored to use cag-review.js)
 async function runCodeReview(options) {
+  configureCleanStdoutForDataOutput(options);
   let reviewTask = null;
   let operationDescription = '';
   const startTime = Date.now();
@@ -281,7 +283,7 @@ async function runCodeReview(options) {
   // If --directory is specified, use that as the project directory
   // Otherwise, use the current working directory
   const projectPath = options.directory ? path.resolve(options.directory) : process.cwd();
-  console.log(chalk.gray(`Using project path for analysis: ${projectPath}`));
+  diagnosticLog(chalk.gray(`Using project path for analysis: ${projectPath}`));
 
   // Parse custom documents
   const customDocs = [];
@@ -322,12 +324,12 @@ async function runCodeReview(options) {
         .trim(); // Remove leading/trailing whitespace
 
       customDocs.push({ title, content });
-      console.log(chalk.gray(`Loaded custom document '${title}' from ${filePath} (${content.length} chars)`));
+      diagnosticLog(chalk.gray(`Loaded custom document '${title}' from ${filePath} (${content.length} chars)`));
 
       // Debug: Show a clean preview of the content
       const previewLength = 200;
       const preview = content.substring(0, previewLength).replace(/\n/g, '\\n');
-      console.log(chalk.gray(`  Content preview: ${preview}${content.length > previewLength ? '...' : ''}`));
+      diagnosticLog(chalk.gray(`  Content preview: ${preview}${content.length > previewLength ? '...' : ''}`));
     }
   }
 
@@ -352,7 +354,7 @@ async function runCodeReview(options) {
   };
 
   try {
-    console.log(chalk.bold.blue('AI Code Review (RAG Approach) - Starting analysis...'));
+    diagnosticLog(chalk.bold.blue('AI Code Review (RAG Approach) - Starting analysis...'));
 
     // Determine the review mode based on options
     // Only support: single file, specific files, or diff with branch
@@ -361,7 +363,9 @@ async function runCodeReview(options) {
       const gitWorkingDir = options.directory ? path.resolve(options.directory) : process.cwd();
       const changedFiles = getChangedFiles(options.diffWith, gitWorkingDir);
       if (changedFiles.length === 0) {
-        console.log(chalk.yellow(`No changed files found compared to branch '${options.diffWith}'. Exiting.`));
+        const message = `No changed files found compared to branch '${options.diffWith}'. Exiting.`;
+        diagnosticLog(chalk.yellow(message));
+        await emitEmptyReviewOutputIfNeeded(options, { success: true, results: [], message });
         return;
       }
       operationDescription = `${changedFiles.length} files changed vs ${options.diffWith}`;
@@ -383,7 +387,9 @@ async function runCodeReview(options) {
     else if (options.files && options.files.length > 0) {
       const filesToAnalyze = await expandFilePatterns(options.files);
       if (filesToAnalyze.length === 0) {
-        console.log(chalk.yellow('No files found matching the specified patterns. Exiting.'));
+        const message = 'No files found matching the specified patterns. Exiting.';
+        diagnosticLog(chalk.yellow(message));
+        await emitEmptyReviewOutputIfNeeded(options, { success: true, results: [], message });
         return;
       }
       operationDescription = `${filesToAnalyze.length} specific files/patterns`;
@@ -408,7 +414,7 @@ async function runCodeReview(options) {
       process.exit(1);
     }
 
-    console.log(chalk.cyan(`Starting review for ${operationDescription}...`));
+    diagnosticLog(chalk.cyan(`Starting review for ${operationDescription}...`));
 
     // Execute the selected review task
     const reviewResult = await reviewTask;
@@ -421,60 +427,77 @@ async function runCodeReview(options) {
     // Process and output results
     if (reviewResult && reviewResult.success) {
       if (reviewResult.results && reviewResult.results.length > 0) {
-        console.log(chalk.green(`Found ${reviewResult.results.length} result items to display`));
-        // Determine output function based on format option
-        const outputFn = options.output === 'json' ? outputJson : options.output === 'markdown' ? outputMarkdown : outputText;
-        // Pass the detailed results array to the output function
-        outputFn(reviewResult.results, options, reviewResult);
-        console.log(chalk.bold.green(`\nAnalysis complete for ${operationDescription}! (${duration}s)`));
+        diagnosticLog(chalk.green(`Found ${reviewResult.results.length} result items to display`));
+        await outputReviewResults(reviewResult.results, options, reviewResult);
+        diagnosticLog(chalk.bold.green(`\nAnalysis complete for ${operationDescription}! (${duration}s)`));
       }
       else {
         // No results to display (e.g., all files were excluded/skipped)
         const message = reviewResult.message || 'All files were excluded from review (e.g., config files, lock files).';
-        console.log(chalk.yellow(message));
+        diagnosticLog(chalk.yellow(message));
 
-        // Still output empty results if outputFile is specified (for CI/CD pipelines)
-        if (options.outputFile) {
-          const outputFn = options.output === 'json' ? outputJson : options.output === 'markdown' ? outputMarkdown : outputText;
-          outputFn([], options, reviewResult);
-          console.log(chalk.yellow(`Empty results written to: ${options.outputFile}`));
+        if (await emitEmptyReviewOutputIfNeeded(options, reviewResult)) {
+          if (options.outputFile) {
+            diagnosticLog(chalk.yellow(`Empty results written to: ${options.outputFile}`));
+          }
         }
 
-        console.log(chalk.bold.yellow(`\nReview complete for ${operationDescription} - no reviewable files found (${duration}s)`));
+        diagnosticLog(chalk.bold.yellow(`\nReview complete for ${operationDescription} - no reviewable files found (${duration}s)`));
       }
     }
     else {
+      const error = reviewResult?.error || 'Code review process failed.';
       console.error(chalk.red('\nCode review process failed.'));
-      if (reviewResult && reviewResult.error) {
-        console.error(chalk.red(`Error: ${reviewResult.error}`));
+      console.error(chalk.red(`Error: ${error}`));
+
+      if (await emitErrorReviewOutputIfNeeded(options, error, reviewResult || {})) {
+        if (options.outputFile) {
+          diagnosticLog(chalk.yellow(`Error results written to: ${options.outputFile}`));
+        }
       }
+      // AI review output is advisory; report review-task failures without failing CI.
     }
 
     // Clean up resources
-    console.log(chalk.cyan('Cleaning up resources...'));
+    diagnosticLog(chalk.cyan('Cleaning up resources...'));
     try {
       await embeddingsSystem.cleanup();
       await cleanupClassifier();
-      console.log(chalk.green('All resources cleaned up successfully'));
+      diagnosticLog(chalk.green('All resources cleaned up successfully'));
     }
     catch (cleanupErr) {
       console.error(chalk.yellow('Error during cleanup:'), cleanupErr.message);
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
   }
   catch (err) {
-    console.error(chalk.red(`\nError during code review (${operationDescription}):`), err.message);
-    console.error(err.stack);
+    if (!isBrokenStdoutPipeError(err)) {
+      console.error(chalk.red(`\nError during code review (${operationDescription}):`), err.message);
+      if (shouldPrintErrorStack(options, err)) {
+        console.error(err.stack);
+      }
+    }
+
+    try {
+      await emitErrorReviewOutputIfNeeded(options, err.message, { success: false, error: err.message });
+    }
+    catch (outputErr) {
+      if (!isBrokenStdoutPipeError(outputErr)) {
+        console.error(chalk.red('Error writing review error output:'), outputErr.message);
+      }
+    }
+
     // Clean up resources even on error
     try {
       await embeddingsSystem.cleanup();
       await cleanupClassifier();
-      console.log(chalk.green('All resources cleaned up successfully'));
+      diagnosticLog(chalk.green('All resources cleaned up successfully'));
     }
     catch (cleanupErr) {
       console.error(chalk.red('Error during cleanup:'), cleanupErr.message);
     }
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
@@ -961,7 +984,7 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
   try {
     // Get git root directory
     const gitRoot = execSync('git rev-parse --show-toplevel', { cwd: workingDir }).toString().trim();
-    console.log(chalk.gray(`Git repository: ${gitRoot}`));
+    diagnosticLog(chalk.gray(`Git repository: ${gitRoot}`));
 
     // Ensure the branch exists locally (fetch if needed)
     ensureBranchExists(branch, workingDir);
@@ -978,7 +1001,7 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
       // Continue with the original baseBranch name, it might work with remote refs
     }
 
-    console.log(chalk.gray(`Comparing ${branch} against ${baseBranch}...`));
+    diagnosticLog(chalk.gray(`Comparing ${branch} against ${baseBranch}...`));
 
     // Use three-dot notation to get changes in branch compared to base
     // This shows commits that are in 'branch' but not in 'baseBranch'
@@ -992,7 +1015,7 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
       .map((file) => path.resolve(gitRoot, file)); // Get absolute path
 
     if (changedFiles.length > 0) {
-      console.log(chalk.gray(`Found ${changedFiles.length} changed files in ${branch} vs ${baseBranch}`));
+      diagnosticLog(chalk.gray(`Found ${changedFiles.length} changed files in ${branch} vs ${baseBranch}`));
     }
 
     return changedFiles;
@@ -1009,6 +1032,58 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
 // --- Output Formatting Functions --- //
 // These consume the normalized results returned by the RAG review pipeline
 
+function getReviewOutputFunction(outputFormat) {
+  if (outputFormat === 'json') {
+    return outputJson;
+  }
+  if (outputFormat === 'markdown') {
+    return outputMarkdown;
+  }
+  return outputText;
+}
+
+function shouldEmitReviewOutput(options = {}) {
+  return Boolean(options.outputFile || options.output === 'json' || options.output === 'markdown');
+}
+
+function shouldPrintErrorStack(options, error) {
+  return Boolean(error?.stack && (isVerboseEnabled(options) || isDebugEnabled()));
+}
+
+async function outputReviewResults(reviewResults, options, aggregateResult = {}) {
+  await getReviewOutputFunction(options.output)(reviewResults, options, aggregateResult);
+}
+
+async function emitEmptyReviewOutputIfNeeded(options, aggregateResult = {}) {
+  if (!shouldEmitReviewOutput(options)) {
+    return false;
+  }
+
+  await outputReviewResults([], options, aggregateResult);
+  return true;
+}
+
+async function emitErrorReviewOutputIfNeeded(options, error, aggregateResult = {}) {
+  if (!shouldEmitReviewOutput(options)) {
+    return false;
+  }
+
+  await outputReviewResults([createReviewErrorResult(error)], options, {
+    ...aggregateResult,
+    success: false,
+    error,
+  });
+  return true;
+}
+
+function createReviewErrorResult(error) {
+  return {
+    filePath: 'review',
+    success: false,
+    error,
+  };
+}
+
 /**
  * Output results in JSON format
  *
@@ -1016,7 +1091,7 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
  * @param {Object} options - Command line options
  * @param {Object} aggregateResult - Full review result with PR-level context
  */
-function outputJson(reviewResults, options, aggregateResult = {}) {
+async function outputJson(reviewResults, options, aggregateResult = {}) {
   const prLevelFindings = collectPRLevelFindings(reviewResults, aggregateResult);
   const fileLevelIssues = getFileLevelIssueCount(reviewResults);
 
@@ -1069,7 +1144,7 @@ function outputJson(reviewResults, options, aggregateResult = {}) {
   }
   else {
     // Write JSON output to stdout (process.stdout is not buffered)
-    process.stdout.write(jsonOutput);
+    await writeStdout(jsonOutput);
   }
 }
 
@@ -1080,7 +1155,7 @@ function outputJson(reviewResults, options, aggregateResult = {}) {
  * @param {Object} options - Command line options
  * @param {Object} aggregateResult - Full review result with PR-level context
  */
-function outputMarkdown(reviewResults, options, aggregateResult = {}) {
+async function outputMarkdown(reviewResults, options, aggregateResult = {}) {
   const totalFiles = reviewResults.length;
   const filesWithIssues = reviewResults.filter((r) => r.success && !r.skipped && r.results?.issues?.length > 0).length;
   const skippedFiles = reviewResults.filter((r) => r.skipped).length;
@@ -1164,7 +1239,7 @@ function outputMarkdown(reviewResults, options, aggregateResult = {}) {
     return;
   }
 
-  process.stdout.write(markdownOutput);
+  await writeStdout(markdownOutput);
 }
 
 /**

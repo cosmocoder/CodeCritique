@@ -6,6 +6,9 @@
  */
 
 import chalk from 'chalk';
+import { diagnosticLog } from './stdout.js';
+
+export { diagnosticLog };
 
 /**
  * Determine whether verbose logging is enabled.
@@ -33,11 +36,11 @@ export function isDebugEnabled() {
  * Log only when verbose output is enabled.
  *
  * @param {Object|boolean} options - Options object or boolean verbose flag
- * @param {...any} args - Arguments to pass to console.log
+ * @param {...any} args - Arguments to pass to the diagnostic log sink
  */
 export function verboseLog(options, ...args) {
   if (isVerboseEnabled(options)) {
-    console.log(...args);
+    diagnosticLog(...args);
   }
 }
 
@@ -52,6 +55,6 @@ export function verboseLog(options, ...args) {
  */
 export function debug(message) {
   if (isDebugEnabled()) {
-    console.log(chalk.cyan(`[DEBUG] ${message}`));
+    diagnosticLog(chalk.cyan(`[DEBUG] ${message}`));
   }
 }
