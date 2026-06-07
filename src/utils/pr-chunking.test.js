@@ -163,12 +163,39 @@ describe('chunkPRFiles', () => {
       expect(chunks[0].files[0].estimatedTokens).toBe(0);
     });
 
-    it('should handle single large file that exceeds chunk limit', () => {
-      const prFiles = [{ filePath: 'src/huge.js', diffContent: 'x'.repeat(150000), content: 'y'.repeat(150000) }];
+    it('should split a single large file without dropping changed hunks', () => {
+      const hugeDiff = [
+        'diff --git a/src/huge.js b/src/huge.js',
+        '--- a/src/huge.js',
+        '+++ b/src/huge.js',
+        ...Array.from({ length: 90 }, (_, i) => `@@ -${i},1 +${i},1 @@\n-context ${i}\n+changed sentinel-${i} ${'x'.repeat(5000)}`),
+      ].join('\n');
+      const prFiles = [{ filePath: 'src/huge.js', diffContent: hugeDiff, content: 'y'.repeat(150000) }];
       const chunks = chunkPRFiles(prFiles, 35000);
-      // Single file should still be in its own chunk even if it exceeds limit
-      expect(chunks.length).toBe(1);
-      expect(chunks[0].files.length).toBe(1);
+      const splitFiles = chunks.flatMap((chunk) => chunk.files);
+      const combinedDiff = splitFiles.map((file) => file.diffContent).join('\n');
+
+      expect(splitFiles.length).toBeGreaterThan(1);
+      expect(splitFiles.every((file) => file.diffSplitForChunk)).toBe(true);
+      expect(splitFiles.every((file) => file.originalEstimatedTokens > 35000)).toBe(true);
+      expect(chunks.every((chunk) => chunk.totalTokens <= 35000)).toBe(true);
+      expect(combinedDiff).toContain('changed sentinel-0');
+      expect(combinedDiff).toContain('changed sentinel-45');
+      expect(combinedDiff).toContain('changed sentinel-89');
+    });
+
+    it('should keep split diff parts within budget for tiny budgets with large headers', () => {
+      const hugeDiff = [
+        `diff --git a/${'very-long-path/'.repeat(20)}huge.js b/${'very-long-path/'.repeat(20)}huge.js`,
+        '--- a/src/huge.js',
+        '+++ b/src/huge.js',
+        `@@ -1,1 +1,1 @@\n-old\n+${'x'.repeat(120)}`,
+      ].join('\n');
+
+      const chunks = chunkPRFiles([{ filePath: 'src/huge.js', diffContent: hugeDiff, content: 'y'.repeat(120) }], 5);
+
+      expect(chunks.length).toBeGreaterThan(1);
+      expect(chunks.every((chunk) => chunk.totalTokens <= 5)).toBe(true);
     });
   });
 });
@@ -218,6 +245,33 @@ describe('combineChunkResults', () => {
       expect(combined.prContext.totalFiles).toBe(5);
       expect(combined.prContext.chunkedReview).toBe(true);
       expect(combined.prContext.chunks).toBe(1);
+    });
+
+    it('should merge duplicate file results from split diff chunks', () => {
+      const duplicateIssue = { type: 'bug', description: 'Missing null check', lineNumbers: [10], suggestion: 'Add a guard' };
+      const chunkResults = [
+        {
+          success: true,
+          results: [{ filePath: 'src/huge.js', results: { issues: [duplicateIssue] } }],
+        },
+        {
+          success: true,
+          results: [
+            {
+              filePath: 'src/huge.js',
+              results: { issues: [duplicateIssue, { type: 'bug', description: 'Handle timeout', lineNumbers: [50] }] },
+            },
+          ],
+        },
+      ];
+
+      const combined = combineChunkResults(chunkResults, 1);
+
+      expect(combined.results.length).toBe(1);
+      expect(combined.results[0].filePath).toBe('src/huge.js');
+      expect(combined.results[0].results.issues).toHaveLength(2);
+      expect(combined.results[0].chunkInfo.chunkNumbers).toEqual([1, 2]);
+      expect(combined.combinedSummary).toContain('Total issues found: 2');
     });
   });
 
@@ -307,6 +361,25 @@ describe('combineChunkResults', () => {
         },
       ];
       const combined = combineChunkResults(chunkResults, 2);
+      expect(combined.crossChunkIssues.length).toBe(0);
+    });
+
+    it('should not flag duplicate split-file issues as cross-chunk patterns', () => {
+      const chunkResults = [
+        {
+          chunkId: 1,
+          success: true,
+          results: [{ filePath: 'src/huge.js', results: { issues: [{ type: 'bug', description: 'Missing null check in handler' }] } }],
+        },
+        {
+          chunkId: 2,
+          success: true,
+          results: [{ filePath: 'src/huge.js', results: { issues: [{ type: 'bug', description: 'Missing null check in handler' }] } }],
+        },
+      ];
+
+      const combined = combineChunkResults(chunkResults, 1);
+
       expect(combined.crossChunkIssues.length).toBe(0);
     });
   });

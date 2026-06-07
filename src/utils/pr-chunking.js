@@ -1,6 +1,13 @@
 import chalk from 'chalk';
 import { verboseLog } from './logging.js';
 
+const CHARS_PER_ESTIMATED_TOKEN = 3;
+const FULL_CONTENT_CONTEXT_TOKEN_RATIO = 0.25;
+
+function estimateTokens(text) {
+  return Math.ceil((text?.length || 0) / CHARS_PER_ESTIMATED_TOKEN);
+}
+
 /**
  * Determines if a PR should be chunked based on estimated token usage
  * @param {Array} prFiles - Array of PR files with diffContent and content
@@ -14,12 +21,12 @@ export function shouldChunkPR(prFiles, options = {}) {
 
   // Calculate tokens for diff content
   const diffTokens = prFiles.reduce((sum, file) => {
-    return sum + Math.ceil((file.diffContent?.length || 0) / 3);
+    return sum + estimateTokens(file.diffContent);
   }, 0);
 
   // Calculate tokens for full file content (included in prompt for context awareness)
   const fullContentTokens = prFiles.reduce((sum, file) => {
-    return sum + Math.ceil((file.content?.length || 0) / 3);
+    return sum + estimateTokens(file.content);
   }, 0);
 
   // Total file-related tokens (both diff AND full content are sent)
@@ -64,13 +71,17 @@ export function shouldChunkPR(prFiles, options = {}) {
 export function chunkPRFiles(prFiles, maxTokensPerChunk = 35000) {
   // Calculate change complexity for each file (works for any language)
   // IMPORTANT: Token estimate must include BOTH diff AND full content since both are sent
-  const filesWithMetrics = prFiles.map((file) => ({
-    ...file,
-    changeSize: calculateChangeSize(file.diffContent),
-    fileComplexity: calculateFileComplexity(file),
-    // Estimate tokens for BOTH diff content AND full file content (both are included in prompt)
-    estimatedTokens: Math.ceil((file.diffContent?.length || 0) / 3) + Math.ceil((file.content?.length || 0) / 3),
-  }));
+  const filesWithMetrics = prFiles.flatMap((file) => {
+    const fileWithMetrics = {
+      ...file,
+      changeSize: calculateChangeSize(file.diffContent),
+      fileComplexity: calculateFileComplexity(file),
+      // Estimate tokens for BOTH diff content AND full file content (both are included in prompt)
+      estimatedTokens: estimateTokens(file.diffContent) + estimateTokens(file.content),
+    };
+
+    return splitOversizedFileForChunk(fileWithMetrics, maxTokensPerChunk);
+  });
 
   // Sort by directory + change importance for logical grouping
   const sortedFiles = filesWithMetrics.sort((a, b) => {
@@ -117,6 +128,178 @@ export function chunkPRFiles(prFiles, maxTokensPerChunk = 35000) {
   }
 
   return chunks;
+}
+
+function splitOversizedFileForChunk(file, maxTokensPerChunk) {
+  if (file.estimatedTokens <= maxTokensPerChunk) {
+    return [file];
+  }
+
+  const diffTokens = estimateTokens(file.diffContent);
+  if (diffTokens <= maxTokensPerChunk) {
+    return [capFileContentForChunk(file, maxTokensPerChunk, diffTokens)];
+  }
+
+  const contentBudget = Math.floor(maxTokensPerChunk * FULL_CONTENT_CONTEXT_TOKEN_RATIO);
+  const diffBudget = Math.max(maxTokensPerChunk - contentBudget, 1);
+  const diffParts = splitDiffToTokenBudget(file.diffContent, diffBudget);
+  const cappedContent = truncateToTokenBudget(file.content, contentBudget, 'file content');
+
+  return diffParts.map((diffPart, index) => ({
+    ...file,
+    diffContent: diffPart,
+    content: cappedContent,
+    estimatedTokens: estimateTokens(diffPart) + estimateTokens(cappedContent),
+    truncatedForChunk: cappedContent !== file.content,
+    diffSplitForChunk: true,
+    chunkPart: index + 1,
+    chunkParts: diffParts.length,
+    originalEstimatedTokens: file.estimatedTokens,
+    originalDiffEstimatedTokens: diffTokens,
+    summary: `${file.summary || pathBasename(file.filePath)} (diff part ${index + 1}/${diffParts.length})`,
+  }));
+}
+
+function capFileContentForChunk(file, maxTokensPerChunk, diffTokens) {
+  const contentBudget = Math.max(maxTokensPerChunk - diffTokens, 0);
+  const cappedContent = truncateToTokenBudget(file.content, contentBudget, 'file content');
+
+  return {
+    ...file,
+    content: cappedContent,
+    estimatedTokens: diffTokens + estimateTokens(cappedContent),
+    truncatedForChunk: cappedContent !== file.content,
+    originalEstimatedTokens: file.estimatedTokens,
+  };
+}
+
+function splitDiffToTokenBudget(diffContent, tokenBudget) {
+  if (!diffContent || estimateTokens(diffContent) <= tokenBudget) {
+    return [diffContent || ''];
+  }
+
+  const maxChars = tokenBudget * CHARS_PER_ESTIMATED_TOKEN;
+  const lines = diffContent.split('\n');
+  const firstHunkIndex = lines.findIndex((line) => line.startsWith('@@'));
+  const headerLines = firstHunkIndex > 0 ? lines.slice(0, firstHunkIndex) : [];
+  const bodyLines = firstHunkIndex >= 0 ? lines.slice(firstHunkIndex) : lines;
+  const headerText = headerLines.join('\n');
+  const units = splitDiffIntoUnits(bodyLines);
+  const parts = [];
+  let currentBody = '';
+
+  for (const unit of units) {
+    const candidateBody = currentBody ? `${currentBody}\n${unit}` : unit;
+    if (formatDiffPart(headerText, candidateBody, parts.length > 0).length <= maxChars) {
+      currentBody = candidateBody;
+      continue;
+    }
+
+    if (currentBody) {
+      parts.push(formatDiffPart(headerText, currentBody, parts.length > 0));
+      currentBody = '';
+    }
+
+    if (formatDiffPart(headerText, unit, parts.length > 0).length <= maxChars) {
+      currentBody = unit;
+      continue;
+    }
+
+    parts.push(...splitLargeDiffUnit(headerText, unit, maxChars, parts.length > 0));
+  }
+
+  if (currentBody) {
+    parts.push(formatDiffPart(headerText, currentBody, parts.length > 0));
+  }
+
+  return parts.length > 0 ? parts : [diffContent];
+}
+
+function splitDiffIntoUnits(lines) {
+  const hasHunks = lines.some((line) => line.startsWith('@@'));
+  if (!hasHunks) {
+    return [lines.join('\n')];
+  }
+
+  const units = [];
+  let currentUnit = [];
+
+  for (const line of lines) {
+    if (line.startsWith('@@') && currentUnit.length > 0) {
+      units.push(currentUnit.join('\n'));
+      currentUnit = [];
+    }
+    currentUnit.push(line);
+  }
+
+  if (currentUnit.length > 0) {
+    units.push(currentUnit.join('\n'));
+  }
+
+  return units;
+}
+
+function splitLargeDiffUnit(headerText, unit, maxChars, hasPreviousPart) {
+  const parts = [];
+
+  for (let offset = 0; offset < unit.length; ) {
+    const prefix = buildBoundedDiffPrefix(headerText, hasPreviousPart || parts.length > 0, maxChars);
+    const sliceChars = Math.max(maxChars - prefix.length, 1);
+    const slice = unit.slice(offset, offset + sliceChars);
+    parts.push(`${prefix}${slice}`);
+    offset += sliceChars;
+  }
+
+  return parts;
+}
+
+function buildBoundedDiffPrefix(headerText, isContinuation, maxChars) {
+  const prefixText = [headerText, isContinuation ? splitMarker() : ''].filter(Boolean).join('\n');
+  if (!prefixText || maxChars <= 1) {
+    return '';
+  }
+
+  const maxPrefixChars = Math.max(maxChars - 2, 0);
+  const boundedPrefix = prefixText.length > maxPrefixChars ? prefixText.slice(0, maxPrefixChars) : prefixText;
+  return boundedPrefix ? `${boundedPrefix}\n` : '';
+}
+
+function formatDiffPart(headerText, bodyText, isContinuation) {
+  return [headerText, isContinuation ? splitMarker() : '', bodyText].filter(Boolean).join('\n');
+}
+
+function splitMarker() {
+  return '... (diff split for PR review token budget; continued from another part) ...';
+}
+
+function pathBasename(filePath) {
+  return (
+    String(filePath || '')
+      .split('/')
+      .pop() || 'file'
+  );
+}
+
+function truncateToTokenBudget(text, tokenBudget, label) {
+  if (!text || tokenBudget <= 0) {
+    return '';
+  }
+
+  const maxChars = tokenBudget * CHARS_PER_ESTIMATED_TOKEN;
+  if (text.length <= maxChars) {
+    return text;
+  }
+
+  const marker = `\n... (${label} truncated for PR review token budget; original length ${text.length} characters) ...\n`;
+  if (maxChars <= marker.length + 20) {
+    return text.slice(0, Math.max(maxChars, 0));
+  }
+
+  const availableChars = maxChars - marker.length;
+  const headChars = Math.ceil(availableChars * 0.7);
+  const tailChars = Math.max(availableChars - headChars, 0);
+
+  return `${text.slice(0, headChars)}${marker}${tailChars > 0 ? text.slice(-tailChars) : ''}`;
 }
 
 /**
@@ -201,25 +384,25 @@ export function combineChunkResults(chunkResults, totalFiles, options = {}) {
     },
   };
 
-  // Combine file-specific results
+  const mergedResultsByFile = new Map();
+
+  // Combine file-specific results, merging split-file review parts back into one file result.
   chunkResults.forEach((chunkResult, chunkIndex) => {
     if (chunkResult.success && chunkResult.results) {
-      chunkResult.results.forEach((fileResult) => {
-        // Add chunk context to each result
-        const enhancedResult = {
-          ...fileResult,
-          chunkInfo: {
-            chunkNumber: chunkIndex + 1,
-            totalChunks: chunkResults.length,
-          },
-        };
-        combinedResult.results.push(enhancedResult);
+      chunkResult.results.forEach((fileResult, resultIndex) => {
+        mergeChunkFileResult(mergedResultsByFile, fileResult, {
+          chunkNumber: chunkIndex + 1,
+          totalChunks: chunkResults.length,
+          resultIndex,
+        });
       });
     }
   });
 
+  combinedResult.results = Array.from(mergedResultsByFile.values());
+
   // Create combined summary
-  combinedResult.combinedSummary = createCombinedSummary(chunkResults);
+  combinedResult.combinedSummary = createCombinedSummary(combinedResult.results, chunkResults);
 
   // Detect and merge cross-chunk issues
   combinedResult.crossChunkIssues = detectCrossChunkIssues(chunkResults);
@@ -229,22 +412,80 @@ export function combineChunkResults(chunkResults, totalFiles, options = {}) {
   return combinedResult;
 }
 
+function mergeChunkFileResult(mergedResultsByFile, fileResult, chunkInfo) {
+  const key = fileResult.filePath || `chunk-${chunkInfo.chunkNumber}-result-${chunkInfo.resultIndex}`;
+  const resultWithChunkInfo = {
+    ...fileResult,
+    chunkInfo: {
+      chunkNumber: chunkInfo.chunkNumber,
+      totalChunks: chunkInfo.totalChunks,
+    },
+    chunkInfos: [
+      {
+        chunkNumber: chunkInfo.chunkNumber,
+        totalChunks: chunkInfo.totalChunks,
+      },
+    ],
+  };
+
+  if (!mergedResultsByFile.has(key)) {
+    mergedResultsByFile.set(key, resultWithChunkInfo);
+    return;
+  }
+
+  const existing = mergedResultsByFile.get(key);
+  const existingIssues = existing.results?.issues || [];
+  const newIssues = fileResult.results?.issues || [];
+  existing.results = {
+    ...existing.results,
+    ...fileResult.results,
+    issues: mergeIssues(existingIssues, newIssues),
+  };
+  existing.chunkInfos.push({
+    chunkNumber: chunkInfo.chunkNumber,
+    totalChunks: chunkInfo.totalChunks,
+  });
+  existing.chunkInfo = {
+    chunkNumber: existing.chunkInfo.chunkNumber,
+    totalChunks: chunkInfo.totalChunks,
+    chunkNumbers: [...new Set(existing.chunkInfos.map((info) => info.chunkNumber))],
+  };
+}
+
+function mergeIssues(existingIssues, newIssues) {
+  const mergedIssues = [...existingIssues];
+  const seenIssueKeys = new Set(existingIssues.map(issueKey));
+
+  for (const issue of newIssues) {
+    const key = issueKey(issue);
+    if (!seenIssueKeys.has(key)) {
+      mergedIssues.push(issue);
+      seenIssueKeys.add(key);
+    }
+  }
+
+  return mergedIssues;
+}
+
+function issueKey(issue) {
+  return JSON.stringify({
+    type: issue.type,
+    severity: issue.severity,
+    description: issue.description,
+    suggestion: issue.suggestion,
+    lineNumbers: issue.lineNumbers,
+    codeSuggestion: issue.codeSuggestion,
+  });
+}
+
 /**
  * Creates a summary from combined chunk results
  * @param {Array} chunkResults - Array of chunk review results
  * @returns {string} Combined summary text
  */
-function createCombinedSummary(chunkResults) {
-  const totalIssues = chunkResults.reduce((sum, chunk) => {
-    if (!chunk.results) {
-      return sum;
-    }
-    return (
-      sum +
-      chunk.results.reduce((fileSum, file) => {
-        return fileSum + (file.results?.issues?.length || 0);
-      }, 0)
-    );
+function createCombinedSummary(results, chunkResults) {
+  const totalIssues = results.reduce((sum, file) => {
+    return sum + (file.results?.issues?.length || 0);
   }, 0);
 
   const successfulChunks = chunkResults.filter((c) => c.success).length;
@@ -285,7 +526,8 @@ function detectCrossChunkIssues(chunkResults) {
   // Identify patterns that appear across multiple chunks
   issueGroups.forEach((issues) => {
     const uniqueChunks = new Set(issues.map((i) => i.chunkId));
-    if (uniqueChunks.size > 1) {
+    const uniqueFiles = new Set(issues.map((i) => i.filePath));
+    if (uniqueChunks.size > 1 && uniqueFiles.size > 1) {
       crossChunkIssues.push({
         type: 'pattern',
         severity: 'medium',

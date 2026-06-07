@@ -32,6 +32,8 @@ export function createMockTable(overrides = {}) {
       where: vi.fn().mockReturnThis(),
       limit: vi.fn().mockReturnThis(),
       select: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockReturnThis(),
+      offset: vi.fn().mockReturnThis(),
       toArray: vi.fn().mockResolvedValue([]),
     }),
     search: vi.fn().mockReturnValue({
@@ -301,24 +303,4 @@ export function createMockUnifiedContext(overrides = {}) {
     prComments: overrides.prComments || [],
     customDocChunks: overrides.customDocChunks || [],
   };
-}
-
-// ============================================================================
-// Test Case Data Generators
-// ============================================================================
-
-/**
- * Generates test cases for shouldSkipPR function
- * @returns {{pr: PRData|null, oldest: string|null, newest: string|null, expected: boolean, description: string}[]} Array of test case objects
- */
-export function generateShouldSkipPRTestCases() {
-  return [
-    { pr: { merged_at: '2024-01-15' }, oldest: null, newest: null, expected: false, description: 'no date range provided' },
-    { pr: null, oldest: '2024-01-01', newest: '2024-01-31', expected: false, description: 'PR is null' },
-    { pr: { merged_at: '2024-01-15' }, oldest: '2024-01-01', newest: '2024-01-31', expected: true, description: 'PR within range' },
-    { pr: { merged_at: '2023-12-15' }, oldest: '2024-01-01', newest: '2024-01-31', expected: false, description: 'PR before range' },
-    { pr: { merged_at: '2024-02-15' }, oldest: '2024-01-01', newest: '2024-01-31', expected: false, description: 'PR after range' },
-    { pr: { created_at: '2024-01-15' }, oldest: '2024-01-01', newest: '2024-01-31', expected: true, description: 'using created_at' },
-    { pr: { updated_at: '2024-01-15' }, oldest: '2024-01-01', newest: '2024-01-31', expected: true, description: 'using updated_at' },
-  ];
 }

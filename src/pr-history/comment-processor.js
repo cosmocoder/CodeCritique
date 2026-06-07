@@ -177,6 +177,7 @@ export class PRCommentProcessor {
       author: comment.user?.login || 'unknown',
       created_at: comment.created_at,
       updated_at: comment.updated_at,
+      pr_updated_at: prContext.pr?.updated_at || null,
       review_id: comment.pull_request_review_id?.toString() || null,
       review_state: comment.review_state || null,
     };

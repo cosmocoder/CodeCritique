@@ -1,25 +1,36 @@
-import { createMockPRSearchResult, generateShouldSkipPRTestCases } from '../test-utils/fixtures.js';
+import { createMockPRSearchResult } from '../test-utils/fixtures.js';
 import {
   shouldSkipPR,
   storePRCommentsBatch,
   getPRCommentsStats,
   clearPRComments,
   hasPRComments,
-  getProcessedPRDateRange,
+  getProcessedPRSyncState,
   getLastAnalysisTimestamp,
   findRelevantPRComments,
   cleanupClassifier,
 } from './database.js';
 
+const mockMergeBuilder = vi.hoisted(() => {
+  const builder = {};
+  builder.whenMatchedUpdateAll = vi.fn(() => builder);
+  builder.whenNotMatchedInsertAll = vi.fn(() => builder);
+  builder.execute = vi.fn().mockResolvedValue(undefined);
+  return builder;
+});
+
 // Create hoisted mock table for embeddings system (must be inline, can't use imported functions)
 const mockTable = vi.hoisted(() => ({
   add: vi.fn().mockResolvedValue(undefined),
+  mergeInsert: vi.fn(() => mockMergeBuilder),
   optimize: vi.fn().mockResolvedValue(undefined),
   countRows: vi.fn().mockResolvedValue(0),
   query: vi.fn().mockReturnValue({
     where: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
     select: vi.fn().mockReturnThis(),
+    orderBy: vi.fn().mockReturnThis(),
+    offset: vi.fn().mockReturnThis(),
     toArray: vi.fn().mockResolvedValue([]),
   }),
   search: vi.fn().mockReturnValue({
@@ -93,6 +104,8 @@ const setupMockQueryResults = (results) => {
     where: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
     select: vi.fn().mockReturnThis(),
+    orderBy: vi.fn().mockReturnThis(),
+    offset: vi.fn().mockReturnThis(),
     toArray: vi.fn().mockResolvedValue(results),
   });
 };
@@ -106,6 +119,10 @@ describe('PR History Database', () => {
     mockConsole();
     // Reset mockTable (inline since can't use imported function with hoisted mocks)
     mockTable.add.mockReset().mockResolvedValue(undefined);
+    mockTable.mergeInsert.mockReset().mockReturnValue(mockMergeBuilder);
+    mockMergeBuilder.whenMatchedUpdateAll.mockReset().mockReturnValue(mockMergeBuilder);
+    mockMergeBuilder.whenNotMatchedInsertAll.mockReset().mockReturnValue(mockMergeBuilder);
+    mockMergeBuilder.execute.mockReset().mockResolvedValue(undefined);
     mockTable.optimize.mockReset().mockResolvedValue(undefined);
     mockTable.countRows.mockReset().mockResolvedValue(0);
     mockTable.delete.mockReset().mockResolvedValue(undefined);
@@ -113,6 +130,8 @@ describe('PR History Database', () => {
       where: vi.fn().mockReturnThis(),
       limit: vi.fn().mockReturnThis(),
       select: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockReturnThis(),
+      offset: vi.fn().mockReturnThis(),
       toArray: vi.fn().mockResolvedValue([]),
     });
     mockTable.search.mockReset().mockReturnValue({
@@ -139,8 +158,28 @@ describe('PR History Database', () => {
   // ==========================================================================
 
   describe('shouldSkipPR', () => {
-    it.each(generateShouldSkipPRTestCases())('should return $expected when $description', ({ pr, oldest, newest, expected }) => {
-      expect(shouldSkipPR(pr, oldest, newest)).toBe(expected);
+    it.each([
+      ['missing sync state', { number: 12, updated_at: '2024-01-20T00:00:00.000Z' }, null, false],
+      ['missing PR', null, { processedPRs: new Map([[12, { latestPRUpdatedAt: '2024-01-20T00:00:00.000Z' }]]) }, false],
+      ['unprocessed PR', { number: 13, updated_at: '2024-01-20T00:00:00.000Z' }, { processedPRs: new Map() }, false],
+    ])('should return expected when %s', (_, pr, syncState, expected) => {
+      expect(shouldSkipPR(pr, syncState)).toBe(expected);
+    });
+
+    it('should skip only exact processed PRs with no newer PR activity', () => {
+      const processedPRs = new Map([
+        [12, { latestCommentAt: '2024-01-10T00:00:00.000Z', latestPRUpdatedAt: '2024-01-20T00:00:00.000Z', commentCount: 2 }],
+      ]);
+
+      expect(shouldSkipPR({ number: 12, updated_at: '2024-01-20T00:00:00.000Z' }, { processedPRs })).toBe(true);
+      expect(shouldSkipPR({ number: 13, updated_at: '2024-01-20T00:00:00.000Z' }, { processedPRs })).toBe(false);
+      expect(shouldSkipPR({ number: 12, updated_at: '2024-01-21T00:00:00.000Z' }, { processedPRs })).toBe(false);
+    });
+
+    it('should skip legacy PR state using stored comments as the processed marker', () => {
+      const processedPRs = new Map([[12, { latestCommentAt: '2024-01-20T00:00:00.000Z', commentCount: 2 }]]);
+
+      expect(shouldSkipPR({ number: 12, updated_at: '2024-01-21T00:00:00.000Z' }, { processedPRs })).toBe(true);
     });
   });
 
@@ -161,7 +200,110 @@ describe('PR History Database', () => {
       const comments = [createValidComment()];
       const result = await storePRCommentsBatch(comments);
       expect(result).toBe(1);
-      expect(mockTable.add).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ comment_text: 'Test comment' })]));
+      expect(mockTable.mergeInsert).toHaveBeenCalledWith(['id', 'project_path']);
+      expect(mockMergeBuilder.whenMatchedUpdateAll).toHaveBeenCalled();
+      expect(mockMergeBuilder.whenNotMatchedInsertAll).toHaveBeenCalled();
+      expect(mockMergeBuilder.execute).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ comment_text: 'Test comment' })])
+      );
+    });
+
+    it('should upsert comments with the same id without deleting existing rows first', async () => {
+      const comments = [createValidComment({ id: "comment-'1" })];
+      const result = await storePRCommentsBatch(comments, "/project/that's/deep");
+
+      expect(result).toBe(1);
+      expect(mockTable.delete).not.toHaveBeenCalled();
+      expect(mockMergeBuilder.execute).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ id: "comment-'1" })]));
+    });
+
+    it('should remove stale comments for fully reprocessed PRs after upsert succeeds', async () => {
+      const comments = [createValidComment({ id: "comment-'1", repository: 'owner/repo', pr_number: 7 })];
+      setupMockQueryResults([{ id: "comment-'1" }, { id: "stale-'2" }]);
+
+      const result = await storePRCommentsBatch(comments, "/project/that's/deep", {
+        replacePRs: [{ repository: 'owner/repo', prNumber: 7 }],
+      });
+
+      expect(result).toBe(1);
+      expect(mockMergeBuilder.execute).toHaveBeenCalled();
+      expect(mockTable.delete).toHaveBeenCalledWith(
+        "repository = 'owner/repo' AND project_path = '/project/that''s/deep' AND pr_number = 7 AND id IN ('stale-''2')"
+      );
+    });
+
+    it('should keep live comments that were fetched but skipped during validation', async () => {
+      const comments = [
+        createValidComment({ id: 'live-valid', repository: 'owner/repo', pr_number: 7 }),
+        createValidComment({ id: 'live-invalid', repository: 'owner/repo', pr_number: 7, comment_embedding: new Array(256).fill(0.1) }),
+      ];
+      setupMockQueryResults([{ id: 'live-valid' }, { id: 'live-invalid' }, { id: 'stale-deleted' }]);
+
+      const result = await storePRCommentsBatch(comments, '/project', {
+        replacePRs: [{ repository: 'owner/repo', prNumber: 7 }],
+      });
+
+      expect(result).toBe(1);
+      expect(mockTable.delete).toHaveBeenCalledTimes(1);
+      expect(mockTable.delete).toHaveBeenCalledWith(
+        "repository = 'owner/repo' AND project_path = '/project' AND pr_number = 7 AND id IN ('stale-deleted')"
+      );
+    });
+
+    it('should remove all stored comments when a reprocessed PR now has no comments', async () => {
+      const result = await storePRCommentsBatch([], "/project/that's/deep", {
+        replacePRs: [{ repository: 'owner/repo', prNumber: 7 }],
+      });
+
+      expect(result).toBe(0);
+      expect(mockMergeBuilder.execute).not.toHaveBeenCalled();
+      expect(mockTable.delete).toHaveBeenCalledWith(
+        "repository = 'owner/repo' AND project_path = '/project/that''s/deep' AND pr_number = 7"
+      );
+      expect(mockEmbeddingsSystem.updatePRCommentsIndex).toHaveBeenCalled();
+    });
+
+    it('should not delete existing rows when an upsert fails', async () => {
+      mockMergeBuilder.execute.mockRejectedValue(new Error('Database error'));
+
+      const result = await storePRCommentsBatch([createValidComment({ repository: 'owner/repo', pr_number: 7 })], '/project', {
+        replacePRs: [{ repository: 'owner/repo', prNumber: 7 }],
+      });
+
+      expect(result).toBe(0);
+      expect(mockTable.delete).not.toHaveBeenCalled();
+    });
+
+    it('should still clean up unaffected PRs when another PR storage batch fails', async () => {
+      const failedPRComments = Array.from({ length: 100 }, (_, index) =>
+        createValidComment({ id: `failed-${index}`, repository: 'owner/repo', pr_number: 7 })
+      );
+      const successfulComment = createValidComment({ id: 'live-8', repository: 'owner/repo', pr_number: 8 });
+      const comments = [...failedPRComments, successfulComment];
+      const query = {
+        where: vi.fn().mockReturnThis(),
+        select: vi.fn().mockReturnThis(),
+        orderBy: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+        offset: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValue([{ id: 'live-8' }, { id: 'stale-8' }]),
+      };
+      mockTable.query.mockReturnValue(query);
+      mockMergeBuilder.execute.mockRejectedValueOnce(new Error('Database error')).mockResolvedValueOnce(undefined);
+
+      const result = await storePRCommentsBatch(comments, '/project', {
+        replacePRs: [
+          { repository: 'owner/repo', prNumber: 7 },
+          { repository: 'owner/repo', prNumber: 8 },
+        ],
+      });
+
+      expect(result).toBe(1);
+      expect(query.where).toHaveBeenCalledWith("repository = 'owner/repo' AND project_path = '/project' AND pr_number = 8");
+      expect(mockTable.delete).toHaveBeenCalledTimes(1);
+      expect(mockTable.delete).toHaveBeenCalledWith(
+        "repository = 'owner/repo' AND project_path = '/project' AND pr_number = 8 AND id IN ('stale-8')"
+      );
     });
 
     it('should skip comments with missing required fields', async () => {
@@ -183,7 +325,7 @@ describe('PR History Database', () => {
     });
 
     it('should handle batch storage errors', async () => {
-      mockTable.add.mockRejectedValue(new Error('Database error'));
+      mockMergeBuilder.execute.mockRejectedValue(new Error('Database error'));
       const result = await storePRCommentsBatch([createValidComment()]);
       expect(result).toBe(0);
     });
@@ -339,50 +481,53 @@ describe('PR History Database', () => {
     });
   });
 
-  // ==========================================================================
-  // getProcessedPRDateRange
-  // ==========================================================================
-
-  describe('getProcessedPRDateRange', () => {
-    it.each([
-      ['table not found', () => mockEmbeddingsSystem.getPRCommentsTable.mockResolvedValue(null)],
-      ['no results', () => setupMockQueryResults([])],
-      [
-        'query errors',
-        () =>
-          mockTable.query.mockReturnValue({
-            where: vi.fn().mockReturnThis(),
-            limit: vi.fn().mockReturnThis(),
-            toArray: vi.fn().mockRejectedValue(new Error('Query error')),
-          }),
-      ],
-    ])('should return null dates when %s', async (_, setup) => {
-      setup();
-      const result = await getProcessedPRDateRange('owner/repo');
-      expect(result.oldestPR).toBeNull();
-      expect(result.newestPR).toBeNull();
-    });
-
-    it('should return date range for comments', async () => {
-      const mockComments = [
-        { pr_number: 1, created_at: '2024-01-10T00:00:00Z' },
-        { pr_number: 2, created_at: '2024-01-20T00:00:00Z' },
-        { pr_number: 1, created_at: '2024-01-15T00:00:00Z' },
-      ];
-      setupMockQueryResults(mockComments);
-      const result = await getProcessedPRDateRange('owner/repo');
-      expect(result.oldestPR).toContain('2024-01-10');
-      expect(result.newestPR).toContain('2024-01-20');
-    });
-
-    it('should return null dates when no valid pr_number or created_at', async () => {
+  describe('getProcessedPRSyncState', () => {
+    it('should return exact PR sync state with latest comment timestamps', async () => {
       setupMockQueryResults([
-        { pr_number: null, created_at: '2024-01-15' },
-        { pr_number: 1, created_at: null },
+        { pr_number: 1, created_at: '2024-01-10T00:00:00Z', updated_at: null, pr_updated_at: '2024-01-14T00:00:00Z' },
+        { pr_number: 1, created_at: '2024-01-12T00:00:00Z', updated_at: '2024-01-15T00:00:00Z', pr_updated_at: '2024-01-16T00:00:00Z' },
+        { pr_number: 2, created_at: '2024-01-20T00:00:00Z', updated_at: null, pr_updated_at: '2024-01-21T00:00:00Z' },
       ]);
-      const result = await getProcessedPRDateRange('owner/repo');
-      expect(result.oldestPR).toBeNull();
-      expect(result.newestPR).toBeNull();
+
+      const result = await getProcessedPRSyncState('owner/repo');
+
+      expect(result.processedPRs.size).toBe(2);
+      expect(result.processedPRs.get(1)).toEqual({
+        latestCommentAt: '2024-01-15T00:00:00.000Z',
+        latestPRUpdatedAt: '2024-01-16T00:00:00.000Z',
+        commentCount: 2,
+      });
+      expect(result.processedPRs.get(2)).toEqual({
+        latestCommentAt: '2024-01-20T00:00:00.000Z',
+        latestPRUpdatedAt: '2024-01-21T00:00:00.000Z',
+        commentCount: 1,
+      });
+    });
+
+    it('should read all sync rows in pages with a narrow projection', async () => {
+      const firstPage = Array.from({ length: 10000 }, (_, index) => ({
+        pr_number: index + 1,
+        created_at: '2024-01-10T00:00:00Z',
+        pr_updated_at: '2024-01-11T00:00:00Z',
+      }));
+      const secondPage = [{ pr_number: 10001, created_at: '2024-01-12T00:00:00Z', pr_updated_at: '2024-01-13T00:00:00Z' }];
+      const query = {
+        where: vi.fn().mockReturnThis(),
+        select: vi.fn().mockReturnThis(),
+        orderBy: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+        offset: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValueOnce(firstPage).mockResolvedValueOnce(secondPage),
+      };
+      mockTable.query.mockReturnValue(query);
+
+      const result = await getProcessedPRSyncState('owner/repo');
+
+      expect(result.processedPRs.size).toBe(10001);
+      expect(query.select).toHaveBeenCalledWith(['id', 'pr_number', 'created_at', 'updated_at', 'pr_updated_at']);
+      expect(query.orderBy).toHaveBeenCalledWith([{ column: 'id', order: 'asc' }]);
+      expect(query.offset).toHaveBeenNthCalledWith(1, 0);
+      expect(query.offset).toHaveBeenNthCalledWith(2, 10000);
     });
   });
 

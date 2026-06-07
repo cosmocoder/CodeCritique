@@ -762,6 +762,19 @@ describe('rag-analyzer', () => {
       expect(result.success).toBe(true);
     });
 
+    it('should fall back to full custom docs when no relevant chunks are found', async () => {
+      mockEmbeddingsSystem.getExistingCustomDocumentChunks.mockResolvedValue([
+        { id: 'existing', content: 'Existing indexed chunk', document_title: 'Indexed Doc', chunk_index: 0 },
+      ]);
+      mockEmbeddingsSystem.findRelevantCustomDocChunks.mockResolvedValue([]);
+
+      await runAnalysis('/test/file.js', {
+        customDocs: [{ content: 'Mandatory internal review rule', document_title: 'Internal Standards' }],
+      });
+
+      expect(llm.sendPromptToClaude).toHaveBeenCalledWith(expect.stringContaining('Mandatory internal review rule'), expect.any(Object));
+    });
+
     it('should log selected chunks when verbose', async () => {
       mockEmbeddingsSystem.findRelevantCustomDocChunks.mockResolvedValue([
         { id: 'chunk1', content: 'Guidelines', document_title: 'Guide', chunk_index: 0, similarity: 0.85 },

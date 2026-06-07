@@ -31,6 +31,7 @@ const createMockTable = (overrides = {}) => ({
   schema: { fields: [{ name: 'project_path' }] },
   query: vi.fn().mockReturnValue({ where: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
   add: vi.fn().mockResolvedValue(undefined),
+  addColumns: vi.fn().mockResolvedValue(undefined),
   delete: vi.fn().mockResolvedValue(undefined),
   optimize: vi.fn().mockResolvedValue(undefined),
   ...overrides,
