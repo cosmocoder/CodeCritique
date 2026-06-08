@@ -263,8 +263,13 @@ npx codecritique analyze --file src/components/Button.tsx
 # Analyze files matching patterns
 npx codecritique analyze --files "src/**/*.ts" "lib/*.js"
 
-# Analyze changes in feature-branch vs main branch (auto-detects base branch)
+# Review changes in a target branch against its auto-detected parent branch
 npx codecritique analyze --diff-with feature-branch
+
+# Review against an explicit base branch (overrides auto-detection).
+# Useful for stacked PRs where you know the real base, or in CI where the PR
+# base ref is authoritative.
+npx codecritique analyze --diff-with feature-B --base feature-A
 ```
 
 #### Using with Custom Guidelines
@@ -383,9 +388,6 @@ jobs:
       - name: ⬇️ Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup master branch for diff analysis
-        run: git fetch --no-tags --prune origin main:main
-
       - name: Code Review
         uses: cosmocoder/CodeCritique/.github/actions/pr-review@main
         with:
@@ -393,11 +395,16 @@ jobs:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
+> No manual `git fetch` or `fetch-depth: 0` is needed. The action fetches the PR base
+> branch (the parent — which for a stacked PR is another feature branch) and deepens
+> the shallow checkout just enough to compute the diff, so parent auto-detection works
+> without the cost of a full-history clone.
+
 #### Required Setup
 
 1. **Anthropic API Key**: Store your Anthropic API key as a repository secret named `ANTHROPIC_API_KEY`
 2. **Permissions**: The workflow must have `contents: write`, `actions: read`, and `pull-requests: write` permissions
-3. **Git Setup**: Ensure the base branch is available for diff analysis (see example above)
+3. **Git Setup**: None required — the action fetches the PR base/parent branch and deepens the checkout only as much as the diff needs (no `fetch-depth: 0`)
 
 #### Input Parameters
 
@@ -450,7 +457,7 @@ codecritique analyze --file src/components/Button.tsx
 # Analyze files matching patterns
 codecritique analyze --files "src/**/*.ts" "lib/*.js"
 
-# Analyze branch diff
+# Review target branch changes against its auto-detected parent branch
 codecritique analyze --diff-with feature-branch
 
 # Generate embeddings

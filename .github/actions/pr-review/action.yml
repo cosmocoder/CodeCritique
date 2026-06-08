@@ -144,6 +144,49 @@ runs:
           ${{ env.FEEDBACK_CACHE_KEY }}-
       continue-on-error: true
 
+    # Parent auto-detection (findParentBranch) diffs the PR head against the
+    # branch it was forked from. On pull_request that parent is the PR base, which
+    # for a stacked PR is another feature branch -- not main. The default checkout
+    # is shallow and only has the PR head, so the base is missing and detection
+    # would fall back to main. Fetch the base (and main as fallback) here.
+    #
+    # We deliberately avoid `fetch-depth: 0` (a full clone is slow on large/old
+    # repos) and instead deepen incrementally only until the merge-base with the
+    # base is reachable -- the minimum history needed for correct ancestry checks
+    # on a shallow checkout. On a complete checkout this loop is skipped entirely.
+    - name: Fetch base branch for parent detection
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        HEAD_REF: ${{ github.head_ref }}
+        BASE_REF: ${{ github.base_ref }}
+      run: |
+        # Nothing to set up when there is no PR head (e.g. push events).
+        [ -z "$HEAD_REF" ] && exit 0
+
+        # Fetch the PR head and its base into remote-tracking refs (candidates
+        # that findParentBranch reads), plus main as the fallback base.
+        git fetch --no-tags --prune origin \
+          "+refs/heads/${HEAD_REF}:refs/remotes/origin/${HEAD_REF}" \
+          ${BASE_REF:+"+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"} 2>/dev/null || true
+        git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main" 2>/dev/null || true
+
+        # Deepen the head's history until the merge-base with the selected diff
+        # base is present, capped, with a full fetch only as a last resort.
+        DIFF_BASE="origin/${BASE_REF:-main}"
+        if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+          depth=50
+          while ! git merge-base "$DIFF_BASE" "origin/${HEAD_REF}" >/dev/null 2>&1; do
+            git fetch --no-tags --deepen="$depth" origin \
+              "+refs/heads/${HEAD_REF}:refs/remotes/origin/${HEAD_REF}" 2>/dev/null || true
+            depth=$((depth * 2))
+            if [ "$depth" -gt 4096 ]; then
+              git fetch --no-tags --unshallow origin 2>/dev/null || true
+              break
+            fi
+          done
+        fi
+
     - name: Run AI Code Review
       id: review
       shell: bash
@@ -152,12 +195,20 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
+        BASE_REF: ${{ github.base_ref }}
         CI: true
         DEBUG: ${{ inputs.verbose }}
         VERBOSE: ${{ inputs.verbose }}
       run: |
         # Build CLI command arguments safely - avoid eval/string interpolation.
         CLI_ARGS=("analyze" "-b" "${{ github.head_ref }}" "--directory" "$GITHUB_WORKSPACE")
+
+        # In CI the PR base is authoritative -- pass it as the diff base so the
+        # review uses it directly instead of inferring the parent (which skips a
+        # base that has advanced past the fork point). Empty on push events.
+        if [ -n "$BASE_REF" ]; then
+          CLI_ARGS+=("--base" "$BASE_REF")
+        fi
 
         # Add output format and output file (always JSON)
         CLI_ARGS+=("--output" "json" "--output-file" "review_output.json")

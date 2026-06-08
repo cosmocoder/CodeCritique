@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import * as command from './command.js';
-import { ensureBranchExists, findBaseBranch, getChangedLinesInfo, getFileContentFromGit } from './git.js';
+import { ensureBranchExists, findBaseBranch, findParentBranch, getChangedLinesInfo, getFileContentFromGit } from './git.js';
 
 vi.mock('node:child_process', () => ({
   execSync: vi.fn(),
@@ -85,6 +85,172 @@ describe('findBaseBranch', () => {
     });
 
     findBaseBranch('/custom/path');
+  });
+});
+
+describe('findParentBranch', () => {
+  beforeEach(() => {
+    mockConsoleSelective('warn');
+  });
+
+  it('should detect the nearest ancestor branch in a stacked-PR setup', () => {
+    // main -> feature-A -> feature-B; both are ancestors of feature-B.
+    command.execGitSafe.mockImplementation((cmd, args) => {
+      if (cmd === 'git show-ref') {
+        if (args.includes('refs/heads/feature-B')) {
+          return ''; // target exists locally
+        }
+        throw new Error('not found');
+      }
+      if (cmd === 'git for-each-ref') {
+        return 'feature-A\nfeature-B\nmain\n';
+      }
+      if (cmd === 'git merge-base') {
+        return ''; // --is-ancestor succeeds: both feature-A and main are ancestors
+      }
+      if (cmd === 'git rev-list') {
+        if (args.includes('feature-A..feature-B')) {
+          return '2';
+        }
+        if (args.includes('main..feature-B')) {
+          return '4';
+        }
+      }
+      throw new Error(`unexpected call: ${cmd} ${args}`);
+    });
+
+    // feature-A is the nearer ancestor (2 commits behind vs main's 4) -> parent is feature-A
+    expect(findParentBranch('feature-B')).toBe('feature-A');
+  });
+
+  it('should not pick a branch forked from the middle of the target (child outranking real parent)', () => {
+    // main -> target(commit 1) -> child forks -> target(commit 2).
+    // 'child-from-middle' is NOT an ancestor of target, so it must be excluded
+    // even though the target is only 1 commit ahead of their merge-base.
+    const revListCalls = [];
+    command.execGitSafe.mockImplementation((cmd, args) => {
+      if (cmd === 'git show-ref') {
+        if (args.includes('refs/heads/target')) {
+          return '';
+        }
+        throw new Error('not found');
+      }
+      if (cmd === 'git for-each-ref') {
+        return 'child-from-middle\nmain\ntarget\n';
+      }
+      if (cmd === 'git merge-base') {
+        // --is-ancestor: child is not an ancestor of target; main is.
+        if (args.includes('child-from-middle')) {
+          throw new Error('not an ancestor');
+        }
+        if (args.includes('main')) {
+          return '';
+        }
+      }
+      if (cmd === 'git rev-list') {
+        revListCalls.push(args.join(' '));
+        if (args.includes('main..target')) {
+          return '2';
+        }
+      }
+      throw new Error(`unexpected call: ${cmd} ${args}`);
+    });
+
+    expect(findParentBranch('target')).toBe('main');
+    // The child branch is rejected before any distance is computed for it.
+    expect(revListCalls.some((c) => c.includes('child-from-middle'))).toBe(false);
+  });
+
+  it('should skip a descendant branch that fully contains the target', () => {
+    // 'downstream' contains the target's commits, so it is not an ancestor of the target.
+    command.execGitSafe.mockImplementation((cmd, args) => {
+      if (cmd === 'git show-ref') {
+        if (args.includes('refs/heads/feature-B')) {
+          return '';
+        }
+        throw new Error('not found');
+      }
+      if (cmd === 'git for-each-ref') {
+        return 'downstream\nfeature-B\nmain\n';
+      }
+      if (cmd === 'git merge-base') {
+        if (args.includes('downstream')) {
+          throw new Error('not an ancestor'); // target does not contain downstream's commits
+        }
+        if (args.includes('main')) {
+          return '';
+        }
+      }
+      if (cmd === 'git rev-list') {
+        return '5';
+      }
+      throw new Error(`unexpected call: ${cmd} ${args}`);
+    });
+
+    expect(findParentBranch('feature-B')).toBe('main');
+  });
+
+  it('should prefer a standard base branch when distances tie', () => {
+    // feature-Y and main are both ancestors of feature-X at the same distance.
+    command.execGitSafe.mockImplementation((cmd, args) => {
+      if (cmd === 'git show-ref') {
+        if (args.includes('refs/heads/feature-X')) {
+          return '';
+        }
+        throw new Error('not found');
+      }
+      if (cmd === 'git for-each-ref') {
+        return 'feature-X\nfeature-Y\nmain\n';
+      }
+      if (cmd === 'git merge-base') {
+        return ''; // both are ancestors
+      }
+      if (cmd === 'git rev-list') {
+        return '3'; // identical distance
+      }
+      throw new Error(`unexpected call: ${cmd} ${args}`);
+    });
+
+    expect(findParentBranch('feature-X')).toBe('main');
+  });
+
+  it('should fall back to findBaseBranch when no ancestor parent can be inferred', () => {
+    command.execGitSafe.mockImplementation((cmd, args) => {
+      if (cmd === 'git show-ref') {
+        // target resolves; base branch detection finds 'main'
+        if (args.includes('refs/heads/feature-solo')) {
+          return '';
+        }
+        if (args.includes('refs/heads/main')) {
+          return '';
+        }
+        throw new Error('not found');
+      }
+      if (cmd === 'git for-each-ref') {
+        return 'feature-solo\n'; // only the target exists -> no candidates
+      }
+      throw new Error(`unexpected call: ${cmd} ${args}`);
+    });
+
+    expect(findParentBranch('feature-solo')).toBe('main');
+  });
+
+  it('should use provided working directory', () => {
+    command.execGitSafe.mockImplementation((cmd, args, options) => {
+      expect(options.cwd).toBe('/custom/path');
+      if (cmd === 'git show-ref') {
+        if (args.includes('refs/heads/feature-X')) {
+          return '';
+        }
+        throw new Error('not found');
+      }
+      if (cmd === 'git for-each-ref') {
+        return 'feature-X\n';
+      }
+      return '';
+    });
+
+    findParentBranch('feature-X', '/custom/path');
   });
 });
 

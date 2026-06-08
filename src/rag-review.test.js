@@ -1,7 +1,7 @@
 import { runAnalysis, gatherUnifiedContextForPR } from './rag-analyzer.js';
 import { reviewFile, reviewFiles, reviewPullRequest } from './rag-review.js';
 import { shouldProcessFile } from './utils/file-validation.js';
-import { getChangedLinesInfo, getFileContentFromGit } from './utils/git.js';
+import { ensureBranchExists, findParentBranch, getChangedLinesInfo, getFileContentFromGit } from './utils/git.js';
 import { shouldChunkPR, chunkPRFiles, combineChunkResults } from './utils/pr-chunking.js';
 
 vi.mock('./rag-analyzer.js', () => ({
@@ -19,7 +19,8 @@ vi.mock('./utils/file-validation.js', () => ({
 }));
 
 vi.mock('./utils/git.js', () => ({
-  findBaseBranch: vi.fn().mockReturnValue('main'),
+  ensureBranchExists: vi.fn(),
+  findParentBranch: vi.fn().mockReturnValue('main'),
   getChangedLinesInfo: vi.fn().mockReturnValue({
     hasChanges: true,
     addedLines: [1, 2, 3],
@@ -208,6 +209,38 @@ describe('rag-review', () => {
 
       expect(result.success).toBe(true);
       expect(result.results).toEqual([]);
+    });
+
+    it('should use a pre-detected baseBranch without re-running parent detection', async () => {
+      findParentBranch.mockClear();
+      getChangedLinesInfo.mockClear();
+      runAnalysis.mockResolvedValue({
+        success: true,
+        results: { issues: [], crossFileIssues: [], summary: 'OK' },
+      });
+
+      await reviewPullRequest(['/src/file.js'], { actualBranch: 'feature-B', baseBranch: 'feature-A' });
+
+      // Detection is skipped when the caller supplies the base branch...
+      expect(findParentBranch).not.toHaveBeenCalled();
+      // ...and the supplied base is what the per-file diff is computed against.
+      expect(getChangedLinesInfo).toHaveBeenCalledWith('/src/file.js', 'feature-A', 'feature-B', expect.any(String));
+    });
+
+    it('should detect and ensure the parent branch when none is supplied', async () => {
+      findParentBranch.mockClear();
+      ensureBranchExists.mockClear();
+      findParentBranch.mockReturnValue('main');
+      runAnalysis.mockResolvedValue({
+        success: true,
+        results: { issues: [], crossFileIssues: [], summary: 'OK' },
+      });
+
+      await reviewPullRequest(['/src/file.js'], { actualBranch: 'feature-X' });
+
+      expect(findParentBranch).toHaveBeenCalledWith('feature-X', expect.any(String));
+      // A detected (possibly remote-only) base must be materialized locally before diffing.
+      expect(ensureBranchExists).toHaveBeenCalledWith('main', expect.any(String));
     });
 
     it('should skip files based on exclusion rules', async () => {
