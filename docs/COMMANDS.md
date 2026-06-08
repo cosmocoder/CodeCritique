@@ -10,27 +10,28 @@ codecritique analyze [options]
 
 ### Options
 
-| Option                            | Description                                                                                              | Default       |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------- |
-| `-b, --diff-with <branch>`        | Analyze files changed in the specified branch compared to the base branch (main/master)                  | -             |
-| `-f, --files <files...>`          | Specific files or glob patterns to review                                                                | -             |
-| `--file <file>`                   | Analyze a single file                                                                                    | -             |
-| `-d, --directory <dir>`           | Working directory for git operations (use with --diff-with)                                              | -             |
-| `-o, --output <format>`           | Output format (text, json, markdown)                                                                     | `text`        |
-| `--output-file <file>`            | Save output to file (useful with --output json)                                                          | -             |
-| `--no-color`                      | Disable colored output                                                                                   | `false`       |
-| `--verbose`                       | Show verbose output                                                                                      | `false`       |
-| `--model <model>`                 | LLM model to use (e.g., claude-sonnet-4-5)                                                               | Auto-selected |
-| `--temperature <number>`          | LLM temperature                                                                                          | `0.2`         |
-| `--max-tokens <number>`           | LLM max tokens                                                                                           | `8192`        |
-| `--cache-ttl <ttl>`               | Cache TTL for LLM prompts: "5m" (default, no extra cost) or "1h" (extended, extra cost for cache writes) | `5m`          |
-| `--similarity-threshold <number>` | Threshold for finding similar code examples                                                              | `0.6`         |
-| `--max-examples <number>`         | Max similar code examples to use                                                                         | `5`           |
-| `--concurrency <number>`          | Concurrency for processing multiple files                                                                | `3`           |
-| `--doc <specs...>`                | Custom documents to provide to LLM (format: "Title:./path/to/file.md"). Can be specified multiple times. | -             |
-| `--feedback-path <path>`          | Path to feedback artifacts directory for filtering dismissed issues                                      | -             |
-| `--track-feedback`                | Enable feedback-aware analysis to avoid previously dismissed issues                                      | `false`       |
-| `--feedback-threshold <number>`   | Similarity threshold for feedback filtering (0-1)                                                        | `0.7`         |
+| Option                            | Description                                                                                                                                   | Default       |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| `-b, --diff-with <branch>`        | Review the specified target branch against its auto-detected parent branch (the branch it was forked from; falls back to main/master/develop) | -             |
+| `--base <branch>`                 | Base branch to diff the target against, overriding auto-detection (e.g. the authoritative PR base ref in CI). Use with `--diff-with`          | -             |
+| `-f, --files <files...>`          | Specific files or glob patterns to review                                                                                                     | -             |
+| `--file <file>`                   | Analyze a single file                                                                                                                         | -             |
+| `-d, --directory <dir>`           | Working directory for git operations (use with --diff-with)                                                                                   | -             |
+| `-o, --output <format>`           | Output format (text, json, markdown)                                                                                                          | `text`        |
+| `--output-file <file>`            | Save output to file (useful with --output json)                                                                                               | -             |
+| `--no-color`                      | Disable colored output                                                                                                                        | `false`       |
+| `--verbose`                       | Show verbose output                                                                                                                           | `false`       |
+| `--model <model>`                 | LLM model to use (e.g., claude-sonnet-4-5)                                                                                                    | Auto-selected |
+| `--temperature <number>`          | LLM temperature                                                                                                                               | `0.2`         |
+| `--max-tokens <number>`           | LLM max tokens                                                                                                                                | `8192`        |
+| `--cache-ttl <ttl>`               | Cache TTL for LLM prompts: "5m" (default, no extra cost) or "1h" (extended, extra cost for cache writes)                                      | `5m`          |
+| `--similarity-threshold <number>` | Threshold for finding similar code examples                                                                                                   | `0.6`         |
+| `--max-examples <number>`         | Max similar code examples to use                                                                                                              | `5`           |
+| `--concurrency <number>`          | Concurrency for processing multiple files                                                                                                     | `3`           |
+| `--doc <specs...>`                | Custom documents to provide to LLM (format: "Title:./path/to/file.md"). Can be specified multiple times.                                      | -             |
+| `--feedback-path <path>`          | Path to feedback artifacts directory for filtering dismissed issues                                                                           | -             |
+| `--track-feedback`                | Enable feedback-aware analysis to avoid previously dismissed issues                                                                           | `false`       |
+| `--feedback-threshold <number>`   | Similarity threshold for feedback filtering (0-1)                                                                                             | `0.7`         |
 
 ### Examples
 
@@ -41,8 +42,12 @@ codecritique analyze --file src/components/Button.tsx
 # Analyze multiple files with patterns
 codecritique analyze --files "src/**/*.tsx" "lib/*.js"
 
-# Analyze changes in feature-branch vs main branch (auto-detects base branch)
+# Review changes in a target branch against its auto-detected parent branch
 codecritique analyze --diff-with feature-branch
+
+# Review against an explicit base branch (overrides auto-detection; useful for
+# stacked PRs or in CI where the PR base ref is authoritative)
+codecritique analyze --diff-with feature-B --base feature-A
 
 # Analyze with custom documentation
 codecritique analyze --file src/utils/validation.ts \

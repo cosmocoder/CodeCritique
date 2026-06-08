@@ -29,7 +29,7 @@ import { cleanupClassifier, clearPRComments, getPRCommentsStats, hasPRComments }
 import { ProjectAnalyzer } from './project-analyzer.js';
 import { reviewFile, reviewFiles, reviewPullRequest } from './rag-review.js';
 import { execGitSafe } from './utils/command.js';
-import { ensureBranchExists, findBaseBranch } from './utils/git.js';
+import { ensureBranchExists, findParentBranch } from './utils/git.js';
 import { diagnosticLog, isDebugEnabled, isVerboseEnabled, verboseLog } from './utils/logging.js';
 import { collectPRLevelFindings, getFileLevelIssueCount, hasPRLevelFindings } from './utils/review-results.js';
 import { configureCleanStdoutForDataOutput, isBrokenStdoutPipeError, writeStdout } from './utils/stdout.js';
@@ -46,7 +46,11 @@ program.name('codecritique').description('CLI tool for AI-powered code review us
 program
   .command('analyze')
   .description('Analyze code using dynamic context (RAG approach)')
-  .option('-b, --diff-with <branch>', 'Analyze files changed compared to a branch (triggers PR review mode)')
+  .option(
+    '-b, --diff-with <branch>',
+    'Review the specified target branch against its auto-detected parent branch (triggers PR review mode)'
+  )
+  .option('--base <branch>', 'Base branch to diff the target against, overriding auto-detection (e.g. the authoritative PR base ref in CI)')
   .option('-f, --files <files...>', 'Specific files or glob patterns to review')
   .option('--file <file>', 'Analyze a single file')
   .option('-d, --directory <dir>', 'Working directory for git operations (use with --diff-with)')
@@ -163,12 +167,12 @@ Examples:
   $ codecritique analyze --directory src/components
   $ codecritique analyze --file src/utils/validation.ts
   $ codecritique analyze --files "src/**/*.tsx" "lib/*.js"
-  $ codecritique analyze -b main
+  $ codecritique analyze -b feature-branch
   $ codecritique analyze --doc "Our Eng Guidelines:./ENGINEERING_GUIDELINES.md" --file src/utils/validation.ts
   $ codecritique analyze --diff-with feature-branch -d /path/to/repo
   $ codecritique analyze --output json > review-results.json
   $ codecritique analyze --track-feedback --feedback-path ./feedback-artifacts --file src/utils/validation.ts
-  $ codecritique analyze --track-feedback --feedback-threshold 0.8 -b main
+  $ codecritique analyze --track-feedback --feedback-threshold 0.8 -b feature-branch
   $ codecritique embeddings:generate --directory src
   $ codecritique embeddings:generate --exclude "**/*.test.js" "**/*.spec.js"
   $ codecritique embeddings:generate --exclude-file .embedignore
@@ -357,23 +361,26 @@ async function runCodeReview(options) {
     diagnosticLog(chalk.bold.blue('AI Code Review (RAG Approach) - Starting analysis...'));
 
     // Determine the review mode based on options
-    // Only support: single file, specific files, or diff with branch
+    // Only support: single file, specific files, or target-branch diff review
     if (options.diffWith) {
+      const targetBranch = options.diffWith;
       // Use directory option as working directory for git commands if specified
       const gitWorkingDir = options.directory ? path.resolve(options.directory) : process.cwd();
-      const changedFiles = getChangedFiles(options.diffWith, gitWorkingDir);
+      const { changedFiles, baseBranch } = getChangedFiles(targetBranch, gitWorkingDir, options.base);
       if (changedFiles.length === 0) {
-        const message = `No changed files found compared to branch '${options.diffWith}'. Exiting.`;
+        const message = `No changed files found in target branch '${targetBranch}' compared to its detected parent branch. Exiting.`;
         diagnosticLog(chalk.yellow(message));
         await emitEmptyReviewOutputIfNeeded(options, { success: true, results: [], message });
         return;
       }
-      operationDescription = `${changedFiles.length} files changed vs ${options.diffWith}`;
-      // Add the actual branch name to reviewOptions
+      operationDescription = `${changedFiles.length} files changed in target branch ${targetBranch}`;
+      // Add the actual branch name to reviewOptions. Pass the already-detected
+      // parent branch so the review pipeline doesn't re-run parent detection.
       const enhancedReviewOptions = {
         ...reviewOptions,
-        actualBranch: options.diffWith,
-        diffWith: options.diffWith,
+        actualBranch: targetBranch,
+        diffWith: targetBranch,
+        baseBranch,
       };
       reviewTask = reviewPullRequest(changedFiles, enhancedReviewOptions);
     }
@@ -400,7 +407,7 @@ async function runCodeReview(options) {
       console.error(chalk.red('Error: You must specify one of the following:'));
       console.error(chalk.yellow('  --file <file>                    Analyze a single file'));
       console.error(chalk.yellow('  --files <files...>               Analyze specific files or glob patterns'));
-      console.error(chalk.yellow('  -b, --diff-with <branch>         Analyze files changed in a branch'));
+      console.error(chalk.yellow('  -b, --diff-with <branch>         Review a target branch against its auto-detected parent branch'));
       console.error(chalk.gray('\nOptional:'));
       console.error(chalk.gray('  -d, --directory <dir>            Working directory (for git operations with --diff-with)'));
       console.error(chalk.gray('\nExamples:'));
@@ -973,24 +980,36 @@ async function expandFilePatterns(patterns, baseDir = process.cwd()) {
 }
 
 /**
- * Get list of files changed in a branch compared to the base branch (main/master).
- * This shows what changes the specified branch has compared to the base.
+ * Get list of files changed in the target branch compared to its base branch.
+ * The supplied branch is the branch being reviewed, not the base branch.
  *
- * @param {string} branch - Branch to analyze (the feature/target branch)
+ * When `explicitBase` is given (e.g. the authoritative PR base ref in CI) it is
+ * used directly. Otherwise the parent is auto-detected (see findParentBranch),
+ * so stacked PRs are diffed against the branch they were forked from rather than
+ * always against main/master/develop.
+ *
+ * @param {string} targetBranch - Branch to analyze (the feature/target branch)
  * @param {string} workingDir - Directory to run git commands in (optional, defaults to cwd)
- * @returns {Array<string>} Array of changed file paths relative to git root
+ * @param {string} [explicitBase] - Base branch to diff against, overriding auto-detection
+ * @returns {{ changedFiles: Array<string>, baseBranch: string|null }} Changed file paths
+ *   (absolute) and the base branch they were diffed against (null on error).
  */
-function getChangedFiles(branch, workingDir = process.cwd()) {
+function getChangedFiles(targetBranch, workingDir = process.cwd(), explicitBase = undefined) {
   try {
     // Get git root directory
     const gitRoot = execSync('git rev-parse --show-toplevel', { cwd: workingDir }).toString().trim();
     diagnosticLog(chalk.gray(`Git repository: ${gitRoot}`));
 
-    // Ensure the branch exists locally (fetch if needed)
-    ensureBranchExists(branch, workingDir);
+    // Ensure the target branch exists locally (fetch if needed)
+    ensureBranchExists(targetBranch, workingDir);
 
-    // Find the base branch (main/master)
-    const baseBranch = findBaseBranch(workingDir);
+    // Use the explicitly provided base (authoritative, e.g. the PR base ref in CI)
+    // when given; otherwise detect the parent branch the target was forked from
+    // (main/master/develop, or another feature branch in stacked-PR workflows).
+    const baseBranch = explicitBase || findParentBranch(targetBranch, workingDir);
+    if (explicitBase) {
+      diagnosticLog(chalk.gray(`Using explicit base branch '${baseBranch}' (auto-detection skipped)`));
+    }
 
     // Ensure the base branch exists locally as well (crucial for diff operations)
     try {
@@ -1001,12 +1020,13 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
       // Continue with the original baseBranch name, it might work with remote refs
     }
 
-    diagnosticLog(chalk.gray(`Comparing ${branch} against ${baseBranch}...`));
+    diagnosticLog(chalk.gray(`Reviewing target branch '${targetBranch}' against base branch '${baseBranch}'...`));
 
-    // Use three-dot notation to get changes in branch compared to base
-    // This shows commits that are in 'branch' but not in 'baseBranch'
+    // Use three-dot notation to get changes in the target branch compared to the base.
     // By adding --diff-filter=d, we exclude deleted files from the list.
-    const gitOutput = execGitSafe('git diff', ['--name-only', '--diff-filter=d', `${baseBranch}...${branch}`], { cwd: gitRoot }).toString();
+    const gitOutput = execGitSafe('git diff', ['--name-only', '--diff-filter=d', `${baseBranch}...${targetBranch}`], {
+      cwd: gitRoot,
+    }).toString();
 
     // Split, filter empty lines, resolve paths, and check existence
     const changedFiles = gitOutput
@@ -1015,14 +1035,14 @@ function getChangedFiles(branch, workingDir = process.cwd()) {
       .map((file) => path.resolve(gitRoot, file)); // Get absolute path
 
     if (changedFiles.length > 0) {
-      diagnosticLog(chalk.gray(`Found ${changedFiles.length} changed files in ${branch} vs ${baseBranch}`));
+      diagnosticLog(chalk.gray(`Found ${changedFiles.length} changed files in target branch '${targetBranch}' vs base '${baseBranch}'`));
     }
 
-    return changedFiles;
+    return { changedFiles, baseBranch };
   }
   catch (err) {
     console.error(chalk.red('Error getting git diff:'), err.message);
-    return [];
+    return { changedFiles: [], baseBranch: null };
   }
 }
 

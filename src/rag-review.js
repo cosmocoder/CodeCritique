@@ -10,7 +10,7 @@ import path from 'path';
 import chalk from 'chalk';
 import { runAnalysis, gatherUnifiedContextForPR } from './rag-analyzer.js';
 import { shouldProcessFile } from './utils/file-validation.js';
-import { findBaseBranch, getChangedLinesInfo, getFileContentFromGit } from './utils/git.js';
+import { ensureBranchExists, findParentBranch, getChangedLinesInfo, getFileContentFromGit } from './utils/git.js';
 import { detectFileType, detectLanguageFromExtension } from './utils/language-detection.js';
 import { verboseLog } from './utils/logging.js';
 import { shouldChunkPR, chunkPRFiles, combineChunkResults } from './utils/pr-chunking.js';
@@ -209,8 +209,9 @@ async function reviewPullRequest(changedFilePaths, options = {}) {
  * @param {boolean} [options.verbose=false] - Enable verbose progress logging
  * @param {number} [options.concurrency=3] - Maximum number of fallback per-file reviews to run in parallel
  * @param {string} [options.directory] - Working directory for git operations
- * @param {string} [options.diffWith='HEAD'] - Branch or ref to compare against
+ * @param {string} [options.diffWith='HEAD'] - Target branch or ref being reviewed against the detected base branch
  * @param {string} [options.actualBranch] - Actual target branch used for content retrieval
+ * @param {string} [options.baseBranch] - Pre-detected parent/base branch to diff against; detected here if omitted
  * @param {boolean} [options.skipChunking=false] - Skip PR chunking, used internally for chunk review recursion
  * @returns {Promise<Object>} Aggregated review results
  */
@@ -221,11 +222,26 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
 
     // Step 1: Get the base branch and collect diff info for all files in the PR
     const workingDir = options.directory ? path.resolve(options.directory) : process.cwd();
-    const baseBranch = findBaseBranch(workingDir);
     const targetBranch = options.diffWith || 'HEAD'; // The feature branch being reviewed
 
     // Get the actual branch name from options passed from index.js
     const actualTargetBranch = options.actualBranch || targetBranch;
+
+    // Prefer the parent branch already detected (and materialized locally) by the
+    // caller to avoid re-running the O(branches) detection. Only detect here when
+    // this function is invoked directly without a pre-detected base.
+    let baseBranch = options.baseBranch;
+    if (!baseBranch) {
+      baseBranch = findParentBranch(actualTargetBranch, workingDir);
+      // Detection may return a branch that exists only on the remote; ensure it
+      // resolves locally before it is used for diffing.
+      try {
+        ensureBranchExists(baseBranch, workingDir);
+      }
+      catch (error) {
+        verboseLog(verbose, chalk.yellow(`Could not ensure base branch '${baseBranch}' exists locally: ${error.message}`));
+      }
+    }
 
     verboseLog(verbose, chalk.gray(`Base branch: ${baseBranch}, Target branch: ${targetBranch}`));
 
@@ -319,7 +335,9 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
     verboseLog(
       verbose,
       chalk.green(
-        `De-duplicated context: ${deduplicatedCodeExamples.length} code examples, ${deduplicatedGuidelines.length} guidelines, ${deduplicatedPRComments.length} PR comments, ${deduplicatedCustomDocChunks.length} custom doc chunks`
+        `De-duplicated context: ${deduplicatedCodeExamples.length} code examples, ${deduplicatedGuidelines.length} guidelines, ${
+          deduplicatedPRComments.length
+        } PR comments, ${deduplicatedCustomDocChunks.length} custom doc chunks`
       )
     );
 
