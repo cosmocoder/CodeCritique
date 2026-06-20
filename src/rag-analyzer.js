@@ -42,6 +42,20 @@ const embeddingsSystem = getDefaultEmbeddingsSystem();
 // Track if semantic similarity has been initialized
 let semanticSimilarityInitialized = false;
 
+async function fileExists(filePath) {
+  try {
+    await fs.promises.access(filePath);
+    return true;
+  }
+  catch {
+    return false;
+  }
+}
+
+async function readTextFile(filePath) {
+  return await fs.promises.readFile(filePath, 'utf8');
+}
+
 /**
  * Initialize semantic similarity for feedback filtering
  * Uses the shared embeddings system from feedback-loader.js
@@ -448,7 +462,7 @@ async function runAnalysis(filePath, options = {}) {
     }
 
     // Check if file exists
-    if (!fs.existsSync(filePath)) {
+    if (!(await fileExists(filePath))) {
       throw new Error(`File not found: ${filePath}`);
     }
 
@@ -458,11 +472,11 @@ async function runAnalysis(filePath, options = {}) {
     if (options.diffOnly && options.diffContent) {
       content = options.diffContent;
       // For PR reviews, always read the full file content for context awareness
-      fullFileContent = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : null;
+      fullFileContent = await readTextFile(filePath);
       verboseLog(options, chalk.blue(`Analyzing diff only for ${path.basename(filePath)}`));
     }
     else {
-      content = fs.readFileSync(filePath, 'utf8');
+      content = await readTextFile(filePath);
       fullFileContent = content;
       verboseLog(options, chalk.blue(`Analyzing full file ${path.basename(filePath)}`));
     }
@@ -1487,7 +1501,7 @@ async function getPRCommentContext(filePath, options = {}) {
       verboseLog(options, chalk.blue(`🔍 Using pre-computed query embedding for PR comment search`));
       // We still need the file content for the search function, but not for embedding
       try {
-        fileContent = fs.readFileSync(filePath, 'utf8');
+        fileContent = await readTextFile(filePath);
         const maxEmbeddingLength = 8000; // Keep consistent with original truncation
         contentForSearch = fileContent.length > maxEmbeddingLength ? fileContent.substring(0, maxEmbeddingLength) : fileContent;
       }
@@ -1505,7 +1519,7 @@ async function getPRCommentContext(filePath, options = {}) {
     else {
       // Fallback to original behavior if no pre-computed embedding provided
       try {
-        fileContent = fs.readFileSync(filePath, 'utf8');
+        fileContent = await readTextFile(filePath);
       }
       catch (readError) {
         debug(`[getPRCommentContext] Could not read file ${filePath}: ${readError.message}`);

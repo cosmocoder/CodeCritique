@@ -8,7 +8,7 @@ vi.mock('node:fs', () => ({
   default: {
     readdirSync: vi.fn(),
     statSync: vi.fn(),
-    promises: { readFile: vi.fn() },
+    promises: { readFile: vi.fn(), stat: vi.fn() },
   },
 }));
 
@@ -61,6 +61,7 @@ vi.mock('../utils/logging.js', () => ({ debug: vi.fn(), verboseLog: vi.fn() }));
 
 const setupFileSystemMocks = (content = 'const x = 1;') => {
   fs.statSync.mockReturnValue({ size: 1000, mtime: new Date(), isFile: () => true });
+  fs.promises.stat.mockResolvedValue({ size: 1000, mtime: new Date(), isFile: () => true });
   fs.promises.readFile.mockResolvedValue(content);
   fs.readdirSync.mockReturnValue([]);
 };
@@ -291,7 +292,7 @@ describe('FileProcessor', () => {
 
     it('should skip files that fail shouldProcessFile check', async () => {
       shouldProcessFile.mockReturnValue(false);
-      fs.statSync.mockReturnValue({ size: 1000, mtime: new Date() });
+      fs.promises.stat.mockResolvedValue({ size: 1000, mtime: new Date() });
       fs.readdirSync.mockReturnValue([]);
       const result = await processor.processBatchEmbeddings(['/test/file.js']);
       expect(result.excluded).toBeGreaterThan(0);
@@ -337,14 +338,14 @@ describe('FileProcessor', () => {
     });
 
     it('should handle file read errors', async () => {
-      fs.statSync.mockReturnValue({ size: 1000, mtime: new Date() });
+      fs.promises.stat.mockResolvedValue({ size: 1000, mtime: new Date() });
       fs.promises.readFile.mockRejectedValue(new Error('Read error'));
       const result = await processor.processBatchEmbeddings(['/test/file.js'], { baseDir: '/test' });
       expect(result.failed).toBeGreaterThanOrEqual(0);
     });
 
     it('should skip large files', async () => {
-      fs.statSync.mockReturnValue({ size: 10 * 1024 * 1024, mtime: new Date() });
+      fs.promises.stat.mockResolvedValue({ size: 10 * 1024 * 1024, mtime: new Date() });
       const result = await processor.processBatchEmbeddings(['/test/large-file.js'], {
         maxFileSizeBytes: 1024 * 1024,
         baseDir: '/test',
@@ -353,9 +354,7 @@ describe('FileProcessor', () => {
     });
 
     it('should handle file stat error', async () => {
-      fs.statSync.mockImplementation(() => {
-        throw new Error('Stat error');
-      });
+      fs.promises.stat.mockRejectedValue(new Error('Stat error'));
       const onProgress = vi.fn();
       const result = await processor.processBatchEmbeddings(['/test/file.js'], { baseDir: '/test', onProgress });
       expect(result.failed).toBe(1);
@@ -518,7 +517,7 @@ describe('FileProcessor', () => {
     });
 
     it('should skip large documentation files', async () => {
-      fs.statSync.mockReturnValue({ size: 6 * 1024 * 1024, mtime: new Date() });
+      fs.promises.stat.mockResolvedValue({ size: 6 * 1024 * 1024, mtime: new Date() });
       fs.promises.readFile.mockResolvedValue('# Large doc');
       expect(await processor.processBatchEmbeddings(['/test/large.md'], { baseDir: '/test' })).toBeDefined();
     });
@@ -620,11 +619,11 @@ describe('FileProcessor', () => {
     });
 
     it('should handle document chunk processing errors', async () => {
-      fs.statSync.mockImplementation((filePath) => {
+      fs.promises.stat.mockImplementation((filePath) => {
         if (filePath.includes('error')) {
-          throw new Error('Stat error');
+          return Promise.reject(new Error('Stat error'));
         }
-        return { size: 1000, mtime: new Date() };
+        return Promise.resolve({ size: 1000, mtime: new Date() });
       });
       fs.promises.readFile.mockResolvedValue('# Title');
       expect(await processor.processBatchEmbeddings(['/test/error.md'], { baseDir: '/test' })).toBeDefined();

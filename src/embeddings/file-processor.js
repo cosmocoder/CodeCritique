@@ -475,7 +475,7 @@ export class FileProcessor {
       const relativePath = path.relative(sharedState.baseDir, absoluteFilePath);
 
       try {
-        const stats = fs.statSync(absoluteFilePath);
+        const stats = await fs.promises.stat(absoluteFilePath);
         const language = detectLanguageFromExtension(path.extname(absoluteFilePath));
 
         if (
