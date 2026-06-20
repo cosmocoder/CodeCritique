@@ -40,6 +40,37 @@ const FILE_EMBEDDINGS_TABLE = TABLE_NAMES.FILE_EMBEDDINGS;
 const DOCUMENT_CHUNK_TABLE = TABLE_NAMES.DOCUMENT_CHUNK;
 const PR_COMMENTS_TABLE = TABLE_NAMES.PR_COMMENTS;
 const PROJECT_SUMMARIES_TABLE = TABLE_NAMES.PROJECT_SUMMARIES;
+const DELETE_BATCH_SIZE = 100;
+
+function buildIdInFilter(ids) {
+  return `id IN (${ids.map((id) => `'${escapeSqlString(id)}'`).join(', ')})`;
+}
+
+async function deleteRecordsById(table, records, warningMessage) {
+  let deletedCount = 0;
+
+  for (let start = 0; start < records.length; start += DELETE_BATCH_SIZE) {
+    const batch = records.slice(start, start + DELETE_BATCH_SIZE);
+
+    try {
+      await table.delete(buildIdInFilter(batch.map((record) => record.id)));
+      deletedCount += batch.length;
+    }
+    catch {
+      for (const record of batch) {
+        try {
+          await table.delete(`id = '${escapeSqlString(record.id)}'`);
+          deletedCount++;
+        }
+        catch (deleteError) {
+          console.warn(chalk.yellow(warningMessage(record, deleteError)));
+        }
+      }
+    }
+  }
+
+  return deletedCount;
+}
 
 // ============================================================================
 // DATABASE MANAGER CLASS
@@ -620,9 +651,10 @@ export class DatabaseManager {
     const livePathSet = new Set(Array.from(livePaths));
     const records = await table
       .query()
+      .select(['id', 'path', 'type'])
       .where(`project_path = '${escapeSqlString(resolvedProjectPath)}'`)
       .toArray();
-    let deletedCount = 0;
+    const recordsToDelete = [];
 
     for (const record of records) {
       if (record.type === 'directory-structure') {
@@ -633,16 +665,14 @@ export class DatabaseManager {
         continue;
       }
 
-      try {
-        await table.delete(`id = '${escapeSqlString(record.id)}'`);
-        deletedCount++;
-      }
-      catch (deleteError) {
-        console.warn(chalk.yellow(`Warning: Could not prune file embedding ${record.id}: ${deleteError.message}`));
-      }
+      recordsToDelete.push(record);
     }
 
-    return deletedCount;
+    return await deleteRecordsById(
+      table,
+      recordsToDelete,
+      (record, deleteError) => `Warning: Could not prune file embedding ${record.id}: ${deleteError.message}`
+    );
   }
 
   /**

@@ -450,7 +450,7 @@ describe('FileProcessor', () => {
           .mockResolvedValue([{ id: 'old-record', path: 'file.js', content_hash: 'different', last_modified: new Date().toISOString() }]),
       });
       const result = await processor.processBatchEmbeddings(['/test/file.js'], { baseDir: '/test' });
-      expect(mockTable.delete).toHaveBeenCalled();
+      expect(mockTable.delete).toHaveBeenCalledWith("id IN ('old-record')");
       expect(result.processed).toBeGreaterThanOrEqual(0);
     });
 
