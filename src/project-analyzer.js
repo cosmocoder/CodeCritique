@@ -16,6 +16,8 @@ import { isDocumentationFile, isTestFile } from './utils/file-validation.js';
 import { verboseLog } from './utils/logging.js';
 import { escapeSqlString } from './utils/string-utils.js';
 
+const TERM_SEARCH_CONTENT_CANDIDATE_LIMIT = 500;
+
 // Consolidated file classification configuration
 const FILE_PATTERNS = {
   config: {
@@ -383,14 +385,18 @@ export class ProjectAnalyzer {
       // Unified query function
       const queryFiles = async (config) => {
         try {
-          let query = table.query().select(['path', 'name', 'content', 'type', 'language']);
-
           if (config.whereClause) {
-            query = query.where(`${projectPathFilter} AND (${config.whereClause})`);
+            return await table
+              .query()
+              .select(['path', 'name', 'content', 'type', 'language'])
+              .where(`${projectPathFilter} AND (${config.whereClause})`)
+              .limit(config.limit || 30)
+              .toArray();
           }
           else if (config.terms) {
-            // For term-based searches, query ALL files and sort by depth to prioritize shallow config files
-            const allFiles = await table.query().select(['path', 'name', 'content', 'type', 'language']).where(projectPathFilter).toArray(); // NO LIMIT - get all files
+            // For term-based searches, query metadata first and only fetch content for
+            // the shallow candidate set used for matching.
+            const allFiles = await table.query().select(['path', 'name', 'type', 'language']).where(projectPathFilter).toArray();
 
             // Sort by path depth (shorter paths first) to prioritize config files
             allFiles.sort((a, b) => {
@@ -400,24 +406,54 @@ export class ProjectAnalyzer {
             });
 
             // Take only the first 500 after sorting to ensure we have shallow files
-            const sortedFiles = allFiles.slice(0, 500);
+            const sortedFiles = allFiles.slice(0, TERM_SEARCH_CONTENT_CANDIDATE_LIMIT);
+            if (sortedFiles.length === 0) {
+              return [];
+            }
 
-            return sortedFiles.filter((result) => {
-              const content = (result.content || '').toLowerCase();
-              const pathName = (result.path || '').toLowerCase();
-              const name = (result.name || '').toLowerCase();
-              const matches = config.terms.some(
-                (term) => content.includes(term.toLowerCase()) || pathName.includes(term.toLowerCase()) || name.includes(term.toLowerCase())
-              );
+            const candidatePaths = sortedFiles.map((file) => file.path).filter(Boolean);
+            const contentByPath = new Map();
+            if (candidatePaths.length > 0) {
+              const pathList = candidatePaths.map((candidatePath) => `'${escapeSqlString(candidatePath)}'`).join(', ');
+              const contentResults = await table
+                .query()
+                .select(['path', 'content'])
+                .where(`${projectPathFilter} AND path IN (${pathList})`)
+                .limit(TERM_SEARCH_CONTENT_CANDIDATE_LIMIT)
+                .toArray();
 
-              return matches;
-            });
+              for (const result of contentResults) {
+                contentByPath.set(result.path, result.content || '');
+              }
+            }
+
+            return sortedFiles
+              .filter((result) => {
+                const content = (contentByPath.get(result.path) || '').toLowerCase();
+                const pathName = (result.path || '').toLowerCase();
+                const name = (result.name || '').toLowerCase();
+                const matches = config.terms.some(
+                  (term) =>
+                    content.includes(term.toLowerCase()) || pathName.includes(term.toLowerCase()) || name.includes(term.toLowerCase())
+                );
+
+                return matches;
+              })
+              .map((result) => {
+                return {
+                  ...result,
+                  content: contentByPath.get(result.path) || '',
+                };
+              });
           }
           else {
-            query = query.where(projectPathFilter);
+            return await table
+              .query()
+              .select(['path', 'name', 'content', 'type', 'language'])
+              .where(projectPathFilter)
+              .limit(config.limit || 30)
+              .toArray();
           }
-
-          return await query.limit(config.limit || 30).toArray();
         }
         catch (error) {
           verboseLog({}, chalk.yellow(`     ⚠️ Query failed for ${config.category}: ${error.message}`));
