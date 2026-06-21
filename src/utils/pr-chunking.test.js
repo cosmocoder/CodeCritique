@@ -59,6 +59,21 @@ describe('shouldChunkPR', () => {
       const result = shouldChunkPR(prFiles);
       expect(result.recommendedChunks).toBeGreaterThan(1);
     });
+
+    it('should not chunk only because a huge file has a tiny diff', () => {
+      const prFiles = [
+        {
+          filePath: 'src/huge.js',
+          diffContent: '@@ -10,1 +10,1 @@\n-old value\n+new value',
+          content: Array.from({ length: 10000 }, (_, index) => `line ${index + 1}`).join('\n'),
+        },
+      ];
+
+      const result = shouldChunkPR(prFiles, { maxTotalFullContentTokens: 1000 });
+
+      expect(result.fullContentTokens).toBeGreaterThan(result.plannedFileContextTokens);
+      expect(result.shouldChunk).toBe(false);
+    });
   });
 
   describe('edge cases', () => {
@@ -118,6 +133,44 @@ describe('chunkPRFiles', () => {
       const prFiles = [{ filePath: 'src/file.js', diffContent: 'abc', content: 'def' }];
       const chunks = chunkPRFiles(prFiles);
       expect(chunks[0].totalTokens).toBeGreaterThan(0);
+    });
+
+    it('should attach holistic context plans to chunked files', () => {
+      const prFiles = [
+        {
+          filePath: 'src/huge.js',
+          diffContent: '@@ -10,1 +10,1 @@\n-old value\n+new value',
+          content: Array.from({ length: 10000 }, (_, index) => `line ${index + 1}`).join('\n'),
+        },
+      ];
+
+      const chunks = chunkPRFiles(prFiles, 35000, { maxTotalFullContentTokens: 1000 });
+
+      expect(chunks[0].files[0].holisticContextPlan.mode).toBe('focused');
+      expect(chunks[0].files[0].estimatedTokens).toBe(chunks[0].totalTokens);
+    });
+
+    it('should shrink focused context plans instead of truncating content when chunking focused files', () => {
+      const content = Array.from({ length: 2000 }, (_, index) => `line ${index + 1}`).join('\n');
+      const scatteredDiff = [
+        'diff --git a/src/huge.js b/src/huge.js',
+        '--- a/src/huge.js',
+        '+++ b/src/huge.js',
+        ...Array.from({ length: 60 }, (_, index) => {
+          const line = index * 30 + 10;
+          return `@@ -${line},1 +${line},1 @@\n-line ${line}\n+line ${line} changed`;
+        }),
+      ].join('\n');
+
+      const chunks = chunkPRFiles([{ filePath: 'src/huge.js', diffContent: scatteredDiff, content }], 1500, {
+        maxTotalFullContentTokens: 1,
+      });
+      const chunkedFile = chunks[0].files[0];
+
+      expect(chunkedFile.holisticContextPlan.mode).toBe('focused');
+      expect(chunkedFile.holisticContextPlan.maxFocusedContextTokens).toBeLessThan(1500);
+      expect(chunkedFile.truncatedForChunk).toBeUndefined();
+      expect(chunks.every((chunk) => chunk.totalTokens <= 1500)).toBe(true);
     });
   });
 
@@ -182,6 +235,79 @@ describe('chunkPRFiles', () => {
       expect(combinedDiff).toContain('changed sentinel-0');
       expect(combinedDiff).toContain('changed sentinel-45');
       expect(combinedDiff).toContain('changed sentinel-89');
+    });
+
+    it('should clear whole-file diffInfo on focused split parts so each part anchors its own diff slice', () => {
+      const hugeDiff = [
+        'diff --git a/src/huge.js b/src/huge.js',
+        '--- a/src/huge.js',
+        '+++ b/src/huge.js',
+        ...Array.from({ length: 90 }, (_, i) => `@@ -${i + 1},1 +${i + 1},1 @@\n-context ${i}\n+changed sentinel-${i} ${'x'.repeat(5000)}`),
+      ].join('\n');
+      const prFiles = [
+        {
+          filePath: 'src/huge.js',
+          diffContent: hugeDiff,
+          content: Array.from({ length: 200 }, (_, index) => `line ${index + 1}`).join('\n'),
+          diffInfo: {
+            addedLines: Array.from({ length: 90 }, (_, index) => ({ lineNumber: index + 1, content: `changed ${index}` })),
+          },
+        },
+      ];
+
+      const chunks = chunkPRFiles(prFiles, 35000, { maxTotalFullContentTokens: 1 });
+      const splitFiles = chunks.flatMap((chunk) => chunk.files);
+
+      expect(splitFiles.length).toBeGreaterThan(1);
+      expect(splitFiles.every((file) => file.diffSplitForChunk)).toBe(true);
+      expect(splitFiles.every((file) => file.diffInfo === undefined)).toBe(true);
+    });
+
+    it('should preserve hunk headers on char-split diff continuations for focused context anchoring', () => {
+      const hugeDiff = [
+        'diff --git a/src/huge.js b/src/huge.js',
+        '--- a/src/huge.js',
+        '+++ b/src/huge.js',
+        `@@ -150,1 +150,1 @@\n-old\n+${'x'.repeat(120000)}`,
+      ].join('\n');
+
+      const chunks = chunkPRFiles([{ filePath: 'src/huge.js', diffContent: hugeDiff, content: 'y'.repeat(1200) }], 35000, {
+        maxTotalFullContentTokens: 1,
+      });
+      const splitFiles = chunks.flatMap((chunk) => chunk.files);
+
+      expect(splitFiles.length).toBeGreaterThan(1);
+      expect(splitFiles.slice(1).every((file) => file.diffContent.includes('@@ -150,1 +150,1 @@'))).toBe(true);
+    });
+
+    it('should adjust char-split continuation hunk headers toward the slice line range', () => {
+      const hugeDiff = [
+        'diff --git a/src/huge.js b/src/huge.js',
+        '--- a/src/huge.js',
+        '+++ b/src/huge.js',
+        '@@ -150,0 +150,2000 @@',
+        ...Array.from({ length: 2000 }, (_, index) => `+changed ${index} ${'x'.repeat(90)}`),
+      ].join('\n');
+
+      const chunks = chunkPRFiles(
+        [
+          {
+            filePath: 'src/huge.js',
+            diffContent: hugeDiff,
+            content: Array.from({ length: 2500 }, (_, index) => `line ${index + 1}`).join('\n'),
+          },
+        ],
+        35000,
+        { maxTotalFullContentTokens: 1 }
+      );
+      const splitFiles = chunks.flatMap((chunk) => chunk.files);
+      const continuationStart = splitFiles
+        .slice(1)
+        .map((file) => file.diffContent.match(/@@ -150,0 \+(\d+),2000 @@/)?.[1])
+        .find(Boolean);
+
+      expect(splitFiles.length).toBeGreaterThan(1);
+      expect(Number(continuationStart)).toBeGreaterThan(150);
     });
 
     it('should keep split diff parts within budget for tiny budgets with large headers', () => {

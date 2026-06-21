@@ -9,6 +9,7 @@ import { execSync } from 'child_process';
 import path from 'path';
 import chalk from 'chalk';
 import { execGitSafe } from './command.js';
+import { parseDiffLineInfo } from './diff-lines.js';
 import { verboseLog } from './logging.js';
 
 /**
@@ -317,33 +318,7 @@ export function getChangedLinesInfo(filePath, baseBranch, targetBranch, workingD
       return { hasChanges: false, addedLines: [], removedLines: [], contextLines: [] };
     }
 
-    const lines = diffOutput.split('\n');
-    const addedLines = [];
-    const removedLines = [];
-    const contextLines = [];
-
-    let currentLineNumber = 0;
-
-    for (const line of lines) {
-      if (line.startsWith('@@')) {
-        // Parse line numbers from diff header like "@@ -10,7 +10,8 @@"
-        const match = line.match(/@@ -(\d+),?\d* \+(\d+),?\d* @@/);
-        if (match) {
-          currentLineNumber = parseInt(match[2]);
-        }
-      }
-      else if (line.startsWith('+') && !line.startsWith('+++')) {
-        addedLines.push({ lineNumber: currentLineNumber, content: line.substring(1) });
-        currentLineNumber++;
-      }
-      else if (line.startsWith('-') && !line.startsWith('---')) {
-        removedLines.push({ content: line.substring(1) });
-      }
-      else if (line.startsWith(' ')) {
-        contextLines.push({ lineNumber: currentLineNumber, content: line.substring(1) });
-        currentLineNumber++;
-      }
-    }
+    const { addedLines, removedLines, contextLines } = parseDiffLineInfo(diffOutput);
 
     return {
       hasChanges: addedLines.length > 0 || removedLines.length > 0,

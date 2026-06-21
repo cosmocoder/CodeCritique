@@ -1,12 +1,17 @@
 import chalk from 'chalk';
 import { verboseLog } from './logging.js';
+import {
+  CHARS_PER_ESTIMATED_TOKEN,
+  diffCost,
+  fileCost,
+  fitHolisticPlanToChunk,
+  mergeHolisticFileContextPlans,
+  planContextCost,
+  rawFullContentCost,
+  estimatePrContextTokens,
+} from './pr-file-context.js';
 
-const CHARS_PER_ESTIMATED_TOKEN = 3;
 const FULL_CONTENT_CONTEXT_TOKEN_RATIO = 0.25;
-
-function estimateTokens(text) {
-  return Math.ceil((text?.length || 0) / CHARS_PER_ESTIMATED_TOKEN);
-}
 
 /**
  * Determines if a PR should be chunked based on estimated token usage
@@ -16,21 +21,26 @@ function estimateTokens(text) {
  * @returns {Object} Decision object with shouldChunk flag and estimates
  */
 export function shouldChunkPR(prFiles, options = {}) {
-  // IMPORTANT: The holistic PR prompt includes BOTH full file content AND diff content
-  // for each file, plus context (code examples, guidelines, PR comments, custom docs)
+  // IMPORTANT: The holistic PR prompt includes diff content plus adaptive file context:
+  // full content while it fits the budget, focused changed-line windows for very large files/PRs.
+  const holisticContextPlans = mergeHolisticFileContextPlans(prFiles, options, options.holisticContextPlans);
 
   // Calculate tokens for diff content
   const diffTokens = prFiles.reduce((sum, file) => {
-    return sum + estimateTokens(file.diffContent);
+    return sum + diffCost(file);
   }, 0);
 
-  // Calculate tokens for full file content (included in prompt for context awareness)
+  // Calculate raw full file tokens for observability
   const fullContentTokens = prFiles.reduce((sum, file) => {
-    return sum + estimateTokens(file.content);
+    return sum + rawFullContentCost(file);
   }, 0);
 
-  // Total file-related tokens (both diff AND full content are sent)
-  const fileTokens = diffTokens + fullContentTokens;
+  const plannedFileContextTokens = holisticContextPlans.reduce((sum, plan) => {
+    return sum + planContextCost(plan);
+  }, 0);
+
+  // Total file-related tokens (diff plus planned full/focused context)
+  const fileTokens = diffTokens + plannedFileContextTokens;
 
   // Estimate context overhead (code examples, guidelines, PR comments, custom docs, project summary)
   // This is typically 10-30k tokens depending on project size
@@ -48,7 +58,7 @@ export function shouldChunkPR(prFiles, options = {}) {
   verboseLog(
     options,
     chalk.gray(
-      `  Token breakdown: ${diffTokens} diff + ${fullContentTokens} full content + ${CONTEXT_OVERHEAD_TOKENS} context overhead = ${totalEstimatedTokens} total`
+      `  Token breakdown: ${diffTokens} diff + ${plannedFileContextTokens} planned file context (${fullContentTokens} raw full content) + ${CONTEXT_OVERHEAD_TOKENS} context overhead = ${totalEstimatedTokens} total`
     )
   );
 
@@ -57,6 +67,8 @@ export function shouldChunkPR(prFiles, options = {}) {
     estimatedTokens: totalEstimatedTokens,
     diffTokens,
     fullContentTokens,
+    plannedFileContextTokens,
+    holisticContextPlans,
     contextOverhead: CONTEXT_OVERHEAD_TOKENS,
     recommendedChunks: Math.ceil(totalEstimatedTokens / 35000), // More aggressive chunking
   };
@@ -66,18 +78,22 @@ export function shouldChunkPR(prFiles, options = {}) {
  * Chunks PR files into manageable groups based on token limits and logical grouping
  * @param {Array} prFiles - Array of PR files with diffContent and content
  * @param {number} maxTokensPerChunk - Maximum tokens per chunk
+ * @param {Object} options - Chunking options
  * @returns {Array} Array of chunks with files and metadata
  */
-export function chunkPRFiles(prFiles, maxTokensPerChunk = 35000) {
+export function chunkPRFiles(prFiles, maxTokensPerChunk = 35000, options = {}) {
+  const holisticContextPlans = mergeHolisticFileContextPlans(prFiles, options, options.holisticContextPlans);
+
   // Calculate change complexity for each file (works for any language)
-  // IMPORTANT: Token estimate must include BOTH diff AND full content since both are sent
-  const filesWithMetrics = prFiles.flatMap((file) => {
+  // IMPORTANT: Token estimate must match the adaptive holistic prompt context plan.
+  const filesWithMetrics = prFiles.flatMap((file, index) => {
+    const fileContextPlan = holisticContextPlans[index];
     const fileWithMetrics = {
       ...file,
+      holisticContextPlan: fileContextPlan,
       changeSize: calculateChangeSize(file.diffContent),
       fileComplexity: calculateFileComplexity(file),
-      // Estimate tokens for BOTH diff content AND full file content (both are included in prompt)
-      estimatedTokens: estimateTokens(file.diffContent) + estimateTokens(file.content),
+      estimatedTokens: fileCost(fileContextPlan),
     };
 
     return splitOversizedFileForChunk(fileWithMetrics, maxTokensPerChunk);
@@ -135,7 +151,11 @@ function splitOversizedFileForChunk(file, maxTokensPerChunk) {
     return [file];
   }
 
-  const diffTokens = estimateTokens(file.diffContent);
+  const diffTokens = diffCost(file);
+  if (file.holisticContextPlan?.mode === 'focused' && diffTokens <= maxTokensPerChunk) {
+    return [capFocusedContextForChunk(file, maxTokensPerChunk)];
+  }
+
   if (diffTokens <= maxTokensPerChunk) {
     return [capFileContentForChunk(file, maxTokensPerChunk, diffTokens)];
   }
@@ -145,19 +165,42 @@ function splitOversizedFileForChunk(file, maxTokensPerChunk) {
   const diffParts = splitDiffToTokenBudget(file.diffContent, diffBudget);
   const cappedContent = truncateToTokenBudget(file.content, contentBudget, 'file content');
 
-  return diffParts.map((diffPart, index) => ({
+  return diffParts.map((diffPart, index) => {
+    const splitFile = {
+      ...file,
+      diffContent: diffPart,
+      diffInfo: undefined,
+      diffSplitForChunk: true,
+      chunkPart: index + 1,
+      chunkParts: diffParts.length,
+      originalEstimatedTokens: file.estimatedTokens,
+      originalDiffEstimatedTokens: diffTokens,
+      summary: `${file.summary || pathBasename(file.filePath)} (diff part ${index + 1}/${diffParts.length})`,
+    };
+
+    if (file.holisticContextPlan?.mode === 'focused') {
+      return capFocusedContextForChunk(splitFile, maxTokensPerChunk);
+    }
+
+    return {
+      ...splitFile,
+      content: cappedContent,
+      estimatedTokens: estimatePrContextTokens(diffPart) + estimatePrContextTokens(cappedContent),
+      truncatedForChunk: cappedContent !== file.content,
+    };
+  });
+}
+
+function capFocusedContextForChunk(file, maxTokensPerChunk) {
+  const adjustedPlan = fitHolisticPlanToChunk(file, file.holisticContextPlan, maxTokensPerChunk);
+
+  return {
     ...file,
-    diffContent: diffPart,
-    content: cappedContent,
-    estimatedTokens: estimateTokens(diffPart) + estimateTokens(cappedContent),
-    truncatedForChunk: cappedContent !== file.content,
-    diffSplitForChunk: true,
-    chunkPart: index + 1,
-    chunkParts: diffParts.length,
-    originalEstimatedTokens: file.estimatedTokens,
-    originalDiffEstimatedTokens: diffTokens,
-    summary: `${file.summary || pathBasename(file.filePath)} (diff part ${index + 1}/${diffParts.length})`,
-  }));
+    holisticContextPlan: adjustedPlan,
+    estimatedTokens: fileCost(adjustedPlan),
+    focusedContextReducedForChunk: adjustedPlan.contextTokens < (file.holisticContextPlan?.contextTokens || Number.POSITIVE_INFINITY),
+    originalEstimatedTokens: file.originalEstimatedTokens ?? file.estimatedTokens,
+  };
 }
 
 function capFileContentForChunk(file, maxTokensPerChunk, diffTokens) {
@@ -167,14 +210,14 @@ function capFileContentForChunk(file, maxTokensPerChunk, diffTokens) {
   return {
     ...file,
     content: cappedContent,
-    estimatedTokens: diffTokens + estimateTokens(cappedContent),
+    estimatedTokens: diffTokens + estimatePrContextTokens(cappedContent),
     truncatedForChunk: cappedContent !== file.content,
     originalEstimatedTokens: file.estimatedTokens,
   };
 }
 
 function splitDiffToTokenBudget(diffContent, tokenBudget) {
-  if (!diffContent || estimateTokens(diffContent) <= tokenBudget) {
+  if (!diffContent || estimatePrContextTokens(diffContent) <= tokenBudget) {
     return [diffContent || ''];
   }
 
@@ -241,9 +284,12 @@ function splitDiffIntoUnits(lines) {
 
 function splitLargeDiffUnit(headerText, unit, maxChars, hasPreviousPart) {
   const parts = [];
+  const hunkHeader = unit.split('\n').find((line) => line.startsWith('@@'));
 
   for (let offset = 0; offset < unit.length; ) {
-    const prefix = buildBoundedDiffPrefix(headerText, hasPreviousPart || parts.length > 0, maxChars);
+    const isContinuation = hasPreviousPart || parts.length > 0;
+    const continuationHunkHeader = offset > 0 ? adjustHunkHeaderNewStart(hunkHeader, estimateNewLineAtOffset(unit, offset)) : '';
+    const prefix = buildBoundedDiffPrefix(headerText, isContinuation, maxChars, continuationHunkHeader);
     const sliceChars = Math.max(maxChars - prefix.length, 1);
     const slice = unit.slice(offset, offset + sliceChars);
     parts.push(`${prefix}${slice}`);
@@ -253,14 +299,61 @@ function splitLargeDiffUnit(headerText, unit, maxChars, hasPreviousPart) {
   return parts;
 }
 
-function buildBoundedDiffPrefix(headerText, isContinuation, maxChars) {
-  const prefixText = [headerText, isContinuation ? splitMarker() : ''].filter(Boolean).join('\n');
-  if (!prefixText || maxChars <= 1) {
+function estimateNewLineAtOffset(unit, offset) {
+  let currentNewLine = null;
+  let currentOffset = 0;
+
+  for (const line of unit.split('\n')) {
+    const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    const lineEndOffset = currentOffset + line.length + 1;
+
+    if (hunkMatch) {
+      currentNewLine = Number.parseInt(hunkMatch[1], 10);
+      if (offset < lineEndOffset) {
+        return Math.max(1, currentNewLine);
+      }
+      currentOffset = lineEndOffset;
+      continue;
+    }
+
+    if (currentNewLine !== null) {
+      if (offset < lineEndOffset) {
+        return Math.max(1, currentNewLine);
+      }
+
+      if (line.startsWith('+') || line.startsWith(' ')) {
+        currentNewLine++;
+      }
+    }
+
+    currentOffset = lineEndOffset;
+  }
+
+  return Math.max(1, currentNewLine || 1);
+}
+
+function adjustHunkHeaderNewStart(hunkHeader, newStartLine) {
+  if (!hunkHeader) {
     return '';
   }
 
-  const maxPrefixChars = Math.max(maxChars - 2, 0);
-  const boundedPrefix = prefixText.length > maxPrefixChars ? prefixText.slice(0, maxPrefixChars) : prefixText;
+  return hunkHeader.replace(/^(@@ -\d+(?:,\d+)? )\+\d+((?:,\d+)? @@.*)$/, `$1+${newStartLine}$2`);
+}
+
+function buildBoundedDiffPrefix(headerText, isContinuation, maxChars, hunkHeader = '') {
+  let requiredTail = [isContinuation ? splitMarker() : '', hunkHeader].filter(Boolean).join('\n');
+  if (requiredTail.length + 1 >= maxChars) {
+    requiredTail = hunkHeader && hunkHeader.length + 1 < maxChars ? hunkHeader : '';
+  }
+
+  if ((!headerText && !requiredTail) || maxChars <= 1) {
+    return '';
+  }
+
+  const requiredTailWithNewline = requiredTail ? `${requiredTail}\n` : '';
+  const maxHeaderChars = Math.max(maxChars - requiredTailWithNewline.length - 2, 0);
+  const boundedHeader = headerText.length > maxHeaderChars ? headerText.slice(0, maxHeaderChars) : headerText;
+  const boundedPrefix = [boundedHeader, requiredTail].filter(Boolean).join('\n');
   return boundedPrefix ? `${boundedPrefix}\n` : '';
 }
 
