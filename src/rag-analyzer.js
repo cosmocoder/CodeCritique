@@ -37,9 +37,6 @@ const DEFAULT_TRUNCATE_LINES = 300;
 const GUIDELINE_TRUNCATE_LINES = 400;
 const MAX_PR_COMMENTS_FOR_CONTEXT = 15;
 
-// Create embeddings system instance
-const embeddingsSystem = getDefaultEmbeddingsSystem();
-
 // Track if semantic similarity has been initialized
 let semanticSimilarityInitialized = false;
 
@@ -234,6 +231,7 @@ ${ex.content}
  */
 async function getProjectSummary(projectPath, options = {}) {
   const resolvedPath = path.resolve(projectPath);
+  const embeddingsSystem = getDefaultEmbeddingsSystem();
 
   try {
     // Retrieve from database
@@ -1929,6 +1927,7 @@ async function performHolisticPRAnalysis(options) {
  * @returns {Promise<Object>} An object containing the gathered context.
  */
 async function getContextForFile(filePath, content, options = {}) {
+  const embeddingsSystem = getDefaultEmbeddingsSystem();
   const RELEVANT_CHUNK_THRESHOLD = 0.1;
   const W_H1_SIM = 0.2;
   const W_DOC_CONTEXT_MATCH = 0.6;
@@ -2283,6 +2282,7 @@ async function getContextForFile(filePath, content, options = {}) {
 }
 
 async function gatherUnifiedContextForPR(prFiles, options = {}) {
+  const embeddingsSystem = getDefaultEmbeddingsSystem();
   const allProcessedContext = {
     codeExamples: new Map(),
     guidelines: new Map(),
