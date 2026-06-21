@@ -460,3 +460,11 @@ export function getDefaultEmbeddingsSystem() {
   }
   return defaultSystem;
 }
+
+/**
+ * Get the default singleton instance only if it has already been created.
+ * @returns {EmbeddingsSystem|null}
+ */
+export function getDefaultEmbeddingsSystemIfInitialized() {
+  return defaultSystem;
+}

@@ -16,9 +16,6 @@ import { verboseLog } from '../utils/logging.js';
 import { truncateToTokenLimit, cleanupTokenizer } from '../utils/mobilebert-tokenizer.js';
 import { escapeSqlString } from '../utils/string-utils.js';
 
-// Create embeddings system instance
-const embeddingsSystem = getDefaultEmbeddingsSystem();
-
 // Import constants from embeddings.js to avoid duplication
 const { PR_COMMENTS } = TABLE_NAMES;
 const PR_COMMENTS_TABLE = PR_COMMENTS;
@@ -47,7 +44,7 @@ export async function storePRCommentsBatch(commentsData, projectPath = process.c
   const liveIdsByPR = collectLiveCommentIdsByPR(sourceComments, replacePRs);
 
   try {
-    const table = await embeddingsSystem.getPRCommentsTable();
+    const table = await getDefaultEmbeddingsSystem().getPRCommentsTable();
 
     if (!table) {
       throw new Error(`Table ${PR_COMMENTS_TABLE} not found`);
@@ -139,7 +136,7 @@ export async function storePRCommentsBatch(commentsData, projectPath = process.c
 
     if (successCount > 0 || staleCleanupAttempted) {
       await optimizePRCommentsTable(table);
-      await embeddingsSystem.updatePRCommentsIndex();
+      await getDefaultEmbeddingsSystem().updatePRCommentsIndex();
     }
   }
   catch (error) {
@@ -296,7 +293,7 @@ function getPRStorageKey(repository, prNumber) {
  */
 export async function getPRCommentsStats(repository = null, projectPath = process.cwd()) {
   try {
-    const table = await embeddingsSystem.getPRCommentsTable();
+    const table = await getDefaultEmbeddingsSystem().getPRCommentsTable();
 
     const defaultStats = {
       total_comments: 0,
@@ -442,7 +439,7 @@ export async function getPRCommentsStats(repository = null, projectPath = proces
  */
 export async function getProcessedPRSyncState(repository, projectPath = process.cwd()) {
   try {
-    const table = await embeddingsSystem.getPRCommentsTable();
+    const table = await getDefaultEmbeddingsSystem().getPRCommentsTable();
 
     if (!table) {
       return { processedPRs: new Map() };
@@ -543,7 +540,7 @@ export function shouldSkipPR(pr, processedPRSyncState) {
  */
 export async function clearPRComments(repository, projectPath = process.cwd()) {
   try {
-    const table = await embeddingsSystem.getPRCommentsTable();
+    const table = await getDefaultEmbeddingsSystem().getPRCommentsTable();
 
     if (!table) {
       return 0;
@@ -572,7 +569,7 @@ export async function clearPRComments(repository, projectPath = process.cwd()) {
  */
 export async function hasPRComments(repository, projectPath = process.cwd()) {
   try {
-    const table = await embeddingsSystem.getPRCommentsTable();
+    const table = await getDefaultEmbeddingsSystem().getPRCommentsTable();
 
     if (!table) {
       return false;
@@ -602,7 +599,7 @@ export async function hasPRComments(repository, projectPath = process.cwd()) {
  */
 export async function getLastAnalysisTimestamp(repository, projectPath) {
   try {
-    const table = await embeddingsSystem.getPRCommentsTable();
+    const table = await getDefaultEmbeddingsSystem().getPRCommentsTable();
 
     if (!table) {
       return null;
@@ -908,13 +905,13 @@ export async function findRelevantPRComments(reviewFileContent, options = {}) {
 
     const chunkEmbeddings = await Promise.all(
       codeChunks.map(async (chunk) => ({
-        vector: await embeddingsSystem.calculateQueryEmbedding(chunk.code),
+        vector: await getDefaultEmbeddingsSystem().calculateQueryEmbedding(chunk.code),
         ...chunk,
       }))
     );
 
     // --- Step 2: Search for relevant historical comments for each chunk ---
-    const mainTable = await embeddingsSystem.getPRCommentsTable();
+    const mainTable = await getDefaultEmbeddingsSystem().getPRCommentsTable();
     if (!mainTable) {
       throw new Error('Main PR comments table not found.');
     }

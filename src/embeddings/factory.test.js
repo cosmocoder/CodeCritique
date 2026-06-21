@@ -1,4 +1,4 @@
-import { getDefaultEmbeddingsSystem } from './factory.js';
+import { getDefaultEmbeddingsSystem, getDefaultEmbeddingsSystemIfInitialized } from './factory.js';
 
 vi.mock('./cache-manager.js', () => ({
   CacheManager: class {
@@ -80,6 +80,10 @@ describe('EmbeddingsSystem', () => {
       const system1 = getDefaultEmbeddingsSystem();
       const system2 = getDefaultEmbeddingsSystem();
       expect(system1).toBe(system2);
+    });
+
+    it('should expose the created singleton without creating a new one', () => {
+      expect(getDefaultEmbeddingsSystemIfInitialized()).toBe(system);
     });
 
     it('should create system with all components', () => {

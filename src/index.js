@@ -15,7 +15,7 @@ import chalk from 'chalk';
 import { Spinner } from 'cli-spinner';
 import { program } from 'commander';
 import { glob } from 'glob';
-import { getDefaultEmbeddingsSystem } from './embeddings/factory.js';
+import { getDefaultEmbeddingsSystem, getDefaultEmbeddingsSystemIfInitialized } from './embeddings/factory.js';
 import { PRHistoryAnalyzer } from './pr-history/analyzer.js';
 import {
   displayAnalysisResults,
@@ -34,8 +34,12 @@ import { diagnosticLog, isDebugEnabled, isVerboseEnabled, verboseLog } from './u
 import { collectPRLevelFindings, getFileLevelIssueCount, hasPRLevelFindings } from './utils/review-results.js';
 import { configureCleanStdoutForDataOutput, isBrokenStdoutPipeError, writeStdout } from './utils/stdout.js';
 
-// Create a default embeddings system instance
-const embeddingsSystem = getDefaultEmbeddingsSystem();
+async function cleanupEmbeddingsSystemIfInitialized() {
+  const embeddingsSystem = getDefaultEmbeddingsSystemIfInitialized();
+  if (embeddingsSystem) {
+    await embeddingsSystem.cleanup();
+  }
+}
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -103,6 +107,7 @@ program
   .command('embeddings:clear-all')
   .description('Clear ALL stored embeddings (affects all projects - use with caution)')
   .action(async () => {
+    const embeddingsSystem = getDefaultEmbeddingsSystem();
     try {
       console.log(chalk.red('WARNING: This will clear embeddings for ALL projects on this machine!'));
       console.log(chalk.cyan('Clearing all embeddings...'));
@@ -227,7 +232,7 @@ process.on('SIGINT', async () => {
 
   try {
     diagnosticLog(chalk.cyan('SIGINT handler: Attempting embeddingsSystem.cleanup()...'));
-    await embeddingsSystem.cleanup();
+    await cleanupEmbeddingsSystemIfInitialized();
     diagnosticLog(chalk.green('embeddingsSystem.cleanup() completed.'));
     clearTimeout(forceExitTimeout); // Cleanup finished, clear the timeout
     diagnosticLog(chalk.cyan('SIGINT handler: Exiting normally (code 0).'));
@@ -251,7 +256,7 @@ process.on('SIGTERM', async () => {
 
   try {
     diagnosticLog(chalk.cyan('SIGTERM handler: Attempting embeddingsSystem.cleanup()...'));
-    await embeddingsSystem.cleanup();
+    await cleanupEmbeddingsSystemIfInitialized();
     diagnosticLog(chalk.green('embeddingsSystem.cleanup() completed.'));
     clearTimeout(forceExitTimeout); // Cleanup finished, clear the timeout
     diagnosticLog(chalk.cyan('SIGTERM handler: Exiting normally (code 0).'));
@@ -468,7 +473,7 @@ async function runCodeReview(options) {
     // Clean up resources
     diagnosticLog(chalk.cyan('Cleaning up resources...'));
     try {
-      await embeddingsSystem.cleanup();
+      await cleanupEmbeddingsSystemIfInitialized();
       await cleanupClassifier();
       diagnosticLog(chalk.green('All resources cleaned up successfully'));
     }
@@ -497,7 +502,7 @@ async function runCodeReview(options) {
 
     // Clean up resources even on error
     try {
-      await embeddingsSystem.cleanup();
+      await cleanupEmbeddingsSystemIfInitialized();
       await cleanupClassifier();
       diagnosticLog(chalk.green('All resources cleaned up successfully'));
     }
@@ -516,6 +521,7 @@ async function runCodeReview(options) {
  * @param {Object} options - Command options
  */
 async function generateEmbeddings(options) {
+  const embeddingsSystem = getDefaultEmbeddingsSystem();
   try {
     console.log(chalk.bold.blue('AI Code Review - Generating embeddings...'));
     const startTime = Date.now();
@@ -717,6 +723,7 @@ async function generateEmbeddings(options) {
  * Clear stored embeddings for the current project
  */
 async function clearEmbeddings(options) {
+  const embeddingsSystem = getDefaultEmbeddingsSystem();
   try {
     // Determine the working directory for project separation
     // If --directory is specified, use that as the project directory
@@ -751,6 +758,7 @@ async function clearEmbeddings(options) {
  * Show statistics about stored embeddings
  */
 async function showEmbeddingStats(options) {
+  const embeddingsSystem = getDefaultEmbeddingsSystem();
   try {
     // Determine the working directory for project separation
     // If --directory is specified, use that as the project directory
