@@ -21,7 +21,7 @@ import { isDocumentationFile, shouldProcessFile as utilsShouldProcessFile, batch
 import { detectLanguageFromExtension } from '../utils/language-detection.js';
 import { debug, verboseLog } from '../utils/logging.js';
 import { extractMarkdownChunks } from '../utils/markdown.js';
-import { escapeSqlString, slugify } from '../utils/string-utils.js';
+import { buildIdInFilter, escapeSqlString, slugify } from '../utils/string-utils.js';
 import { TABLE_NAMES, LANCEDB_DIR_NAME, FASTEMBED_CACHE_DIR_NAME } from './constants.js';
 import { createFileProcessingError } from './errors.js';
 
@@ -46,10 +46,6 @@ function buildExistingDocumentSignature(chunks) {
     .map((chunk) => `${chunk.id}:${chunk.content_hash}`)
     .sort()
     .join('|');
-}
-
-function buildIdInFilter(ids) {
-  return `id IN (${ids.map((id) => `'${escapeSqlString(id)}'`).join(', ')})`;
 }
 
 async function deleteFileEmbeddingRecords(table, records) {

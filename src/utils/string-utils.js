@@ -65,3 +65,13 @@ export function addLineNumbers(content) {
 export function escapeSqlString(value) {
   return String(value).replace(/'/g, "''");
 }
+
+/**
+ * Build a SQL `id IN (...)` filter from a list of record ids, escaping each value.
+ *
+ * @param {string[]} ids - Record ids to include in the filter
+ * @returns {string} SQL predicate of the form `id IN ('a', 'b', ...)`
+ */
+export function buildIdInFilter(ids) {
+  return `id IN (${ids.map((id) => `'${escapeSqlString(id)}'`).join(', ')})`;
+}
