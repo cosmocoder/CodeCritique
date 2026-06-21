@@ -41,6 +41,10 @@ vi.mock('node:fs', () => ({
   default: {
     readFileSync: vi.fn(),
     existsSync: vi.fn().mockReturnValue(true),
+    promises: {
+      access: vi.fn().mockResolvedValue(undefined),
+      readFile: vi.fn(),
+    },
   },
 }));
 
@@ -155,6 +159,8 @@ describe('rag-analyzer', () => {
     mockEmbeddingsSystem.updatePRCommentsIndex.mockReset().mockResolvedValue(undefined);
     fs.readFileSync.mockReturnValue('const x = 1;\nconsole.log(x);');
     fs.existsSync.mockReturnValue(true);
+    fs.promises.access.mockReset().mockResolvedValue(undefined);
+    fs.promises.readFile.mockReset().mockResolvedValue('const x = 1;\nconsole.log(x);');
   });
 
   afterEach(() => {
@@ -197,7 +203,7 @@ describe('rag-analyzer', () => {
     });
 
     it('should return error when file does not exist', async () => {
-      fs.existsSync.mockReturnValue(false);
+      fs.promises.access.mockRejectedValue(new Error('ENOENT'));
       const result = await runAnalysis('/test/nonexistent.js');
       expect(result.success).toBe(false);
       expect(result.error).toContain('File not found');
@@ -369,13 +375,13 @@ describe('rag-analyzer', () => {
       ['whitespace only', '   \n\n   '],
       ['normal content', 'const x = 1;\nfunction test() {}'],
     ])('should handle %s', async (_, content) => {
-      fs.readFileSync.mockReturnValue(content);
+      fs.promises.readFile.mockResolvedValue(content);
       const result = await runAnalysis('/test/file.js');
       expect(result).toBeDefined();
     });
 
     it('should handle very long files', async () => {
-      fs.readFileSync.mockReturnValue(createMockLongCode(1000));
+      fs.promises.readFile.mockResolvedValue(createMockLongCode(1000));
       const result = await runAnalysis('/test/long.js');
       expect(result.success).toBe(true);
     });
@@ -956,7 +962,7 @@ describe('rag-analyzer', () => {
 
   describe('gatherUnifiedContextForPR error handling', () => {
     it('should handle file context gathering errors', async () => {
-      fs.readFileSync.mockImplementation((path) => {
+      fs.promises.readFile.mockImplementation((path) => {
         if (path.includes('error-file')) {
           throw new Error('Read error');
         }
@@ -1183,7 +1189,7 @@ describe('rag-analyzer', () => {
           return <div>{data}</div>;
         }
       `;
-      fs.readFileSync.mockReturnValue(richCode);
+      fs.promises.readFile.mockResolvedValue(richCode);
       setupSuccessfulLLMResponse();
       const result = await runAnalysis('/test/Dashboard.jsx');
       expect(result.success).toBe(true);
