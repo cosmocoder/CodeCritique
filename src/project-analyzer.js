@@ -405,8 +405,25 @@ export class ProjectAnalyzer {
               return depthA - depthB;
             });
 
-            // Take only the first 500 after sorting to ensure we have shallow files
-            const sortedFiles = allFiles.slice(0, TERM_SEARCH_CONTENT_CANDIDATE_LIMIT);
+            // Dedupe by path before capping: transient duplicate rows can exist for
+            // the same file (different content_hash) when a partial run hasn't pruned
+            // stale embeddings, and they would otherwise consume candidate slots and
+            // bloat the content query. Keep the shallowest occurrence (allFiles is
+            // already depth-sorted), then take the first 500 distinct shallow files.
+            const seenPaths = new Set();
+            const sortedFiles = [];
+            for (const file of allFiles) {
+              if (file.path) {
+                if (seenPaths.has(file.path)) {
+                  continue;
+                }
+                seenPaths.add(file.path);
+              }
+              sortedFiles.push(file);
+              if (sortedFiles.length >= TERM_SEARCH_CONTENT_CANDIDATE_LIMIT) {
+                break;
+              }
+            }
             if (sortedFiles.length === 0) {
               return [];
             }
@@ -415,14 +432,20 @@ export class ProjectAnalyzer {
             const contentByPath = new Map();
             if (candidatePaths.length > 0) {
               const pathList = candidatePaths.map((candidatePath) => `'${escapeSqlString(candidatePath)}'`).join(', ');
+              // No row limit here: the result set is already bounded by the IN list of
+              // distinct candidate paths. A limit could truncate rows when duplicate
+              // rows exist for a path, silently dropping content for matched files.
               const contentResults = await table
                 .query()
                 .select(['path', 'content'])
                 .where(`${projectPathFilter} AND path IN (${pathList})`)
-                .limit(TERM_SEARCH_CONTENT_CANDIDATE_LIMIT)
                 .toArray();
 
               for (const result of contentResults) {
+                // Prefer non-empty content when duplicate rows exist for a path.
+                if (contentByPath.get(result.path)) {
+                  continue;
+                }
                 contentByPath.set(result.path, result.content || '');
               }
             }
