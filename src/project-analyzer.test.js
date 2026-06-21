@@ -410,6 +410,79 @@ describe('ProjectAnalyzer', () => {
       expect(queryChain.where).toHaveBeenCalledWith(expect.stringContaining("/mock/we''re/project"));
     });
 
+    it('should bound content reads for term-based key file searches', async () => {
+      const queryCalls = [];
+      mockTable.query.mockImplementation(() => {
+        const call = {
+          select: [],
+          where: [],
+          limit: [],
+        };
+        queryCalls.push(call);
+
+        const chain = {
+          select: vi.fn((columns) => {
+            call.select.push(columns);
+            return chain;
+          }),
+          where: vi.fn((clause) => {
+            call.where.push(clause);
+            return chain;
+          }),
+          limit: vi.fn((limit) => {
+            call.limit.push(limit);
+            return chain;
+          }),
+          toArray: vi.fn(async () => {
+            const selectedColumns = call.select[0] || [];
+            if (selectedColumns.includes('content')) {
+              return [
+                {
+                  path: 'package.json',
+                  name: 'package.json',
+                  content: '{"name": "test-project"}',
+                  type: 'json',
+                  language: 'json',
+                },
+              ];
+            }
+
+            return [
+              {
+                path: 'package.json',
+                name: 'package.json',
+                type: 'json',
+                language: 'json',
+              },
+            ];
+          }),
+        };
+
+        return chain;
+      });
+
+      const result = await analyzer.mineKeyFilesFromEmbeddings(mockProjectPath);
+
+      expect(result.some((file) => file.path === 'package.json')).toBe(true);
+      expect(
+        queryCalls.some((call) => {
+          const selectedColumns = call.select[0] || [];
+          return selectedColumns.includes('content') && call.where[0] === "project_path = '/mock/project'" && call.limit.length === 0;
+        })
+      ).toBe(false);
+      expect(
+        queryCalls.some((call) => {
+          const selectedColumns = call.select[0] || [];
+          return (
+            selectedColumns.includes('path') &&
+            selectedColumns.includes('name') &&
+            !selectedColumns.includes('content') &&
+            call.where[0] === "project_path = '/mock/project'"
+          );
+        })
+      ).toBe(true);
+    });
+
     it('should handle table optimization errors gracefully', async () => {
       mockTable.optimize.mockRejectedValue(new Error('legacy format'));
       mockTable.query().toArray.mockResolvedValue([]);
