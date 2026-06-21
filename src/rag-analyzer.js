@@ -471,8 +471,10 @@ async function runAnalysis(filePath, options = {}) {
     let fullFileContent;
     if (options.diffOnly && options.diffContent) {
       content = options.diffContent;
-      // For PR reviews, always read the full file content for context awareness
-      fullFileContent = await readTextFile(filePath);
+      // For PR reviews, always read the full file content for context awareness.
+      // Tolerate a missing/unreadable file (e.g. deleted in the window after the
+      // existence check) by degrading to null; downstream falls back to file.content.
+      fullFileContent = await readTextFile(filePath).catch(() => null);
       verboseLog(options, chalk.blue(`Analyzing diff only for ${path.basename(filePath)}`));
     }
     else {
@@ -873,6 +875,22 @@ ${projectArchitectureSection}`);
   return blocks;
 }
 
+/**
+ * Build the user-prompt sentence that points the model at the cached system blocks.
+ * Returns an empty string when no cached blocks were emitted, so the prompt never
+ * instructs the model to use context that was not sent.
+ *
+ * @param {string[]} cachedSystemBlocks - Cached blocks produced for this request
+ * @param {string} subject - What is being evaluated (e.g. 'this file')
+ * @returns {string} Instruction sentence, or '' when there is no cached context
+ */
+function buildCachedContextInstruction(cachedSystemBlocks, subject) {
+  if (!cachedSystemBlocks || cachedSystemBlocks.length === 0) {
+    return '';
+  }
+  return `Use the cached project context, project architecture, and custom instructions when evaluating ${subject}.`;
+}
+
 // LLM call function - sends prompt with cached system content for cost optimization
 async function sendPromptToLLM(promptConfig, llmOptions) {
   try {
@@ -1150,7 +1168,7 @@ ${reviewInstructions}
 
 ${fileSection}
 
-Use the cached project context, project architecture, and custom instructions when evaluating this file.
+${buildCachedContextInstruction(cachedSystemBlocks, 'this file')}
 
 CONTEXT A: EXPLICIT GUIDELINES FROM DOCUMENTATION
 ${formattedGuidelines}
@@ -1270,7 +1288,7 @@ ${reviewInstructions}
 ${fileSection}
 
 ## ANALYSIS CONTEXT
-Use the cached project context, project architecture, and custom instructions when evaluating this test file.
+${buildCachedContextInstruction(cachedSystemBlocks, 'this test file')}
 
 CONTEXT A: TESTING GUIDELINES AND BEST PRACTICES
 ${formattedGuidelines}
@@ -1427,7 +1445,7 @@ For each file in this PR, you have access to:
 - **Test Files**: ${prFiles.filter((f) => f.isTest).length}
 
 ## UNIFIED CONTEXT FROM PROJECT
-Use the cached project context, project architecture, and custom instructions when evaluating this pull request.
+${buildCachedContextInstruction(cachedSystemBlocks, 'this pull request')}
 
 ### PROJECT CODE EXAMPLES
 ${formattedCodeExamples}

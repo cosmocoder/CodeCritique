@@ -26,7 +26,7 @@ import chalk from 'chalk';
 import { getTableSchema, schemaHasField } from '../utils/lancedb.js';
 import { debug, verboseLog } from '../utils/logging.js';
 import { isPathWithinProject } from '../utils/path-utils.js';
-import { escapeSqlString } from '../utils/string-utils.js';
+import { buildIdInFilter, escapeSqlString } from '../utils/string-utils.js';
 import { EMBEDDING_DIMENSIONS, TABLE_NAMES } from './constants.js';
 import { LANCEDB_PATH } from './constants.js';
 import { createDatabaseError, ERROR_CODES } from './errors.js';
@@ -41,10 +41,6 @@ const DOCUMENT_CHUNK_TABLE = TABLE_NAMES.DOCUMENT_CHUNK;
 const PR_COMMENTS_TABLE = TABLE_NAMES.PR_COMMENTS;
 const PROJECT_SUMMARIES_TABLE = TABLE_NAMES.PROJECT_SUMMARIES;
 const DELETE_BATCH_SIZE = 100;
-
-function buildIdInFilter(ids) {
-  return `id IN (${ids.map((id) => `'${escapeSqlString(id)}'`).join(', ')})`;
-}
 
 async function deleteRecordsById(table, records, warningMessage) {
   let deletedCount = 0;
@@ -693,23 +689,16 @@ export class DatabaseManager {
       .query()
       .where(`project_path = '${escapeSqlString(resolvedProjectPath)}'`)
       .toArray();
-    let deletedCount = 0;
 
-    for (const record of records) {
-      if (!record.original_document_path || liveDocumentPathSet.has(record.original_document_path)) {
-        continue;
-      }
+    const recordsToDelete = records.filter(
+      (record) => record.original_document_path && !liveDocumentPathSet.has(record.original_document_path)
+    );
 
-      try {
-        await table.delete(`id = '${escapeSqlString(record.id)}'`);
-        deletedCount++;
-      }
-      catch (deleteError) {
-        console.warn(chalk.yellow(`Warning: Could not prune document chunk ${record.id}: ${deleteError.message}`));
-      }
-    }
-
-    return deletedCount;
+    return deleteRecordsById(
+      table,
+      recordsToDelete,
+      (record, deleteError) => `Warning: Could not prune document chunk ${record.id}: ${deleteError.message}`
+    );
   }
 
   // ============================================================================
