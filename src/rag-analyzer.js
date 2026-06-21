@@ -471,8 +471,10 @@ async function runAnalysis(filePath, options = {}) {
     let fullFileContent;
     if (options.diffOnly && options.diffContent) {
       content = options.diffContent;
-      // For PR reviews, always read the full file content for context awareness
-      fullFileContent = await readTextFile(filePath);
+      // For PR reviews, always read the full file content for context awareness.
+      // Tolerate a missing/unreadable file (e.g. deleted in the window after the
+      // existence check) by degrading to null; downstream falls back to file.content.
+      fullFileContent = await readTextFile(filePath).catch(() => null);
       verboseLog(options, chalk.blue(`Analyzing diff only for ${path.basename(filePath)}`));
     }
     else {
