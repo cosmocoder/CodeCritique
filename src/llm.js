@@ -44,6 +44,44 @@ const DEFAULT_MODEL = 'claude-sonnet-4-5';
 // Maximum tokens for response
 const MAX_TOKENS = 4096;
 
+const MAX_CACHE_CONTROL_BLOCKS = 4;
+
+function normalizeSystemBlock(block, cacheControl) {
+  const normalizedBlock = typeof block === 'string' ? { type: 'text', text: block } : { type: 'text', ...block };
+
+  if (cacheControl) {
+    return {
+      ...normalizedBlock,
+      cache_control: normalizedBlock.cache_control || cacheControl,
+    };
+  }
+
+  return normalizedBlock;
+}
+
+function buildSystemContent(system, cachedSystemBlocks, cacheControl) {
+  if (!system && cachedSystemBlocks.length === 0) {
+    return 'You are an expert code reviewer with deep knowledge of software engineering principles, design patterns, and best practices.';
+  }
+
+  const systemBlocks = [];
+  const appendBlock = (block) => {
+    const cacheable = systemBlocks.filter((existingBlock) => existingBlock.cache_control).length < MAX_CACHE_CONTROL_BLOCKS;
+    systemBlocks.push(normalizeSystemBlock(block, cacheable ? cacheControl : null));
+  };
+
+  if (Array.isArray(system)) {
+    system.forEach(appendBlock);
+  }
+  else if (system) {
+    appendBlock(system);
+  }
+
+  cachedSystemBlocks.filter(Boolean).forEach(appendBlock);
+
+  return systemBlocks;
+}
+
 /**
  * Send a prompt to Claude and get a structured JSON response using tool calling.
  * Uses prompt caching for system prompts to reduce token costs.
@@ -51,12 +89,21 @@ const MAX_TOKENS = 4096;
  * @param {string} prompt - The prompt to send to Claude
  * @param {Object} options - Options for the request
  * @param {string} options.system - System prompt (will be cached for cost optimization)
+ * @param {Array<string|Object>} options.cachedSystemBlocks - Additional stable system blocks to cache when possible
  * @param {Object} options.jsonSchema - JSON schema for structured output
  * @param {string} options.cacheTtl - Cache TTL: '5m' (default, no extra cost) or '1h' (extended, extra cost for writes)
  * @returns {Promise<Object>} The response from Claude with structured data
  */
 async function sendPromptToClaude(prompt, options = {}) {
-  const { model = DEFAULT_MODEL, maxTokens = MAX_TOKENS, temperature = 0.7, system = '', jsonSchema = null, cacheTtl = '5m' } = options;
+  const {
+    model = DEFAULT_MODEL,
+    maxTokens = MAX_TOKENS,
+    temperature = 0.7,
+    system = '',
+    cachedSystemBlocks = [],
+    jsonSchema = null,
+    cacheTtl = '5m',
+  } = options;
 
   try {
     verboseLog(options, chalk.cyan('Sending prompt to Claude...'));
@@ -68,15 +115,7 @@ async function sendPromptToClaude(prompt, options = {}) {
     // TTL options: '5m' (default, no extra cost) or '1h' (extended, extra cost for cache writes)
     const cacheControl = cacheTtl === '1h' ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
 
-    const systemContent = system
-      ? [
-          {
-            type: 'text',
-            text: system,
-            cache_control: cacheControl,
-          },
-        ]
-      : 'You are an expert code reviewer with deep knowledge of software engineering principles, design patterns, and best practices.';
+    const systemContent = buildSystemContent(system, cachedSystemBlocks, cacheControl);
 
     // Build base request parameters
     const requestParams = {

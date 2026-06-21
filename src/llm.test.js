@@ -241,6 +241,62 @@ describe('sendPromptToClaude', () => {
         })
       );
     });
+
+    it('should append additional cached system blocks', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        content: [{ type: 'text', text: 'Response' }],
+        model: 'claude-sonnet-4-5',
+        usage: {},
+      });
+
+      await sendPromptToClaude('Test', {
+        system: 'Base review rules',
+        cachedSystemBlocks: ['Custom project instructions', 'Project architecture context'],
+      });
+
+      expect(mockMessagesCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          system: [
+            {
+              type: 'text',
+              text: 'Base review rules',
+              cache_control: { type: 'ephemeral' },
+            },
+            {
+              type: 'text',
+              text: 'Custom project instructions',
+              cache_control: { type: 'ephemeral' },
+            },
+            {
+              type: 'text',
+              text: 'Project architecture context',
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
+        })
+      );
+    });
+
+    it('should include extra system blocks without exceeding cache breakpoint limits', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        content: [{ type: 'text', text: 'Response' }],
+        model: 'claude-sonnet-4-5',
+        usage: {},
+      });
+
+      await sendPromptToClaude('Test', {
+        system: 'Base review rules',
+        cachedSystemBlocks: ['Block 1', 'Block 2', 'Block 3', 'Block 4'],
+      });
+
+      const request = mockMessagesCreate.mock.calls.at(-1)[0];
+      expect(request.system).toHaveLength(5);
+      expect(request.system.filter((block) => block.cache_control)).toHaveLength(4);
+      expect(request.system.at(-1)).toEqual({
+        type: 'text',
+        text: 'Block 4',
+      });
+    });
   });
 
   describe('message format', () => {

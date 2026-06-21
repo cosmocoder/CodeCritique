@@ -772,7 +772,9 @@ describe('rag-analyzer', () => {
         customDocs: [{ content: 'Mandatory internal review rule', document_title: 'Internal Standards' }],
       });
 
-      expect(llm.sendPromptToClaude).toHaveBeenCalledWith(expect.stringContaining('Mandatory internal review rule'), expect.any(Object));
+      const [, options] = llm.sendPromptToClaude.mock.calls.at(-1);
+      expect(options.cachedSystemBlocks.join('\n')).toContain('Mandatory internal review rule');
+      expect(llm.sendPromptToClaude.mock.calls.at(-1)[0]).not.toContain('Mandatory internal review rule');
     });
 
     it('should log selected chunks when verbose', async () => {

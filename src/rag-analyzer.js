@@ -835,6 +835,30 @@ MARKDOWN FORMATTING IN DESCRIPTIONS AND SUGGESTIONS:
 Your response must start with { and end with } with no additional text.`;
 }
 
+function buildCachedProjectContextBlocks({ roleDefinition, customDocsSection, projectArchitectureSection }) {
+  const blocks = [];
+
+  if (roleDefinition?.trim()) {
+    blocks.push(`REVIEW ROLE AND PROJECT INSTRUCTIONS
+
+${roleDefinition}`);
+  }
+
+  if (customDocsSection?.trim() && !customDocsSection.includes('No custom instructions provided.')) {
+    blocks.push(`CUSTOM PROJECT INSTRUCTIONS
+
+${customDocsSection}`);
+  }
+
+  if (projectArchitectureSection?.trim()) {
+    blocks.push(`PROJECT ARCHITECTURE CONTEXT
+
+${projectArchitectureSection}`);
+  }
+
+  return blocks;
+}
+
 // LLM call function - sends prompt with cached system content for cost optimization
 async function sendPromptToLLM(promptConfig, llmOptions) {
   try {
@@ -946,12 +970,14 @@ async function sendPromptToLLM(promptConfig, llmOptions) {
     verboseLog(llmOptions, chalk.gray(`  Prompt config has systemPrompt: ${!!promptConfig.systemPrompt}`));
     verboseLog(llmOptions, chalk.gray(`  Prompt config has userPrompt: ${!!promptConfig.userPrompt}`));
     verboseLog(llmOptions, chalk.gray(`  System prompt length: ${promptConfig.systemPrompt?.length || 0} chars`));
+    verboseLog(llmOptions, chalk.gray(`  Cached system blocks: ${promptConfig.cachedSystemBlocks?.length || 0}`));
     verboseLog(llmOptions, chalk.gray(`  User prompt length: ${promptConfig.userPrompt?.length || 0} chars`));
 
     // Send prompt with system (cached) and user (dynamic) content
     const response = await llm.sendPromptToClaude(promptConfig.userPrompt, {
       ...llmOptions,
       system: promptConfig.systemPrompt,
+      cachedSystemBlocks: promptConfig.cachedSystemBlocks || [],
       jsonSchema: codeReviewSchema,
     });
 
@@ -1096,21 +1122,21 @@ ${addLineNumbers(file.content)}
 
   // Build the cached system prompt (contains all static rules)
   const systemPrompt = buildCachedSystemPrompt('code');
+  const cachedSystemBlocks = buildCachedProjectContextBlocks({
+    roleDefinition,
+    customDocsSection,
+    projectArchitectureSection,
+  });
 
   // Build the dynamic user prompt (contains all variable content)
   const userPrompt = finalizePrompt(`
 ## REVIEW TYPE: CODE FILE ANALYSIS
 
-${roleDefinition}
-
 ${reviewInstructions}
-
-${customDocsSection}
 
 ${fileSection}
 
-CONTEXT FROM PROJECT:
-${projectArchitectureSection}
+Use the cached project context, project architecture, and custom instructions when evaluating this file.
 
 CONTEXT A: EXPLICIT GUIDELINES FROM DOCUMENTATION
 ${formattedGuidelines}
@@ -1136,7 +1162,7 @@ Analyze the FILE TO REVIEW above using the 4-stage methodology:
 - If you analyzed something and found it's fine, simply don't include it in the output
 `);
 
-  return { systemPrompt, userPrompt };
+  return { systemPrompt, userPrompt, cachedSystemBlocks };
 }
 
 /**
@@ -1215,22 +1241,22 @@ ${addLineNumbers(file.content)}
 
   // Build the cached system prompt (contains all static rules)
   const systemPrompt = buildCachedSystemPrompt('test');
+  const cachedSystemBlocks = buildCachedProjectContextBlocks({
+    roleDefinition,
+    customDocsSection,
+    projectArchitectureSection,
+  });
 
   // Build the dynamic user prompt (contains all variable content)
   const userPrompt = finalizePrompt(`
 ## REVIEW TYPE: TEST FILE ANALYSIS
-
-${roleDefinition}
 
 ${reviewInstructions}
 
 ${fileSection}
 
 ## ANALYSIS CONTEXT
-${customDocsSection}
-
-CONTEXT FROM PROJECT:
-${projectArchitectureSection}
+Use the cached project context, project architecture, and custom instructions when evaluating this test file.
 
 CONTEXT A: TESTING GUIDELINES AND BEST PRACTICES
 ${formattedGuidelines}
@@ -1253,7 +1279,7 @@ Analyze the TEST FILE above using the 5-stage methodology:
 - If you analyzed something and found it's fine, simply don't include it in the output
 `);
 
-  return { systemPrompt, userPrompt };
+  return { systemPrompt, userPrompt, cachedSystemBlocks };
 }
 
 /**
@@ -1371,12 +1397,15 @@ For each file in this PR, you have access to:
 
   // Build the cached system prompt (contains all static rules)
   const systemPrompt = buildCachedSystemPrompt('pr');
+  const cachedSystemBlocks = buildCachedProjectContextBlocks({
+    roleDefinition,
+    customDocsSection,
+    projectArchitectureSection,
+  });
 
   // Build the dynamic user prompt (contains all variable content)
   const userPrompt = finalizePrompt(`
 ## REVIEW TYPE: HOLISTIC PR ANALYSIS
-
-${roleDefinition}
 
 ## PULL REQUEST OVERVIEW
 - **Total Files**: ${prFiles.length}
@@ -1384,7 +1413,7 @@ ${roleDefinition}
 - **Test Files**: ${prFiles.filter((f) => f.isTest).length}
 
 ## UNIFIED CONTEXT FROM PROJECT
-${projectArchitectureSection}
+Use the cached project context, project architecture, and custom instructions when evaluating this pull request.
 
 ### PROJECT CODE EXAMPLES
 ${formattedCodeExamples}
@@ -1397,9 +1426,6 @@ ${formattedPRComments}
 
 ## PR FILES WITH CHANGES
 ${formattedPRFiles}
-
-## CUSTOM INSTRUCTIONS
-${customDocsSection}
 
 ## YOUR TASK
 
@@ -1418,7 +1444,7 @@ Analyze ALL PR FILES above using the 5-stage methodology:
 - If you analyzed something and found it's fine, simply don't include it in the output
 `);
 
-  return { systemPrompt, userPrompt };
+  return { systemPrompt, userPrompt, cachedSystemBlocks };
 }
 
 /**
