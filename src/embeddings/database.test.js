@@ -29,7 +29,9 @@ const createMockTable = (overrides = {}) => ({
   countRows: vi.fn().mockResolvedValue(50),
   createIndex: vi.fn().mockResolvedValue(undefined),
   schema: { fields: [{ name: 'project_path' }] },
-  query: vi.fn().mockReturnValue({ where: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
+  query: vi
+    .fn()
+    .mockReturnValue({ select: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis(), toArray: vi.fn().mockResolvedValue([]) }),
   add: vi.fn().mockResolvedValue(undefined),
   addColumns: vi.fn().mockResolvedValue(undefined),
   delete: vi.fn().mockResolvedValue(undefined),
@@ -394,17 +396,22 @@ describe('DatabaseManager', () => {
   describe('prune project embeddings', () => {
     it('should prune stale file embeddings only for missing live paths', async () => {
       mockDb.tableNames.mockResolvedValue(['file_embeddings']);
-      mockTable.query.mockReturnValue({
+      const query = {
+        select: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
         toArray: vi.fn().mockResolvedValue([
           { id: 'keep-file', path: 'src/keep.js', type: 'file', project_path: '/test/project/deep' },
           { id: 'drop-file', path: 'src/drop.js', type: 'file', project_path: '/test/project/deep' },
           { id: 'structure', path: '.', type: 'directory-structure', project_path: '/test/project/deep' },
         ]),
+      };
+      mockTable.query.mockReturnValue({
+        ...query,
       });
       const deleted = await dbManager.pruneProjectFileEmbeddings('/test/project/deep', new Set(['src/keep.js']));
       expect(deleted).toBe(1);
-      expect(mockTable.delete).toHaveBeenCalledWith(expect.stringContaining('drop-file'));
+      expect(query.select).toHaveBeenCalledWith(['id', 'path', 'type']);
+      expect(mockTable.delete).toHaveBeenCalledWith("id IN ('drop-file')");
       expect(mockTable.delete).not.toHaveBeenCalledWith(expect.stringContaining('structure'));
     });
 

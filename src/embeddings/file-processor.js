@@ -26,6 +26,7 @@ import { TABLE_NAMES, LANCEDB_DIR_NAME, FASTEMBED_CACHE_DIR_NAME } from './const
 import { createFileProcessingError } from './errors.js';
 
 const FILE_EMBEDDING_BATCH_SIZE = 50;
+const DELETE_BATCH_SIZE = 100;
 const DIRECTORY_STRUCTURE_TYPE = 'directory-structure';
 
 function createShortHash(content) {
@@ -45,6 +46,34 @@ function buildExistingDocumentSignature(chunks) {
     .map((chunk) => `${chunk.id}:${chunk.content_hash}`)
     .sort()
     .join('|');
+}
+
+function buildIdInFilter(ids) {
+  return `id IN (${ids.map((id) => `'${escapeSqlString(id)}'`).join(', ')})`;
+}
+
+async function deleteFileEmbeddingRecords(table, records) {
+  for (let start = 0; start < records.length; start += DELETE_BATCH_SIZE) {
+    const batch = records.slice(start, start + DELETE_BATCH_SIZE);
+
+    try {
+      await table.delete(buildIdInFilter(batch.map((record) => record.id)));
+      batch.forEach((record) => {
+        debug(`Deleted old version: ${record.path} (old hash: ${record.content_hash})`);
+      });
+    }
+    catch {
+      for (const record of batch) {
+        try {
+          await table.delete(`id = '${escapeSqlString(record.id)}'`);
+          debug(`Deleted old version: ${record.path} (old hash: ${record.content_hash})`);
+        }
+        catch (deleteError) {
+          console.warn(chalk.yellow(`Warning: Could not delete old version of ${record.path}: ${deleteError.message}`));
+        }
+      }
+    }
+  }
 }
 
 // ============================================================================
@@ -589,14 +618,8 @@ export class FileProcessor {
         }
       }
 
-      for (const recordToDelete of recordsToDelete.values()) {
-        try {
-          await sharedState.fileTable.delete(`id = '${escapeSqlString(recordToDelete.id)}'`);
-          debug(`Deleted old version: ${recordToDelete.path} (old hash: ${recordToDelete.content_hash})`);
-        }
-        catch (deleteError) {
-          console.warn(chalk.yellow(`Warning: Could not delete old version of ${recordToDelete.path}: ${deleteError.message}`));
-        }
+      if (recordsToDelete.size > 0) {
+        await deleteFileEmbeddingRecords(sharedState.fileTable, Array.from(recordsToDelete.values()));
       }
 
       if (filesToActuallyProcess.length === 0) {
