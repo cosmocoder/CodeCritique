@@ -27,6 +27,7 @@ import { isGenericDocument, getGenericDocumentContext } from './utils/document-d
 import { isTestFile, shouldProcessFile } from './utils/file-validation.js';
 import { detectFileType, detectLanguageFromExtension } from './utils/language-detection.js';
 import { debug, verboseLog } from './utils/logging.js';
+import { formatPlannedHolisticFileContext, mergeHolisticFileContextPlans } from './utils/pr-file-context.js';
 import { addLineNumbers } from './utils/string-utils.js';
 
 // Constants for content processing
@@ -1358,23 +1359,24 @@ ${g.content}
 
   // Format PR files with their diffs
   const prFiles = file.prFiles || [];
+  const holisticContextPlans = mergeHolisticFileContextPlans(prFiles, context.options || {});
   const formattedPRFiles = prFiles
     .map((prFile, idx) => {
+      const fileContextPlan = holisticContextPlans[idx];
+      const fileContext = formatPlannedHolisticFileContext(prFile, fileContextPlan, context.options || {});
       return `
 ## FILE ${idx + 1}: ${prFile.path}
 **Language**: ${prFile.language}
 **Type**: ${prFile.isTest ? 'Test' : 'Source'} file
 **Summary**: ${prFile.summary}
+**Context Mode**: ${fileContextPlan.mode === 'full' ? 'Full file content' : 'Focused changed-line context'}
 
 ### Changes (Git Diff):
 \`\`\`diff
 ${prFile.diff}
 \`\`\`
 
-### Full File Content (For Context - line numbers shown for reference):
-\`\`\`${prFile.language}
-${addLineNumbers(prFile.fullContent)}
-\`\`\`
+${fileContext}
 `;
     })
     .join('\n');
@@ -1388,17 +1390,17 @@ ${addLineNumbers(prFile.fullContent)}
 **CRITICAL CONTEXT AWARENESS INSTRUCTIONS:**
 
 For each file in this PR, you have access to:
-1. **FULL FILE CONTENT** - The complete file for understanding context and existing code
+1. **FILE CONTEXT** - Complete file content when it fits the holistic context budget, or focused changed-line windows for very large files/PRs
 2. **GIT DIFF** - Only the changes to review
 
 **Review Rules:**
 - ONLY critique the CHANGED lines shown in each file's diff (lines with + or -)
-- USE the full file content to understand context, dependencies, and existing implementations
+- USE the file context to understand dependencies, nearby behavior, and existing implementations
 - DO NOT suggest adding code that already exists in the unchanged portions of any file
-- DO NOT flag issues about missing code if it exists elsewhere in the full file
-- Before flagging cross-file issues, verify the code doesn't already exist in unchanged portions
-- Do NOT flag functions/variables as missing if they exist elsewhere in the full file
-- The unchanged code is part of each file - always check it before making assumptions`;
+- DO NOT flag issues about missing code when the provided context already shows the code exists
+- Before flagging cross-file issues, verify the code doesn't already exist in the provided context
+- Do NOT flag functions/variables as missing if they exist elsewhere in the provided context
+- The unchanged context is part of each file - always check it before making assumptions`;
 
   let roleDefinition = buildRoleDefinition(baseRole, customDocs, 'pr');
   roleDefinition += '\nAnalyze ALL files together to identify cross-file issues, consistency problems, and overall code quality.';

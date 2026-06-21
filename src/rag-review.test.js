@@ -270,7 +270,8 @@ describe('rag-review', () => {
       });
 
       // Setup: shouldChunkPR returns true to trigger chunked processing
-      shouldChunkPR.mockReturnValue({ shouldChunk: true, estimatedTokens: 100000, recommendedChunks: 2 });
+      const holisticContextPlans = [{ mode: 'focused', contextTokens: 10, totalTokens: 20 }];
+      shouldChunkPR.mockReturnValue({ shouldChunk: true, estimatedTokens: 100000, recommendedChunks: 2, holisticContextPlans });
 
       // Setup chunks that will be processed
       chunkPRFiles.mockReturnValue([
@@ -298,7 +299,7 @@ describe('rag-review', () => {
 
       // Verify chunking flow was triggered
       expect(shouldChunkPR).toHaveBeenCalled();
-      expect(chunkPRFiles).toHaveBeenCalled();
+      expect(chunkPRFiles).toHaveBeenCalledWith(expect.any(Array), 35000, expect.objectContaining({ holisticContextPlans }));
       expect(combineChunkResults).toHaveBeenCalled();
       expect(result.success).toBe(true);
     });

@@ -14,6 +14,7 @@ import { ensureBranchExists, findParentBranch, getChangedLinesInfo, getFileConte
 import { detectFileType, detectLanguageFromExtension } from './utils/language-detection.js';
 import { verboseLog } from './utils/logging.js';
 import { shouldChunkPR, chunkPRFiles, combineChunkResults } from './utils/pr-chunking.js';
+import { mergeHolisticFileContextPlans } from './utils/pr-file-context.js';
 
 /**
  * Review a single file using RAG approach
@@ -308,8 +309,10 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
     }
 
     // Check if PR should be chunked based on size and complexity (skip if this is already a chunk)
+    let holisticContextPlans = options.holisticContextPlans;
     if (!options.skipChunking) {
       const chunkingDecision = shouldChunkPR(prFiles, options);
+      holisticContextPlans = chunkingDecision.holisticContextPlans;
       verboseLog(verbose, chalk.blue(`PR size assessment: ${chunkingDecision.estimatedTokens} tokens, ${prFiles.length} files`));
       verboseLog(
         verbose && chunkingDecision.shouldChunk,
@@ -319,9 +322,11 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
       // If PR is too large, use chunked processing
       if (chunkingDecision.shouldChunk) {
         verboseLog(options, chalk.blue(`🔄 Using chunked processing for large PR (${chunkingDecision.estimatedTokens} tokens)`));
-        return await reviewLargePRInChunks(prFiles, options);
+        return await reviewLargePRInChunks(prFiles, { ...options, holisticContextPlans });
       }
     }
+
+    holisticContextPlans = mergeHolisticFileContextPlans(prFiles, options, holisticContextPlans);
 
     // Step 2: Gather unified context for the entire PR (for regular-sized PRs)
     verboseLog(verbose, chalk.blue(`Performing unified context retrieval for ${prFiles.length} PR files...`));
@@ -361,7 +366,7 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
     try {
       // Create a comprehensive review context with all files and their diffs
       const comprehensiveContext = {
-        prFiles: prFiles.map((file) => ({
+        prFiles: prFiles.map((file, index) => ({
           path: path.relative(workingDir, file.filePath),
           language: file.language,
           isTest: file.isTest,
@@ -369,6 +374,8 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
           summary: file.summary,
           fullContent: file.content, // Add full file content for context
           diff: file.diffContent,
+          diffInfo: file.diffInfo,
+          holisticContextPlan: file.holisticContextPlan || holisticContextPlans[index],
           baseBranch: file.baseBranch,
           targetBranch: file.targetBranch,
         })),
@@ -557,7 +564,7 @@ async function reviewLargePRInChunks(prFiles, options) {
 
   // Step 2: Split PR into manageable chunks
   // Each chunk includes both diff AND full file content, plus ~25k context overhead
-  const chunks = chunkPRFiles(prFiles, 35000); // Conservative limit accounting for context overhead
+  const chunks = chunkPRFiles(prFiles, 35000, options); // Conservative limit accounting for context overhead
   verboseLog(options, chalk.green(`✂️ Split PR into ${chunks.length} chunks`));
 
   chunks.forEach((chunk, i) => {

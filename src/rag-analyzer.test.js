@@ -578,6 +578,70 @@ describe('rag-analyzer', () => {
       );
       expect(result.success).toBe(true);
     });
+
+    it('should use focused context for oversized holistic PR files', async () => {
+      const hugeContent = Array.from({ length: 5000 }, (_, index) => `huge line ${index + 1}`).join('\n');
+      llm.sendPromptToClaude.mockResolvedValue(createMockHolisticReviewResponse());
+
+      const result = await runAnalysis(
+        'PR_HOLISTIC_REVIEW',
+        setupHolisticReviewOptions({
+          prFiles: [
+            createMockPRFile({
+              path: 'src/small.js',
+              fullContent: 'const small = true;',
+              diff: '@@ -1,1 +1,1 @@\n-const small = false;\n+const small = true;',
+            }),
+            createMockPRFile({
+              path: 'src/huge.js',
+              fullContent: hugeContent,
+              diff: '@@ -2500,1 +2500,1 @@\n-huge line 2500\n+huge line 2500 changed',
+            }),
+          ],
+          prContext: { totalFiles: 2 },
+          maxTotalFullContentTokens: 1000,
+        })
+      );
+
+      const prompt = llm.sendPromptToClaude.mock.calls.at(-1)[0];
+      expect(result.success).toBe(true);
+      expect(prompt).toContain('**Context Mode**: Full file content');
+      expect(prompt).toContain('**Context Mode**: Focused changed-line context');
+      expect(prompt).toContain('const small = true;');
+      expect(prompt).toContain('Focused File Context');
+      expect(prompt).toContain('2500 | huge line 2500');
+      expect(prompt).not.toContain('5000 | huge line 5000');
+    });
+
+    it('should preserve carried holistic context plans for chunked reviews', async () => {
+      llm.sendPromptToClaude.mockResolvedValue(createMockHolisticReviewResponse());
+
+      await runAnalysis(
+        'PR_HOLISTIC_REVIEW',
+        setupHolisticReviewOptions({
+          prFiles: [
+            createMockPRFile({
+              path: 'src/chunked.js',
+              fullContent: 'const wouldFit = true;',
+              diff: '@@ -1,1 +1,1 @@\n-const wouldFit = false;\n+const wouldFit = true;',
+              holisticContextPlan: {
+                mode: 'focused',
+                reason: 'global budget assigned focused context before chunking',
+                contextTokens: 5,
+                totalTokens: 20,
+                contextLineRadius: 0,
+              },
+            }),
+          ],
+          prContext: { totalFiles: 1 },
+        })
+      );
+
+      const prompt = llm.sendPromptToClaude.mock.calls.at(-1)[0];
+      expect(prompt).toContain('**Context Mode**: Focused changed-line context');
+      expect(prompt).toContain('global budget assigned focused context before chunking');
+      expect(prompt).not.toContain('### Full File Content');
+    });
   });
 
   // ==========================================================================
