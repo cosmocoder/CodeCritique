@@ -10,6 +10,12 @@ if ! command -v node &> /dev/null; then
     exit 1
 fi
 
+node_major_version=$(node -p 'process.versions.node.split(".")[0]')
+if [ "$node_major_version" -lt 24 ]; then
+    echo "Error: CodeCritique requires Node.js 24 or newer (found $(node --version))." >&2
+    exit 1
+fi
+
 # Parse only CodeCritique-supported settings so a project .env cannot inject
 # process-control options such as NODE_OPTIONS or PATH into the child command.
 exec node -e '
@@ -19,28 +25,29 @@ exec node -e '
   const args = process.argv.slice(1);
   const supportedKeys = [
     "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_LOG",
-    "GITHUB_TOKEN", "GH_TOKEN", "DEBUG", "VERBOSE"
+    "GITHUB_TOKEN", "GH_TOKEN", "DEBUG", "VERBOSE",
+    "CI", "GITHUB_WORKSPACE_PATH"
   ];
-  let fileEnv = {};
   try {
-    fileEnv = parseEnv(readFileSync(".env", "utf8"));
+    const fileEnv = parseEnv(readFileSync(".env", "utf8"));
+    for (const key of supportedKeys) {
+      if (!Object.hasOwn(fileEnv, key)) continue;
+      if (fileEnv[key].includes("\0")) throw new Error(`${key} contains a null byte`);
+      process.env[key] = fileEnv[key];
+    }
   } catch (error) {
     if (error.code !== "ENOENT") {
       console.error(`Unable to load .env: ${error.message}`);
       process.exit(1);
     }
   }
-  const env = { ...process.env };
-  for (const key of supportedKeys) {
-    if (Object.hasOwn(fileEnv, key)) env[key] = fileEnv[key];
-  }
-  if (!env.ANTHROPIC_API_KEY) {
+  if (!process.env.ANTHROPIC_API_KEY) {
     console.warn("Warning: ANTHROPIC_API_KEY is not set. Add it to .env or export it before running CodeCritique.");
   }
-  let result = spawnSync("codecritique", args, { stdio: "inherit", env });
+  let result = spawnSync("codecritique", args, { stdio: "inherit" });
   if (result.error?.code === "ENOENT") {
     console.log("codecritique not found globally, trying with npx...");
-    result = spawnSync("npx", ["codecritique", ...args], { stdio: "inherit", env });
+    result = spawnSync("npx", ["codecritique", ...args], { stdio: "inherit" });
   }
   if (result.error) {
     console.error(result.error.message);

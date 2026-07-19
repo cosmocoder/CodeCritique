@@ -7,7 +7,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 
 const execFileAsync = promisify(execFile);
 
-async function runWrapper(envFile, args = [], command = 'codecritique', extraEnv = {}, envIsDirectory = false) {
+async function runWrapper(envFile, args = [], command = 'codecritique', extraEnv = {}, envIsDirectory = false, nodeMajorVersion = null) {
   const directory = await mkdtemp(join(tmpdir(), 'codecritique-shell-'));
   onTestFinished(() => rm(directory, { recursive: true, force: true }));
   const fakeCommand = join(directory, command);
@@ -18,12 +18,18 @@ async function runWrapper(envFile, args = [], command = 'codecritique', extraEnv
   else if (envFile !== null) {
     await writeFile(join(directory, '.env'), envFile);
   }
-  await writeFile(
-    fakeCommand,
-    '#!/bin/bash\n[ "$1" = "--terminate" ] && kill -TERM $$\nprintf "key=%s\\n" "$ANTHROPIC_API_KEY"\nprintf "node_options=%s\\n" "$NODE_OPTIONS"\nprintf "arg=%s\\n" "$@"\n'
-  );
+  await writeFile(fakeCommand, '#!/bin/bash\n[ "$1" = "--terminate" ] && kill -TERM $$\n/usr/bin/env\nprintf "arg=%s\\n" "$@"\n');
   await chmod(fakeCommand, 0o755);
-  await symlink(process.execPath, join(directory, 'node'));
+  if (nodeMajorVersion === null) {
+    await symlink(process.execPath, join(directory, 'node'));
+  }
+  else {
+    await writeFile(
+      join(directory, 'node'),
+      `#!/bin/bash\nif [ "$1" = "-p" ]; then echo ${nodeMajorVersion}; exit; fi\nif [ "$1" = "--version" ]; then echo v${nodeMajorVersion}.0.0; exit; fi\nexec "${process.execPath}" "$@"\n`
+    );
+    await chmod(join(directory, 'node'), 0o755);
+  }
 
   const result = await execFileAsync('/bin/bash', [join(import.meta.dirname, 'codecritique.sh'), ...args], {
     cwd: directory,
@@ -34,13 +40,20 @@ async function runWrapper(envFile, args = [], command = 'codecritique', extraEnv
 }
 
 describe('codecritique.sh', () => {
+  it('rejects Node versions below the supported minimum', async () => {
+    await expect(runWrapper(null, [], 'codecritique', {}, false, 20)).rejects.toMatchObject({
+      code: 1,
+      stderr: 'Error: CodeCritique requires Node.js 24 or newer (found v20.0.0).\n',
+    });
+  });
+
   it.each([
     ['unquoted spaces and globs', 'ANTHROPIC_API_KEY=value with spaces *\n', 'value with spaces *'],
     ['literal JSON quotes', 'ANTHROPIC_API_KEY={"token":"a*b c"}\n', '{"token":"a*b c"}'],
   ])('loads %s without corruption', async (_label, envFile, expected) => {
     const { stdout } = await runWrapper(envFile, ['--flag', 'value with spaces']);
 
-    expect(stdout).toContain(`key=${expected}`);
+    expect(stdout).toContain(`ANTHROPIC_API_KEY=${expected}`);
     expect(stdout).toContain('arg=--flag');
     expect(stdout).toContain('arg=value with spaces');
   });
@@ -50,15 +63,43 @@ describe('codecritique.sh', () => {
       'ANTHROPIC_API_KEY=test\nMALICIOUS=$(touch executed)\nNODE_OPTIONS=--require=./does-not-exist.cjs\n'
     );
 
-    expect(stdout).toContain('key=test');
-    expect(stdout).toContain('node_options=\n');
+    expect(stdout).toContain('ANTHROPIC_API_KEY=test');
+    expect(stdout).not.toContain('NODE_OPTIONS=');
     await expect(access(join(directory, 'executed'))).rejects.toThrow();
+  });
+
+  it('forwards every supported .env setting', async () => {
+    const supportedEnv = {
+      ANTHROPIC_API_KEY: 'test',
+      ANTHROPIC_BASE_URL: 'https://api.example.test',
+      ANTHROPIC_LOG: 'debug',
+      GITHUB_TOKEN: 'github-token',
+      GH_TOKEN: 'gh-token',
+      DEBUG: '1',
+      VERBOSE: 'true',
+      CI: 'true',
+      GITHUB_WORKSPACE_PATH: '/workspace',
+    };
+    const envFile = Object.entries(supportedEnv)
+      .map(([key, value]) => `${key}=${value}`)
+      .join('\n');
+    const { stdout } = await runWrapper(envFile);
+
+    for (const [key, value] of Object.entries(supportedEnv)) {
+      expect(stdout).toContain(`${key}=${value}`);
+    }
+  });
+
+  it('reports null bytes in supported values without an internal stack', async () => {
+    await expect(runWrapper('ANTHROPIC_API_KEY=test\0value\n')).rejects.toMatchObject({
+      stderr: 'Unable to load .env: ANTHROPIC_API_KEY contains a null byte\n',
+    });
   });
 
   it('preserves an inherited API key when .env is absent', async () => {
     const { stdout } = await runWrapper(null, [], 'codecritique', { ANTHROPIC_API_KEY: 'inherited' });
 
-    expect(stdout).toContain('key=inherited');
+    expect(stdout).toContain('ANTHROPIC_API_KEY=inherited');
   });
 
   it('keeps the original .env-over-inherited-value precedence', async () => {
@@ -66,7 +107,7 @@ describe('codecritique.sh', () => {
       ANTHROPIC_API_KEY: 'from-parent',
     });
 
-    expect(stdout).toContain('key=from-file');
+    expect(stdout).toContain('ANTHROPIC_API_KEY=from-file');
   });
 
   it('warns when no Anthropic credentials are configured', async () => {
