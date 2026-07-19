@@ -1136,6 +1136,32 @@ describe('rag-analyzer', () => {
         expect(context.codeExamples[0].similarity).toBeGreaterThanOrEqual(0.7);
       }
     });
+
+    it('should deduplicate identical code content from different paths', async () => {
+      mockEmbeddingsSystem.findSimilarCode
+        .mockResolvedValueOnce([{ path: '/first.js', content: 'shared implementation', similarity: 0.7 }])
+        .mockResolvedValueOnce([{ path: '/second.js', content: ' shared implementation ', similarity: 0.9 }]);
+      const context = await gatherUnifiedContextForPR([
+        { filePath: '/src/file1.js', content: 'code1' },
+        { filePath: '/src/file2.js', content: 'code2' },
+      ]);
+
+      expect(context.codeExamples).toEqual([
+        expect.objectContaining({ path: '/second.js', content: ' shared implementation ', similarity: 0.9 }),
+      ]);
+    });
+
+    it('should keep content keys separate from path fallbacks', async () => {
+      mockEmbeddingsSystem.findSimilarCode
+        .mockResolvedValueOnce([{ path: '/first.js', content: '', similarity: 0.9 }])
+        .mockResolvedValueOnce([{ path: '/second.js', content: ' /first.js ', similarity: 0.8 }]);
+      const context = await gatherUnifiedContextForPR([
+        { filePath: '/src/file1.js', content: 'code1' },
+        { filePath: '/src/file2.js', content: 'code2' },
+      ]);
+
+      expect(context.codeExamples.map((example) => example.path)).toEqual(['/first.js', '/second.js']);
+    });
   });
 
   // ==========================================================================
