@@ -19,8 +19,8 @@ describe('shouldChunkPR', () => {
       const prFiles = [{ filePath: 'src/utils.js', diffContent: 'a'.repeat(300), content: 'b'.repeat(600) }];
       const result = shouldChunkPR(prFiles);
       expect(result.estimatedTokens).toBeGreaterThan(0);
-      expect(result.diffTokens).toBe(100); // 300 chars / 3
-      expect(result.fullContentTokens).toBe(200); // 600 chars / 3
+      expect(result.diffTokens).toBe(86); // 300 chars / 3.5
+      expect(result.fullContentTokens).toBe(172); // 600 chars / 3.5
     });
   });
 
@@ -268,7 +268,7 @@ describe('chunkPRFiles', () => {
         'diff --git a/src/huge.js b/src/huge.js',
         '--- a/src/huge.js',
         '+++ b/src/huge.js',
-        `@@ -150,1 +150,1 @@\n-old\n+${'x'.repeat(120000)}`,
+        `@@ -150,1 +150,1 @@\n-old\n+${'x'.repeat(140000)}`,
       ].join('\n');
 
       const chunks = chunkPRFiles([{ filePath: 'src/huge.js', diffContent: hugeDiff, content: 'y'.repeat(1200) }], 35000, {

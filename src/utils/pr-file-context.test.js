@@ -5,6 +5,10 @@ import {
   mergeHolisticFileContextPlans,
 } from './pr-file-context.js';
 
+it('estimates source code at 3.5 characters per token', () => {
+  expect(estimatePrContextTokens('x'.repeat(35))).toBe(10);
+});
+
 describe('mergeHolisticFileContextPlans', () => {
   it('keeps complete file content when the PR fits the holistic context budget', () => {
     const plans = mergeHolisticFileContextPlans([

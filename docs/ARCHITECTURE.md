@@ -58,7 +58,7 @@ Retrieval is also defensive about freshness and project isolation. Results are f
 
 ### LLM Integration
 
-[Anthropic Claude](https://www.anthropic.com/) (claude-sonnet-4-5 by default) analyzes code with rich contextual information. The retrieved context is combined with the code being reviewed and sent to Claude, which performs a comprehensive analysis considering:
+[Anthropic Claude](https://www.anthropic.com/) (claude-sonnet-4-6 by default) analyzes code with rich contextual information. The retrieved context is combined with the code being reviewed and sent to Claude, which performs a comprehensive analysis considering:
 
 - The code structure and logic
 - Similar patterns from your codebase
