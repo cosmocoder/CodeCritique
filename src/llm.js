@@ -48,6 +48,7 @@ const DEFAULT_MODEL = 'claude-sonnet-4-6';
 const MAX_TOKENS = 4096;
 
 const DEFAULT_BATCH_POLL_INTERVAL_MS = 10000;
+const MAX_BATCH_POLL_FAILURES = 3;
 
 const MAX_CACHE_CONTROL_BLOCKS = 4;
 
@@ -94,10 +95,21 @@ async function createBatchedMessage(client, requestParams, options) {
   });
 
   verboseLog(options, chalk.cyan(`Submitted Claude message batch ${batch.id}; waiting for completion...`));
+  let consecutivePollFailures = 0;
 
   while (batch.processing_status !== 'ended') {
-    await delay(options.batchPollIntervalMs ?? DEFAULT_BATCH_POLL_INTERVAL_MS);
-    batch = await client.messages.batches.retrieve(batch.id);
+    await delay(DEFAULT_BATCH_POLL_INTERVAL_MS);
+    try {
+      batch = await client.messages.batches.retrieve(batch.id);
+      consecutivePollFailures = 0;
+    }
+    catch (error) {
+      consecutivePollFailures++;
+      if (consecutivePollFailures >= MAX_BATCH_POLL_FAILURES) {
+        throw new Error(`Unable to poll Claude message batch ${batch.id} after ${MAX_BATCH_POLL_FAILURES} attempts: ${error.message}`);
+      }
+      console.warn(chalk.yellow(`Unable to poll Claude message batch ${batch.id}; retrying: ${error.message}`));
+    }
   }
 
   const results = await client.messages.batches.results(batch.id);
@@ -128,7 +140,6 @@ async function createBatchedMessage(client, requestParams, options) {
  * @param {Object} options.jsonSchema - JSON schema for structured output
  * @param {string} options.cacheTtl - Cache TTL: '5m' (default, no extra cost) or '1h' (extended, extra cost for writes)
  * @param {boolean} [options.batch=false] - Use the asynchronous Message Batches API
- * @param {number} [options.batchPollIntervalMs=10000] - Batch polling interval in milliseconds
  * @returns {Promise<Object>} The response from Claude with structured data
  */
 async function sendPromptToClaude(prompt, options = {}) {

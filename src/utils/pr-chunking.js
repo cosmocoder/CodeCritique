@@ -468,7 +468,7 @@ function getDirectoryDepth(filePath) {
  */
 export function combineChunkResults(chunkResults, totalFiles, options = {}) {
   const combinedResult = {
-    success: true,
+    success: chunkResults.every((chunkResult) => chunkResult.success),
     results: [],
     prContext: {
       totalFiles: totalFiles,
@@ -481,7 +481,7 @@ export function combineChunkResults(chunkResults, totalFiles, options = {}) {
 
   // Combine file-specific results, merging split-file review parts back into one file result.
   chunkResults.forEach((chunkResult, chunkIndex) => {
-    if (chunkResult.success && chunkResult.results) {
+    if (chunkResult.results) {
       chunkResult.results.forEach((fileResult, resultIndex) => {
         mergeChunkFileResult(mergedResultsByFile, fileResult, {
           chunkNumber: chunkIndex + 1,
@@ -527,8 +527,15 @@ function mergeChunkFileResult(mergedResultsByFile, fileResult, chunkInfo) {
   }
 
   const existing = mergedResultsByFile.get(key);
+  const hasSuccessfulPart = existing.success === true || fileResult.success === true;
+  const hasFailedPart = existing.success === false || existing.partial || fileResult.success === false;
   const existingIssues = existing.results?.issues || [];
   const newIssues = fileResult.results?.issues || [];
+  existing.success = hasSuccessfulPart;
+  if (hasSuccessfulPart && hasFailedPart) {
+    existing.partial = true;
+  }
+  existing.error ||= fileResult.error;
   existing.results = {
     ...existing.results,
     ...fileResult.results,

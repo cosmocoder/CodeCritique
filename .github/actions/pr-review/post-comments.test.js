@@ -805,6 +805,23 @@ describe('post-comments.js', () => {
       expect(createCommentCall.body).not.toContain('No Issues Found');
       expect(mockGithub.rest.pulls.createReviewComment).toHaveBeenCalled();
     });
+
+    it('should report aggregate review failure without inventing a failed file', async () => {
+      fs.readFileSync.mockReturnValue(
+        JSON.stringify({
+          summary: { totalFilesReviewed: 1, totalIssues: 0, errorFiles: 0, incomplete: true },
+          details: [{ filePath: 'src/a.js', success: true, review: { issues: [] } }],
+        })
+      );
+
+      await postComments({ github: mockGithub, context: mockContext, core: mockCore });
+
+      const createCommentCall = mockGithub.rest.issues.createComment.mock.calls[0][0];
+      expect(createCommentCall.body).toContain('Review Incomplete');
+      expect(createCommentCall.body).toContain('did not complete all review work');
+      expect(createCommentCall.body).not.toContain('could not analyze 0 files');
+      expect(createCommentCall.body).not.toContain('No Issues Found');
+    });
   });
 
   describe('PR-level findings', () => {

@@ -422,7 +422,7 @@ jobs:
 | `concurrency`       | Concurrency for processing multiple files                                                                | No       | `3`                  |
 | `custom-docs`       | Custom documents (format: `"title:path,title:path"`)                                                     | No       | `''`                 |
 
-Batch mode trades latency for Anthropic's Message Batches API discount. Processing may take up to 24 hours, and batch requests are not eligible for Zero Data Retention. GitHub-hosted jobs can run for at most six hours; the action polls in-process and cannot resume a batch after the job ends.
+Batch mode trades latency for Anthropic's Message Batches API discount. Processing may take up to 24 hours, and batch requests are not eligible for Zero Data Retention. GitHub-hosted jobs can run for at most six hours; the action polls in-process and cannot resume a batch after the job ends. If holistic analysis falls back to per-file reviews, each concurrency wave can incur a separate batch wait and further increase runtime.
 
 > **Note**: The action uses sensible defaults for all review parameters. It always:
 >

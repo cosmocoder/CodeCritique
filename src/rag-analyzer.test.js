@@ -199,12 +199,9 @@ describe('rag-analyzer', () => {
     it('should forward batch transport options to the LLM', async () => {
       setupSuccessfulLLMResponse();
 
-      await runAnalysis('/test/file.js', { batch: true, batchPollIntervalMs: 25 });
+      await runAnalysis('/test/file.js', { batch: true });
 
-      expect(llm.sendPromptToClaude).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({ batch: true, batchPollIntervalMs: 25 })
-      );
+      expect(llm.sendPromptToClaude).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ batch: true }));
     });
 
     it('should initialize embeddings system', async () => {

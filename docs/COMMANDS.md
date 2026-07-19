@@ -79,7 +79,7 @@ codecritique analyze --files "src/**/*.ts" --output json --output-file review.js
 codecritique analyze --diff-with feature-branch --track-feedback --feedback-path ./feedback-artifacts
 ```
 
-Batch processing receives Anthropic's Message Batches API discount, but results may take up to 24 hours. Batch requests are not eligible for Zero Data Retention.
+Batch processing receives Anthropic's Message Batches API discount, but results may take up to 24 hours. Batch requests are not eligible for Zero Data Retention. If holistic analysis falls back to per-file reviews, each concurrency wave can incur a separate batch wait and further increase runtime.
 
 ## embeddings:generate
 

@@ -323,6 +323,7 @@ export default async ({ github, context, core }) => {
 
     const totalIssues = reviewData.summary?.totalIssues || 0;
     const errorFiles = reviewData.summary?.errorFiles || 0;
+    const reviewIncomplete = reviewData.summary?.incomplete || errorFiles > 0;
     const prLevelFindingsSection = formatPRLevelFindings(reviewData.prLevelFindings);
     const hasReviewFindings = totalIssues > 0 || Boolean(prLevelFindingsSection);
 
@@ -444,10 +445,14 @@ export default async ({ github, context, core }) => {
 **Issues Found:** ${totalIssues}
 
 ${
-  errorFiles > 0
+  reviewIncomplete
     ? `### ⚠️ Review Incomplete
 
-The AI review could not analyze ${errorFiles} file${errorFiles === 1 ? '' : 's'}. A lack of reported issues is not conclusive.`
+${
+  errorFiles > 0
+    ? `The AI review could not analyze ${errorFiles} file${errorFiles === 1 ? '' : 's'}.`
+    : 'The AI review did not complete all review work.'
+} A lack of reported issues is not conclusive.`
     : hasReviewFindings
       ? `### 📋 Review Results
 

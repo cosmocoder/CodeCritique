@@ -348,6 +348,62 @@ describe('combineChunkResults', () => {
       expect(combined.success).toBe(true);
     });
 
+    it('should preserve partial results and failure state from unsuccessful chunks', () => {
+      const chunkResults = [
+        {
+          success: false,
+          results: [
+            { filePath: 'src/reviewed.js', success: true, results: { issues: [{ type: 'bug', description: 'Finding' }] } },
+            { filePath: 'src/failed.js', success: false, error: 'Batch expired' },
+          ],
+        },
+      ];
+
+      const combined = combineChunkResults(chunkResults, 2);
+
+      expect(combined.success).toBe(false);
+      expect(combined.results).toEqual([
+        expect.objectContaining({ filePath: 'src/reviewed.js', success: true }),
+        expect.objectContaining({ filePath: 'src/failed.js', success: false, error: 'Batch expired' }),
+      ]);
+      expect(combined.combinedSummary).toContain('Total issues found: 1');
+    });
+
+    it.each([
+      [
+        'successful part first',
+        [
+          { success: true, results: { issues: [{ type: 'bug', description: 'Finding' }] } },
+          { success: false, error: 'Batch expired' },
+        ],
+      ],
+      [
+        'failed part first',
+        [
+          { success: false, error: 'Batch expired' },
+          { success: true, results: { issues: [{ type: 'bug', description: 'Finding' }] } },
+        ],
+      ],
+    ])('should preserve findings and errors when a split file has mixed outcomes: %s', (_label, fileParts) => {
+      const chunkResults = fileParts.map((filePart) => ({
+        success: filePart.success,
+        results: [{ filePath: 'src/split.js', ...filePart }],
+      }));
+
+      const combined = combineChunkResults(chunkResults, 1);
+
+      expect(combined.success).toBe(false);
+      expect(combined.results).toEqual([
+        expect.objectContaining({
+          filePath: 'src/split.js',
+          success: true,
+          partial: true,
+          error: 'Batch expired',
+          results: { issues: [{ type: 'bug', description: 'Finding' }] },
+        }),
+      ]);
+    });
+
     it('should add chunk info to each result', () => {
       const chunkResults = [
         {

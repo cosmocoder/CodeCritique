@@ -436,33 +436,6 @@ describe('rag-review', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should fall back to per-file review when holistic analysis returns a failure', async () => {
-      shouldProcessFile.mockReturnValue(true);
-      getFileContentFromGit.mockReturnValue('const x = 1;');
-      getChangedLinesInfo.mockReturnValue({
-        hasChanges: true,
-        addedLines: [1],
-        removedLines: [],
-        fullDiff: '+ code',
-      });
-      shouldChunkPR.mockReturnValue({ shouldChunk: false, estimatedTokens: 1000 });
-      runAnalysis.mockResolvedValueOnce({ success: false, error: 'Claude batch request expired' }).mockResolvedValueOnce({
-        success: true,
-        filePath: '/src/file.js',
-        language: 'javascript',
-        results: { issues: [], summary: 'Fallback review' },
-      });
-
-      const result = await reviewPullRequest(['/src/file.js'], { batch: true });
-
-      expect(runAnalysis).toHaveBeenCalledTimes(2);
-      expect(runAnalysis).toHaveBeenLastCalledWith(
-        '/src/file.js',
-        expect.objectContaining({ batch: true, isPRReview: true, diffOnly: true })
-      );
-      expect(result.results).toEqual([expect.objectContaining({ success: true, filePath: '/src/file.js' })]);
-    });
-
     it('should retain successful fallback results when another file fails', async () => {
       shouldProcessFile.mockReturnValue(true);
       getFileContentFromGit.mockReturnValue('const x = 1;');
@@ -490,6 +463,7 @@ describe('rag-review', () => {
         expect.objectContaining({ success: true, filePath: '/src/a.js' }),
         expect.objectContaining({ success: false, filePath: '/src/b.js', error: 'Claude batch request expired' }),
       ]);
+      expect(runAnalysis).toHaveBeenLastCalledWith('/src/b.js', expect.objectContaining({ batch: true, isPRReview: true, diffOnly: true }));
     });
 
     it('should handle multiple files with different statuses', async () => {
