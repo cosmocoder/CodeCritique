@@ -399,6 +399,9 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
 
       // Create a synthetic "file" path for holistic analysis
       const holisticResult = await runAnalysis('PR_HOLISTIC_REVIEW', holisticOptions);
+      if (!holisticResult?.success) {
+        throw new Error(holisticResult?.error || 'Holistic PR analysis failed');
+      }
 
       // Convert holistic result to individual file results format for compatibility
       const results = prFiles.map((file) => {
@@ -525,8 +528,10 @@ async function reviewPullRequestWithCrossFileContext(filesToReview, options = {}
       }
 
       // Return fallback results
+      const failedReviewCount = results.filter((result) => !result?.success).length;
       return {
-        success: true,
+        success: failedReviewCount === 0,
+        error: failedReviewCount > 0 ? `${failedReviewCount} file review(s) failed after holistic review fallback` : undefined,
         results: results,
         prContext: prContext,
         sharedContextStats: {

@@ -779,6 +779,32 @@ describe('post-comments.js', () => {
       expect(createCommentCall.body).toContain('No Issues Found');
       expect(createCommentCall.body).toContain('Great job!');
     });
+
+    it('should report incomplete analysis instead of no issues when files failed', async () => {
+      const incompleteReview = {
+        summary: { totalFilesReviewed: 2, totalIssues: 1, errorFiles: 1 },
+        details: [
+          {
+            filePath: 'src/a.js',
+            success: true,
+            review: {
+              issues: [{ description: 'Known issue', severity: 'warning', lineNumbers: [1] }],
+            },
+          },
+          { filePath: 'src/b.js', success: false, error: 'Claude batch request expired' },
+        ],
+      };
+
+      fs.readFileSync.mockReturnValue(JSON.stringify(incompleteReview));
+
+      await postComments({ github: mockGithub, context: mockContext, core: mockCore });
+
+      const createCommentCall = mockGithub.rest.issues.createComment.mock.calls[0][0];
+      expect(createCommentCall.body).toContain('Review Incomplete');
+      expect(createCommentCall.body).toContain('could not analyze 1 file');
+      expect(createCommentCall.body).not.toContain('No Issues Found');
+      expect(mockGithub.rest.pulls.createReviewComment).toHaveBeenCalled();
+    });
   });
 
   describe('PR-level findings', () => {

@@ -782,6 +782,8 @@ async function callLLMForAnalysis(context, options = {}) {
       isJsonMode: true, // Standardize on using JSON mode if available
       verbose: options.verbose || false, // Pass verbose flag for cache statistics
       cacheTtl: options.cacheTtl || '5m', // Pass cache TTL option (default: 5m, no extra cost)
+      batch: options.batch || false,
+      batchPollIntervalMs: options.batchPollIntervalMs,
     });
 
     verboseLog(options, chalk.blue('Received LLM response, attempting to parse...'));

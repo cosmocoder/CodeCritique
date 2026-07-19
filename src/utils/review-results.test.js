@@ -1,6 +1,16 @@
-import { collectPRLevelFindings, getFileLevelIssueCount, hasPRLevelFindings } from './review-results.js';
+import { collectPRLevelFindings, getFileLevelIssueCount, getReviewResultsForErrorOutput, hasPRLevelFindings } from './review-results.js';
 
 describe('review-results utilities', () => {
+  it('preserves partial review results in error output', () => {
+    const results = [
+      { filePath: 'a.js', success: true, results: { issues: [{ description: 'Known issue' }] } },
+      { filePath: 'b.js', success: false, error: 'Review expired' },
+    ];
+
+    expect(getReviewResultsForErrorOutput('One review failed', { results })).toBe(results);
+    expect(getReviewResultsForErrorOutput('Review failed')).toEqual([{ filePath: 'review', success: false, error: 'Review failed' }]);
+  });
+
   it('does not count synthetic cross-chunk patterns as additional issues', () => {
     const reviewResults = [
       { results: { issues: [{ description: 'File issue' }] } },

@@ -34,6 +34,11 @@ inputs:
     required: false
     default: '5m'
 
+  batch:
+    description: 'Use the asynchronous Anthropic Message Batches API for lower-cost reviews'
+    required: false
+    default: 'false'
+
   concurrency:
     description: 'Concurrency for processing multiple files'
     required: false
@@ -230,6 +235,10 @@ runs:
 
         if [ -n "${{ inputs.cache-ttl }}" ]; then
           CLI_ARGS+=("--cache-ttl" "${{ inputs.cache-ttl }}")
+        fi
+
+        if [ "${{ inputs.batch }}" = "true" ]; then
+          CLI_ARGS+=("--batch")
         fi
 
         if [ -n "${{ inputs.concurrency }}" ]; then

@@ -6,6 +6,14 @@ export function getFileLevelIssueCount(reviewResults = []) {
   return reviewResults.reduce((sum, result) => sum + (result?.results?.issues?.length || 0), 0);
 }
 
+export function getReviewResultsForErrorOutput(error, aggregateResult = {}) {
+  if (aggregateResult.results?.length > 0) {
+    return aggregateResult.results;
+  }
+
+  return [{ filePath: 'review', success: false, error }];
+}
+
 export function hasPRLevelFindings(prLevelFindings = {}) {
   return Boolean(prLevelFindings.summary || prLevelFindings.issues?.length || prLevelFindings.recommendations?.length);
 }

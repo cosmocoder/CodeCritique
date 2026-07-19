@@ -2,14 +2,28 @@ import { sendPromptToClaude } from './llm.js';
 
 // Create hoisted mock for the Anthropic SDK
 const mockMessagesCreate = vi.hoisted(() => vi.fn());
+const mockBatchesCreate = vi.hoisted(() => vi.fn());
+const mockBatchesRetrieve = vi.hoisted(() => vi.fn());
+const mockBatchesResults = vi.hoisted(() => vi.fn());
 
 vi.mock('@anthropic-ai/sdk', () => ({
   Anthropic: class MockAnthropic {
     messages = {
       create: mockMessagesCreate,
+      batches: {
+        create: mockBatchesCreate,
+        retrieve: mockBatchesRetrieve,
+        results: mockBatchesResults,
+      },
     };
   },
 }));
+
+function batchResults(...responses) {
+  return (async function* iterateResults() {
+    yield* responses;
+  })();
+}
 
 describe('sendPromptToClaude', () => {
   beforeEach(() => {
@@ -83,6 +97,58 @@ describe('sendPromptToClaude', () => {
             },
           ],
         })
+      );
+    });
+
+    it('should submit, poll, and unwrap a successful batch request', async () => {
+      const message = {
+        content: [{ type: 'text', text: 'Batched response' }],
+        model: 'claude-sonnet-4-5',
+        usage: { input_tokens: 100, output_tokens: 50 },
+      };
+      mockBatchesCreate.mockResolvedValue({ id: 'msgbatch_123', processing_status: 'in_progress' });
+      mockBatchesRetrieve.mockResolvedValue({ id: 'msgbatch_123', processing_status: 'ended' });
+      mockBatchesResults.mockResolvedValue(batchResults({ custom_id: 'codecritique-review', result: { type: 'succeeded', message } }));
+
+      const result = await sendPromptToClaude('Review this code', {
+        batch: true,
+        batchPollIntervalMs: 0,
+      });
+
+      expect(result.content).toBe('Batched response');
+      expect(mockMessagesCreate).not.toHaveBeenCalled();
+      expect(mockBatchesCreate).toHaveBeenCalledWith({
+        requests: [
+          {
+            custom_id: 'codecritique-review',
+            params: expect.objectContaining({
+              model: 'claude-sonnet-4-5',
+              messages: [{ role: 'user', content: 'Review this code' }],
+            }),
+          },
+        ],
+      });
+      expect(mockBatchesRetrieve).toHaveBeenCalledWith('msgbatch_123');
+      expect(mockBatchesResults).toHaveBeenCalledWith('msgbatch_123');
+    });
+
+    it.each([
+      [{ type: 'errored', error: { error: { message: 'Request overloaded' } } }, 'Claude batch request errored: Request overloaded'],
+      [{ type: 'canceled' }, 'Claude batch request canceled'],
+      [{ type: 'expired' }, 'Claude batch request expired'],
+    ])('should report an unsuccessful batch result', async (batchResult, expectedMessage) => {
+      mockBatchesCreate.mockResolvedValue({ id: 'msgbatch_123', processing_status: 'ended' });
+      mockBatchesResults.mockResolvedValue(batchResults({ custom_id: 'codecritique-review', result: batchResult }));
+
+      await expect(sendPromptToClaude('Review this code', { batch: true })).rejects.toThrow(expectedMessage);
+    });
+
+    it('should reject a batch response without the review result', async () => {
+      mockBatchesCreate.mockResolvedValue({ id: 'msgbatch_123', processing_status: 'ended' });
+      mockBatchesResults.mockResolvedValue(batchResults());
+
+      await expect(sendPromptToClaude('Review this code', { batch: true })).rejects.toThrow(
+        'Claude batch response did not contain the review request'
       );
     });
   });

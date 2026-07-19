@@ -25,6 +25,7 @@ codecritique analyze [options]
 | `--temperature <number>`          | LLM temperature                                                                                                                               | `0.2`         |
 | `--max-tokens <number>`           | LLM max tokens                                                                                                                                | `8192`        |
 | `--cache-ttl <ttl>`               | Cache TTL for LLM prompts: "5m" (default, no extra cost) or "1h" (extended, extra cost for cache writes)                                      | `5m`          |
+| `--batch`                         | Use the asynchronous Anthropic Message Batches API for lower-cost reviews                                                                     | `false`       |
 | `--similarity-threshold <number>` | Threshold for finding similar code examples                                                                                                   | `0.6`         |
 | `--max-examples <number>`         | Max similar code examples to use                                                                                                              | `5`           |
 | `--concurrency <number>`          | Concurrency for processing multiple files                                                                                                     | `3`           |
@@ -62,6 +63,9 @@ codecritique analyze --file app.py \
 # Use extended cache TTL for large PRs (higher cache hit rate, extra cost for writes)
 codecritique analyze --diff-with feature-branch --cache-ttl 1h
 
+# Use batch processing when lower cost matters more than immediate results
+codecritique analyze --diff-with feature-branch --batch
+
 # Analyze changes in specific directory
 codecritique analyze --diff-with feature-branch --directory /path/to/repo
 
@@ -74,6 +78,8 @@ codecritique analyze --files "src/**/*.ts" --output json --output-file review.js
 # Analyze with feedback tracking (avoids repeating dismissed issues)
 codecritique analyze --diff-with feature-branch --track-feedback --feedback-path ./feedback-artifacts
 ```
+
+Batch processing receives Anthropic's Message Batches API discount, but results may take up to 24 hours. Batch requests are not eligible for Zero Data Retention.
 
 ## embeddings:generate
 

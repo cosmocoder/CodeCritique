@@ -31,7 +31,12 @@ import { reviewFile, reviewFiles, reviewPullRequest } from './rag-review.js';
 import { execGitSafe } from './utils/command.js';
 import { ensureBranchExists, findParentBranch } from './utils/git.js';
 import { diagnosticLog, isDebugEnabled, isVerboseEnabled, verboseLog } from './utils/logging.js';
-import { collectPRLevelFindings, getFileLevelIssueCount, hasPRLevelFindings } from './utils/review-results.js';
+import {
+  collectPRLevelFindings,
+  getFileLevelIssueCount,
+  getReviewResultsForErrorOutput,
+  hasPRLevelFindings,
+} from './utils/review-results.js';
 import { configureCleanStdoutForDataOutput, isBrokenStdoutPipeError, writeStdout } from './utils/stdout.js';
 
 async function cleanupEmbeddingsSystemIfInitialized() {
@@ -67,6 +72,7 @@ program
   .option('--temperature <number>', 'LLM temperature', parseFloat, 0.2)
   .option('--max-tokens <number>', 'LLM max tokens', parseIntegerOption, 8192)
   .option('--cache-ttl <ttl>', 'Cache TTL for LLM prompts: "5m" (default, no extra cost) or "1h" (extended, extra cost for writes)', '5m')
+  .option('--batch', 'Use the asynchronous Anthropic Message Batches API for lower-cost reviews')
   .option('--similarity-threshold <number>', 'Threshold for finding similar code examples', parseFloat, 0.6)
   .option('--max-examples <number>', 'Max similar code examples to use', parseIntegerOption, 5)
   .option('--concurrency <number>', 'Concurrency for processing multiple files', parseIntegerOption, 3)
@@ -350,6 +356,7 @@ async function runCodeReview(options) {
     temperature: options.temperature,
     maxTokens: options.maxTokens,
     cacheTtl: options.cacheTtl,
+    batch: options.batch,
     similarityThreshold: options.similarityThreshold,
     maxExamples: options.maxExamples,
     concurrency: options.concurrency,
@@ -1097,20 +1104,13 @@ async function emitErrorReviewOutputIfNeeded(options, error, aggregateResult = {
     return false;
   }
 
-  await outputReviewResults([createReviewErrorResult(error)], options, {
+  const reviewResults = getReviewResultsForErrorOutput(error, aggregateResult);
+  await outputReviewResults(reviewResults, options, {
     ...aggregateResult,
     success: false,
     error,
   });
   return true;
-}
-
-function createReviewErrorResult(error) {
-  return {
-    filePath: 'review',
-    success: false,
-    error,
-  };
 }
 
 /**

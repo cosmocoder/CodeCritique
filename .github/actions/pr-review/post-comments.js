@@ -322,6 +322,7 @@ export default async ({ github, context, core }) => {
     console.log('✅ JSON file is valid');
 
     const totalIssues = reviewData.summary?.totalIssues || 0;
+    const errorFiles = reviewData.summary?.errorFiles || 0;
     const prLevelFindingsSection = formatPRLevelFindings(reviewData.prLevelFindings);
     const hasReviewFindings = totalIssues > 0 || Boolean(prLevelFindingsSection);
 
@@ -443,11 +444,15 @@ export default async ({ github, context, core }) => {
 **Issues Found:** ${totalIssues}
 
 ${
-  hasReviewFindings
-    ? `### 📋 Review Results
+  errorFiles > 0
+    ? `### ⚠️ Review Incomplete
+
+The AI review could not analyze ${errorFiles} file${errorFiles === 1 ? '' : 's'}. A lack of reported issues is not conclusive.`
+    : hasReviewFindings
+      ? `### 📋 Review Results
 
 The AI has identified review findings or recommendations. PR-level findings are listed below when available, and file-specific findings may appear as inline comments.`
-    : `### ✅ No Issues Found
+      : `### ✅ No Issues Found
 
 Great job! The AI review didn't identify any significant issues with your changes.`
 }
