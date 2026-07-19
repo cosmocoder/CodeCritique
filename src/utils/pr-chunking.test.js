@@ -362,6 +362,7 @@ describe('combineChunkResults', () => {
       const combined = combineChunkResults(chunkResults, 2);
 
       expect(combined.success).toBe(false);
+      expect(combined.error).toBe('1 of 1 review chunks failed');
       expect(combined.results).toEqual([
         expect.objectContaining({ filePath: 'src/reviewed.js', success: true }),
         expect.objectContaining({ filePath: 'src/failed.js', success: false, error: 'Batch expired' }),

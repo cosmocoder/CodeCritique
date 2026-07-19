@@ -51,8 +51,8 @@ it('parses integer options and renders incomplete results in every output format
   await vi.waitFor(() => expect(reviewFile).toHaveBeenCalled());
   expect(reviewFile.mock.calls[0][1].maxExamples).toBe(12);
   await vi.waitFor(() => expect(console.log).toHaveBeenCalledWith('    Visible partial finding'));
-  expect(console.log.mock.calls.some(([message]) => String(message).includes('Partial review for src/index.js'))).toBe(true);
-  expect(console.log.mock.calls.some(([message]) => String(message).includes('Review incomplete'))).toBe(true);
+  expect(console.warn.mock.calls.some(([message]) => String(message).includes('Partial review for src/index.js'))).toBe(true);
+  expect(console.warn.mock.calls.some(([message]) => String(message).includes('Review incomplete'))).toBe(true);
 
   const jsonPath = join(directory, 'review.json');
   await program.parseAsync(['node', 'index.js', 'analyze', '--file', 'src/index.js', '--output', 'json', '--output-file', jsonPath]);

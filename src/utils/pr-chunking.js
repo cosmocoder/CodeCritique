@@ -467,8 +467,10 @@ function getDirectoryDepth(filePath) {
  * @returns {Object} Combined result object
  */
 export function combineChunkResults(chunkResults, totalFiles, options = {}) {
+  const failedChunkCount = chunkResults.filter((chunkResult) => !chunkResult.success).length;
   const combinedResult = {
-    success: chunkResults.every((chunkResult) => chunkResult.success),
+    success: failedChunkCount === 0,
+    error: failedChunkCount > 0 ? `${failedChunkCount} of ${chunkResults.length} review chunks failed` : undefined,
     results: [],
     prContext: {
       totalFiles: totalFiles,
@@ -528,7 +530,7 @@ function mergeChunkFileResult(mergedResultsByFile, fileResult, chunkInfo) {
 
   const existing = mergedResultsByFile.get(key);
   const hasSuccessfulPart = existing.success === true || fileResult.success === true;
-  const hasFailedPart = existing.success === false || existing.partial || fileResult.success === false;
+  const hasFailedPart = existing.success === false || fileResult.success === false;
   const existingIssues = existing.results?.issues || [];
   const newIssues = fileResult.results?.issues || [];
   existing.success = hasSuccessfulPart;

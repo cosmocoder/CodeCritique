@@ -1302,7 +1302,7 @@ function outputText(reviewResults, cliOptions, aggregateResult = {}) {
     console.log(`Errors: ${chalk.red(errorFiles)}`);
   }
   if (aggregateResult.success === false) {
-    console.log(chalk.yellow(`Review Incomplete: ${aggregateResult.error || 'Some review work failed.'}`));
+    console.warn(chalk.yellow(`Review Incomplete: ${aggregateResult.error || 'Some review work failed.'}`));
   }
   console.log(chalk.bold.blue('================================================'));
 
@@ -1316,7 +1316,7 @@ function outputText(reviewResults, cliOptions, aggregateResult = {}) {
       return;
     }
     if (fileResult.partial) {
-      console.log(chalk.yellow(`\nPartial review for ${fileResult.filePath}: ${fileResult.error || 'Some review segments failed.'}`));
+      console.warn(chalk.yellow(`\nPartial review for ${fileResult.filePath}: ${fileResult.error || 'Some review segments failed.'}`));
     }
     if (fileResult.skipped) {
       verboseLog(cliOptions, chalk.yellow(`\nSkipped: ${fileResult.filePath}`));
