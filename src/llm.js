@@ -41,7 +41,7 @@ function getAnthropicClient() {
 }
 
 // Default model
-const DEFAULT_MODEL = 'claude-sonnet-4-5';
+const DEFAULT_MODEL = 'claude-sonnet-4-6';
 
 // Maximum tokens for response
 const MAX_TOKENS = 4096;

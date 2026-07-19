@@ -1,7 +1,8 @@
 import { parseDiffLineInfo } from './diff-lines.js';
 import { addLineNumbers } from './string-utils.js';
 
-export const CHARS_PER_ESTIMATED_TOKEN = 3;
+// Calibrated source-code estimate; the prompt-size safety buffer covers tokenizer variance.
+export const CHARS_PER_ESTIMATED_TOKEN = 3.5;
 const DEFAULT_CONTEXT_LINE_RADIUS = 40;
 const DEFAULT_MAX_FULL_CONTENT_TOKENS_PER_FILE = 12000;
 export const DEFAULT_MAX_TOTAL_FULL_CONTENT_TOKENS = 60000;

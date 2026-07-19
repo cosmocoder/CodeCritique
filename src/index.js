@@ -62,7 +62,7 @@ program
   .option('--output-file <file>', 'Save output to file (useful with --output json)')
   .option('--no-color', 'Disable colored output')
   .option('--verbose', 'Show verbose output')
-  .option('--model <model>', 'LLM model to use (e.g., claude-sonnet-4-5)')
+  .option('--model <model>', 'LLM model to use (e.g., claude-sonnet-4-6)')
   .option('--temperature <number>', 'LLM temperature', parseFloat, 0.2)
   .option('--max-tokens <number>', 'LLM max tokens', parseInt, 8192)
   .option('--cache-ttl <ttl>', 'Cache TTL for LLM prompts: "5m" (default, no extra cost) or "1h" (extended, extra cost for writes)', '5m')

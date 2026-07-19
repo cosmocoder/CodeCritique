@@ -49,7 +49,7 @@ describe('sendPromptToClaude', () => {
 
       expect(mockMessagesCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: 'claude-sonnet-4-5',
+          model: 'claude-sonnet-4-6',
           max_tokens: 4096,
           temperature: 0.7,
         })

@@ -556,7 +556,7 @@ describe('ProjectAnalyzer', () => {
 
       const result = await analyzer.selectFinalKeyFiles(candidates, mockProjectPath);
 
-      expect(llm.sendPromptToClaude).toHaveBeenCalled();
+      expect(llm.sendPromptToClaude).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ model: 'claude-haiku-4-5' }));
       expect(result.length).toBe(1);
       expect(result[0].relativePath).toBe('package.json');
     });
@@ -668,9 +668,11 @@ describe('ProjectAnalyzer', () => {
         content: JSON.stringify(mockSummary),
         json: mockSummary,
       });
+      analyzer.llm = llm;
 
       const result = await analyzer.generateProjectSummary(mockKeyFiles, mockProjectPath);
 
+      expect(llm.sendPromptToClaude).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ model: 'claude-haiku-4-5' }));
       expect(result.projectName).toBe('test-project');
       expect(result.analysisDate).toBeDefined();
       expect(result.projectPath).toBe(mockProjectPath);

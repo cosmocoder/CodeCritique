@@ -17,6 +17,7 @@ import { verboseLog } from './utils/logging.js';
 import { escapeSqlString } from './utils/string-utils.js';
 
 const TERM_SEARCH_CONTENT_CANDIDATE_LIMIT = 500;
+const PROJECT_ANALYSIS_MODEL = 'claude-haiku-4-5';
 
 // Consolidated file classification configuration
 const FILE_PATTERNS = {
@@ -586,6 +587,7 @@ Select files following the criteria in the system instructions.`;
       };
 
       const response = await this.llm.sendPromptToClaude(prompt, {
+        model: PROJECT_ANALYSIS_MODEL,
         system: FILE_SELECTION_SYSTEM_PROMPT,
         temperature: 0.1,
         maxTokens: 1000,
@@ -878,6 +880,7 @@ Follow the analysis guidelines from the system instructions to identify custom i
       };
 
       const response = await this.llm.sendPromptToClaude(prompt, {
+        model: PROJECT_ANALYSIS_MODEL,
         system: PROJECT_SUMMARY_SYSTEM_PROMPT,
         temperature: 0.1,
         maxTokens: 4000,
@@ -886,7 +889,7 @@ Follow the analysis guidelines from the system instructions to identify custom i
 
       const summary = response.json;
       if (summary) {
-        // Validate and ensure required fields exist (Sonnet 4.5 compatibility)
+        // Validate and ensure required fields exist across model responses
         const validatedSummary = this.validateProjectSummary(summary);
 
         // Add metadata
