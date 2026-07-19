@@ -182,7 +182,7 @@ export default async ({ github, context, core }) => {
 
             // Find the thread that contains our comment
             const thread = threadData.repository.pullRequest.reviewThreads.nodes.find((t) =>
-              t.comments.nodes.some((c) => c.databaseId === parseInt(commentId))
+              t.comments.nodes.some((c) => c.databaseId === Number.parseInt(commentId, 10))
             );
 
             if (thread && !thread.isResolved) {

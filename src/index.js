@@ -42,6 +42,7 @@ async function cleanupEmbeddingsSystemIfInitialized() {
 }
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const parseIntegerOption = (value) => Number.parseInt(value, 10);
 
 // Configure command-line interface
 program.name('codecritique').description('CLI tool for AI-powered code review using the RAG approach').version(packageJson.version);
@@ -64,11 +65,11 @@ program
   .option('--verbose', 'Show verbose output')
   .option('--model <model>', 'LLM model to use (e.g., claude-sonnet-4-6)')
   .option('--temperature <number>', 'LLM temperature', parseFloat, 0.2)
-  .option('--max-tokens <number>', 'LLM max tokens', parseInt, 8192)
+  .option('--max-tokens <number>', 'LLM max tokens', parseIntegerOption, 8192)
   .option('--cache-ttl <ttl>', 'Cache TTL for LLM prompts: "5m" (default, no extra cost) or "1h" (extended, extra cost for writes)', '5m')
   .option('--similarity-threshold <number>', 'Threshold for finding similar code examples', parseFloat, 0.6)
-  .option('--max-examples <number>', 'Max similar code examples to use', parseInt, 5)
-  .option('--concurrency <number>', 'Concurrency for processing multiple files', parseInt, 3)
+  .option('--max-examples <number>', 'Max similar code examples to use', parseIntegerOption, 5)
+  .option('--concurrency <number>', 'Concurrency for processing multiple files', parseIntegerOption, 3)
   .option(
     '--doc <specs...>',
     'A document to provide custom instructions to the LLM (e.g., "Engineering Guidelines:./docs/guidelines.md"). Can be specified multiple times.'
@@ -142,11 +143,11 @@ program
   .option('-t, --token <token>', 'GitHub API token (or set GITHUB_TOKEN env var)')
   .option('--since <date>', 'Only analyze PRs since this date (ISO format)')
   .option('--until <date>', 'Only analyze PRs until this date (ISO format)')
-  .option('--limit <number>', 'Limit number of PRs to analyze', parseInt)
+  .option('--limit <number>', 'Limit number of PRs to analyze', parseIntegerOption)
   .option('--resume', 'Resume interrupted analysis')
   .option('--clear', 'Clear existing data before analysis')
-  .option('--concurrency <number>', 'Number of concurrent requests', parseInt, 2)
-  .option('--batch-size <number>', 'Batch size for processing', parseInt, 50)
+  .option('--concurrency <number>', 'Number of concurrent requests', parseIntegerOption, 2)
+  .option('--batch-size <number>', 'Batch size for processing', parseIntegerOption, 50)
   .option('--verbose', 'Show verbose output')
   .action(analyzePRHistory);
 

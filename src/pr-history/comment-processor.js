@@ -246,8 +246,8 @@ export class PRCommentProcessor {
   extractLineRange(diffHunk) {
     const hunkMatch = diffHunk.match(/@@ -(\d+),?(\d+)? \+(\d+),?(\d+)? @@/);
     if (hunkMatch) {
-      const startLine = parseInt(hunkMatch[3]);
-      const contextLines = parseInt(hunkMatch[4]) || 1;
+      const startLine = Number.parseInt(hunkMatch[3], 10);
+      const contextLines = Number.parseInt(hunkMatch[4], 10) || 1;
       return {
         start: startLine,
         end: startLine + contextLines - 1,
@@ -303,7 +303,7 @@ export class PRCommentProcessor {
       if (patchLine.startsWith('@@')) {
         const match = patchLine.match(/@@ -(\d+),?(\d+)? \+(\d+),?(\d+)? @@/);
         if (match) {
-          currentLine = parseInt(match[3]);
+          currentLine = Number.parseInt(match[3], 10);
         }
         continue;
       }
