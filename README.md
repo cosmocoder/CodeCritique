@@ -202,6 +202,8 @@ For easier integration with non-JavaScript projects, you can use the provided sh
    - Validates Node.js 24+ requirement
    - Provides helpful error messages for missing dependencies
 
+   The wrapper forwards only `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_LOG`, `GITHUB_TOKEN`, `GH_TOKEN`, `DEBUG`, `VERBOSE`, `CI`, and `GITHUB_WORKSPACE_PATH` from `.env`; other entries, including process-control variables such as `NODE_OPTIONS` and `PATH`, are ignored. An unreadable `.env` stops the wrapper with an error. Run it only in trusted project directories: `ANTHROPIC_BASE_URL` controls where API requests are sent, while `CI` and `GITHUB_WORKSPACE_PATH` control where embedding data is stored.
+
 ## Quick Start
 
 Follow this three-step workflow for optimal code review results:
@@ -540,6 +542,8 @@ GITHUB_TOKEN=your_github_token
 DEBUG=true
 VERBOSE=true
 ```
+
+Set `CODECRITIQUE_SKIP_DOTENV=1` to disable `.env` loading, as the shell wrapper does after forwarding its supported variables.
 
 ## Output Formats
 

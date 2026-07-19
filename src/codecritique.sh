@@ -10,32 +10,54 @@ if ! command -v node &> /dev/null; then
     exit 1
 fi
 
-# Check if .env file exists in the current directory
-if [ -f .env ]; then
-    echo "Found .env file in current directory. Loading environment variables..."
-    # Export all variables from .env file
-    export $(grep -v '^#' .env | xargs)
+node_major_version=$(node -p 'process.versions.node.split(".")[0]')
+if ! [[ "$node_major_version" =~ ^[0-9]+$ ]]; then
+    echo "Error: Unable to determine the Node.js major version (received: $node_major_version)." >&2
+    exit 1
+fi
+if [ "$node_major_version" -lt 24 ]; then
+    echo "Error: CodeCritique requires Node.js 24 or newer (found $(node --version))." >&2
+    exit 1
 fi
 
-# Check if required API key is set
-if [ -z "$ANTHROPIC_API_KEY" ]; then
-    echo "Warning: ANTHROPIC_API_KEY is not set."
-    echo "You can set it by:"
-    echo "1. Creating a .env file in this directory with:"
-    echo "   ANTHROPIC_API_KEY=your_anthropic_api_key"
-    echo "2. Or by setting it as an environment variable before running this script:"
-    echo "   ANTHROPIC_API_KEY=your_key ./codecritique.sh ..."
-    echo ""
-    echo "Continuing anyway, as you may have set it in your environment..."
-    echo ""
-fi
-
-# Check if codecritique is installed globally
-if command -v codecritique &> /dev/null; then
-    # Run the command with all arguments passed to this script
-    codecritique "$@"
-else
-    # Try to run with npx if not installed globally
-    echo "codecritique not found globally, trying with npx..."
-    npx codecritique "$@"
-fi
+# Parse only CodeCritique-supported settings so a project .env cannot inject
+# process-control options such as NODE_OPTIONS or PATH into the child command.
+exec node -e '
+  const { spawnSync } = require("node:child_process");
+  const { readFileSync } = require("node:fs");
+  const { parseEnv } = require("node:util");
+  const args = process.argv.slice(1);
+  const supportedKeys = [
+    "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_LOG",
+    "GITHUB_TOKEN", "GH_TOKEN", "DEBUG", "VERBOSE",
+    "CI", "GITHUB_WORKSPACE_PATH"
+  ];
+  try {
+    const fileEnv = parseEnv(readFileSync(".env", "utf8"));
+    for (const key of supportedKeys) {
+      if (!Object.hasOwn(fileEnv, key)) continue;
+      if (fileEnv[key].includes("\0")) throw new Error(`${key} contains a null byte`);
+      process.env[key] = fileEnv[key];
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      console.error(`Unable to load .env: ${error.message}`);
+      process.exit(1);
+    }
+  }
+  process.env.CODECRITIQUE_SKIP_DOTENV = "1";
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.warn("Warning: ANTHROPIC_API_KEY is not set. Add it to .env or export it before running CodeCritique.");
+  }
+  let result = spawnSync("codecritique", args, { stdio: "inherit" });
+  if (result.error?.code === "ENOENT") {
+    console.log("codecritique not found globally, trying with npx...");
+    result = spawnSync("npx", ["codecritique", ...args], { stdio: "inherit" });
+  }
+  if (result.error) {
+    console.error(result.error.message);
+    process.exit(1);
+  }
+  if (result.signal) process.exit(128 + require("node:os").constants.signals[result.signal]);
+  process.exit(result.status ?? 1);
+' -- "$@"
