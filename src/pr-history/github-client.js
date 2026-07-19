@@ -536,7 +536,7 @@ export class GitHubAPIClient {
   calculateBackoffDelay(attempt, error) {
     // For rate limiting, use reset time if available
     if (error.status === 429 && error.response?.headers['x-ratelimit-reset']) {
-      const resetTime = parseInt(error.response.headers['x-ratelimit-reset']) * 1000;
+      const resetTime = Number.parseInt(error.response.headers['x-ratelimit-reset'], 10) * 1000;
       const now = Date.now();
       const delay = Math.max(resetTime - now, BASE_RETRY_DELAY);
       return Math.min(delay, 60000); // Cap at 1 minute
@@ -551,10 +551,10 @@ export class GitHubAPIClient {
    */
   updateRateLimitInfo(headers) {
     this.rateLimitInfo = {
-      limit: parseInt(headers['x-ratelimit-limit']) || 0,
-      remaining: parseInt(headers['x-ratelimit-remaining']) || 0,
-      reset: parseInt(headers['x-ratelimit-reset']) || 0,
-      used: parseInt(headers['x-ratelimit-used']) || 0,
+      limit: Number.parseInt(headers['x-ratelimit-limit'], 10) || 0,
+      remaining: Number.parseInt(headers['x-ratelimit-remaining'], 10) || 0,
+      reset: Number.parseInt(headers['x-ratelimit-reset'], 10) || 0,
+      used: Number.parseInt(headers['x-ratelimit-used'], 10) || 0,
     };
   }
 

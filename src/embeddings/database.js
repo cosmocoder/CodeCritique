@@ -1009,11 +1009,11 @@ export class DatabaseManager {
       try {
         const existingRecords = await table
           .query()
-          .where(`project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`)
+          .where(`project_path = '${escapeSqlString(resolvedProjectPath)}'`)
           .toArray();
 
         for (const existing of existingRecords) {
-          await table.delete(`id = '${existing.id.replace(/'/g, "''")}'`);
+          await table.delete(`id = '${escapeSqlString(existing.id)}'`);
         }
       }
       catch {
@@ -1069,7 +1069,7 @@ export class DatabaseManager {
       // Query for the project summary
       const records = await table
         .query()
-        .where(`project_path = '${resolvedProjectPath.replace(/'/g, "''")}'`)
+        .where(`project_path = '${escapeSqlString(resolvedProjectPath)}'`)
         .toArray();
 
       if (records.length === 0) {

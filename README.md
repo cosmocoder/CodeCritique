@@ -545,6 +545,10 @@ VERBOSE=true
 
 Set `CODECRITIQUE_SKIP_DOTENV=1` to disable `.env` loading, as the shell wrapper does after forwarding its supported variables.
 
+### Trust and Prompt Injection
+
+Repository files, diffs, custom documents, and PR comments are untrusted data included in LLM prompts. A malicious repository can attempt to influence generated review text despite prompt boundaries and truncation. Treat CodeCritique output as advisory, review findings before acting on them, and never grant generated suggestions automatic execution privileges.
+
 ## Output Formats
 
 CodeCritique supports three output formats:
