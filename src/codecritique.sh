@@ -11,6 +11,10 @@ if ! command -v node &> /dev/null; then
 fi
 
 node_major_version=$(node -p 'process.versions.node.split(".")[0]')
+if ! [[ "$node_major_version" =~ ^[0-9]+$ ]]; then
+    echo "Error: Unable to determine the Node.js major version (received: $node_major_version)." >&2
+    exit 1
+fi
 if [ "$node_major_version" -lt 24 ]; then
     echo "Error: CodeCritique requires Node.js 24 or newer (found $(node --version))." >&2
     exit 1
@@ -41,6 +45,7 @@ exec node -e '
       process.exit(1);
     }
   }
+  process.env.CODECRITIQUE_SKIP_DOTENV = "1";
   if (!process.env.ANTHROPIC_API_KEY) {
     console.warn("Warning: ANTHROPIC_API_KEY is not set. Add it to .env or export it before running CodeCritique.");
   }

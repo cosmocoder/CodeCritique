@@ -11,6 +11,7 @@ async function runWrapper(envFile, args = [], command = 'codecritique', extraEnv
   const directory = await mkdtemp(join(tmpdir(), 'codecritique-shell-'));
   onTestFinished(() => rm(directory, { recursive: true, force: true }));
   const fakeCommand = join(directory, command);
+  const envInspector = join(directory, 'inspect-entry-env.mjs');
 
   if (envIsDirectory) {
     await mkdir(join(directory, '.env'));
@@ -18,7 +19,23 @@ async function runWrapper(envFile, args = [], command = 'codecritique', extraEnv
   else if (envFile !== null) {
     await writeFile(join(directory, '.env'), envFile);
   }
-  await writeFile(fakeCommand, '#!/bin/bash\n[ "$1" = "--terminate" ] && kill -TERM $$\n/usr/bin/env\nprintf "arg=%s\\n" "$@"\n');
+  await writeFile(
+    envInspector,
+    `process.argv = ['node'];
+process.exit = code => { throw new Error(\`exit \${code}\`); };
+try { await import(${JSON.stringify(new URL('./index.js', import.meta.url).href)}); } catch {}
+console.log(\`inspected_node_options=\${process.env.NODE_OPTIONS || ''}\`);
+`
+  );
+  await writeFile(
+    fakeCommand,
+    `#!/bin/bash
+[ "$1" = "--terminate" ] && kill -TERM $$
+[ "$1" = "--inspect-entry" ] && exec node "${envInspector}"
+/usr/bin/env
+printf "arg=%s\\n" "$@"
+`
+  );
   await chmod(fakeCommand, 0o755);
   if (nodeMajorVersion === null) {
     await symlink(process.execPath, join(directory, 'node'));
@@ -40,10 +57,13 @@ async function runWrapper(envFile, args = [], command = 'codecritique', extraEnv
 }
 
 describe('codecritique.sh', () => {
-  it('rejects Node versions below the supported minimum', async () => {
-    await expect(runWrapper(null, [], 'codecritique', {}, false, 20)).rejects.toMatchObject({
+  it.each([
+    [20, 'Error: CodeCritique requires Node.js 24 or newer (found v20.0.0).\n'],
+    ['not-a-version', 'Error: Unable to determine the Node.js major version (received: not-a-version).\n'],
+  ])('rejects unsupported Node version output: %s', async (nodeVersion, stderr) => {
+    await expect(runWrapper(null, [], 'codecritique', {}, false, nodeVersion)).rejects.toMatchObject({
       code: 1,
-      stderr: 'Error: CodeCritique requires Node.js 24 or newer (found v20.0.0).\n',
+      stderr,
     });
   });
 
@@ -66,6 +86,12 @@ describe('codecritique.sh', () => {
     expect(stdout).toContain('ANTHROPIC_API_KEY=test');
     expect(stdout).not.toContain('NODE_OPTIONS=');
     await expect(access(join(directory, 'executed'))).rejects.toThrow();
+  });
+
+  it('prevents the real CLI entry point from reloading filtered .env values', async () => {
+    const { stdout } = await runWrapper('ANTHROPIC_API_KEY=test\nNODE_OPTIONS=--require=./does-not-exist.cjs\n', ['--inspect-entry']);
+
+    expect(stdout).toContain('inspected_node_options=\n');
   });
 
   it('forwards every supported .env setting', async () => {
@@ -110,14 +136,8 @@ describe('codecritique.sh', () => {
     expect(stdout).toContain('ANTHROPIC_API_KEY=from-file');
   });
 
-  it('warns when no Anthropic credentials are configured', async () => {
-    const { stderr } = await runWrapper(null);
-
-    expect(stderr).toContain('Warning: ANTHROPIC_API_KEY is not set.');
-  });
-
-  it('does not treat an unsupported Anthropic auth token as configured', async () => {
-    const { stderr } = await runWrapper('ANTHROPIC_AUTH_TOKEN=token\n');
+  it.each([null, 'ANTHROPIC_AUTH_TOKEN=token\n'])('warns when no supported Anthropic credentials are configured', async (envFile) => {
+    const { stderr } = await runWrapper(envFile);
 
     expect(stderr).toContain('Warning: ANTHROPIC_API_KEY is not set.');
   });

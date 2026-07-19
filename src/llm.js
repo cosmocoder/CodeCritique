@@ -18,7 +18,9 @@ import dotenv from 'dotenv';
 import { verboseLog } from './utils/logging.js';
 
 // Load env variables if present; do not enforce key at import time
-dotenv.config({ quiet: true });
+if (process.env.CODECRITIQUE_SKIP_DOTENV !== '1') {
+  dotenv.config({ quiet: true });
+}
 
 let anthropic = null;
 
