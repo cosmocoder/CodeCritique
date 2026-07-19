@@ -2343,7 +2343,8 @@ async function gatherUnifiedContextForPR(prFiles, options = {}) {
   // Aggregate and deduplicate results
   for (const context of allContexts) {
     (context.finalCodeExamples || []).forEach((example) => {
-      const key = example.path;
+      const normalizedContent = example.content?.trim();
+      const key = normalizedContent ? `content:${normalizedContent}` : example.path ? `path:${example.path}` : null;
       if (
         key &&
         (!allProcessedContext.codeExamples.has(key) || example.similarity > allProcessedContext.codeExamples.get(key).similarity)
