@@ -32,6 +32,7 @@ console.log(\`inspected_node_options=\${process.env.NODE_OPTIONS || ''}\`);
     `#!/bin/bash
 [ "$1" = "--terminate" ] && kill -TERM $$
 [ "$1" = "--inspect-entry" ] && exec node "${envInspector}"
+[ "$1" = "--inspect-entry-with-dotenv" ] && unset CODECRITIQUE_SKIP_DOTENV && exec node "${envInspector}"
 /usr/bin/env
 printf "arg=%s\\n" "$@"
 `
@@ -92,6 +93,12 @@ describe('codecritique.sh', () => {
     const { stdout } = await runWrapper('ANTHROPIC_API_KEY=test\nNODE_OPTIONS=--require=./does-not-exist.cjs\n', ['--inspect-entry']);
 
     expect(stdout).toContain('inspected_node_options=\n');
+  });
+
+  it('loads .env at the real CLI entry point when the wrapper sentinel is absent', async () => {
+    const { stdout } = await runWrapper('ANTHROPIC_API_KEY=test\nNODE_OPTIONS=loaded-by-dotenv\n', ['--inspect-entry-with-dotenv']);
+
+    expect(stdout).toContain('inspected_node_options=loaded-by-dotenv\n');
   });
 
   it('forwards every supported .env setting', async () => {

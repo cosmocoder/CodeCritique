@@ -543,6 +543,8 @@ DEBUG=true
 VERBOSE=true
 ```
 
+Set `CODECRITIQUE_SKIP_DOTENV=1` to disable `.env` loading, as the shell wrapper does after forwarding its supported variables.
+
 ## Output Formats
 
 CodeCritique supports three output formats:
