@@ -28,7 +28,7 @@ describe('shouldChunkPR', () => {
     it('should chunk PR when total tokens exceed threshold', () => {
       // Create files that will exceed the 100k token threshold
       // Each file needs: diff content + full content + 25k context overhead
-      const largeContent = 'x'.repeat(90000); // 30k tokens per file
+      const largeContent = 'x'.repeat(90000); // About 25.7k estimated tokens
       const prFiles = Array.from({ length: 5 }, (_, i) => ({
         filePath: `src/file${i}.js`,
         diffContent: largeContent,
