@@ -779,6 +779,49 @@ describe('post-comments.js', () => {
       expect(createCommentCall.body).toContain('No Issues Found');
       expect(createCommentCall.body).toContain('Great job!');
     });
+
+    it('should report incomplete analysis instead of no issues when files failed', async () => {
+      const incompleteReview = {
+        summary: { totalFilesReviewed: 2, totalIssues: 1, errorFiles: 1 },
+        details: [
+          {
+            filePath: 'src/a.js',
+            success: true,
+            review: {
+              issues: [{ description: 'Known issue', severity: 'warning', lineNumbers: [1] }],
+            },
+          },
+          { filePath: 'src/b.js', success: false, error: 'Claude batch request expired' },
+        ],
+      };
+
+      fs.readFileSync.mockReturnValue(JSON.stringify(incompleteReview));
+
+      await postComments({ github: mockGithub, context: mockContext, core: mockCore });
+
+      const createCommentCall = mockGithub.rest.issues.createComment.mock.calls[0][0];
+      expect(createCommentCall.body).toContain('Review Incomplete');
+      expect(createCommentCall.body).toContain('could not analyze 1 file');
+      expect(createCommentCall.body).not.toContain('No Issues Found');
+      expect(mockGithub.rest.pulls.createReviewComment).toHaveBeenCalled();
+    });
+
+    it('should report aggregate review failure without inventing a failed file', async () => {
+      fs.readFileSync.mockReturnValue(
+        JSON.stringify({
+          summary: { totalFilesReviewed: 1, totalIssues: 0, errorFiles: 0, incomplete: true },
+          details: [{ filePath: 'src/a.js', success: true, review: { issues: [] } }],
+        })
+      );
+
+      await postComments({ github: mockGithub, context: mockContext, core: mockCore });
+
+      const createCommentCall = mockGithub.rest.issues.createComment.mock.calls[0][0];
+      expect(createCommentCall.body).toContain('Review Incomplete');
+      expect(createCommentCall.body).toContain('did not complete all review work');
+      expect(createCommentCall.body).not.toContain('could not analyze 0 files');
+      expect(createCommentCall.body).not.toContain('No Issues Found');
+    });
   });
 
   describe('PR-level findings', () => {

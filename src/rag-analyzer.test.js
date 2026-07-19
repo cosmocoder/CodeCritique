@@ -196,6 +196,14 @@ describe('rag-analyzer', () => {
       expect(result.error).toContain('LLM unavailable');
     });
 
+    it('should forward batch transport options to the LLM', async () => {
+      setupSuccessfulLLMResponse();
+
+      await runAnalysis('/test/file.js', { batch: true });
+
+      expect(llm.sendPromptToClaude).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ batch: true }));
+    });
+
     it('should initialize embeddings system', async () => {
       setupSuccessfulLLMResponse();
       await runAnalysis('/test/file.js');

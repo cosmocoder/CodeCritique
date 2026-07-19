@@ -12,6 +12,7 @@
  * requests, reducing input token costs by 75%.
  */
 
+import { setTimeout as delay } from 'node:timers/promises';
 import { Anthropic } from '@anthropic-ai/sdk';
 import chalk from 'chalk';
 import dotenv from 'dotenv';
@@ -45,6 +46,9 @@ const DEFAULT_MODEL = 'claude-sonnet-4-6';
 
 // Maximum tokens for response
 const MAX_TOKENS = 4096;
+
+const DEFAULT_BATCH_POLL_INTERVAL_MS = 10000;
+const MAX_BATCH_POLL_FAILURES = 3;
 
 const MAX_CACHE_CONTROL_BLOCKS = 4;
 
@@ -84,6 +88,47 @@ function buildSystemContent(system, cachedSystemBlocks, cacheControl) {
   return systemBlocks;
 }
 
+async function createBatchedMessage(client, requestParams, options) {
+  const customId = 'codecritique-review';
+  let batch = await client.messages.batches.create({
+    requests: [{ custom_id: customId, params: requestParams }],
+  });
+
+  verboseLog(options, chalk.cyan(`Submitted Claude message batch ${batch.id}; waiting for completion...`));
+  let consecutivePollFailures = 0;
+
+  while (batch.processing_status !== 'ended') {
+    await delay(DEFAULT_BATCH_POLL_INTERVAL_MS);
+    try {
+      batch = await client.messages.batches.retrieve(batch.id);
+      consecutivePollFailures = 0;
+    }
+    catch (error) {
+      consecutivePollFailures++;
+      if (consecutivePollFailures >= MAX_BATCH_POLL_FAILURES) {
+        throw new Error(`Unable to poll Claude message batch ${batch.id} after ${MAX_BATCH_POLL_FAILURES} attempts: ${error.message}`);
+      }
+      console.warn(chalk.yellow(`Unable to poll Claude message batch ${batch.id}; retrying: ${error.message}`));
+    }
+  }
+
+  const results = await client.messages.batches.results(batch.id);
+  for await (const response of results) {
+    if (response.custom_id !== customId) {
+      continue;
+    }
+
+    if (response.result.type === 'succeeded') {
+      return response.result.message;
+    }
+
+    const detail = response.result.type === 'errored' ? `: ${response.result.error.error.message}` : '';
+    throw new Error(`Claude batch request ${response.result.type}${detail}`);
+  }
+
+  throw new Error('Claude batch response did not contain the review request');
+}
+
 /**
  * Send a prompt to Claude and get a structured JSON response using tool calling.
  * Uses prompt caching for system prompts to reduce token costs.
@@ -94,6 +139,7 @@ function buildSystemContent(system, cachedSystemBlocks, cacheControl) {
  * @param {Array<string|Object>} options.cachedSystemBlocks - Additional stable system blocks to cache when possible
  * @param {Object} options.jsonSchema - JSON schema for structured output
  * @param {string} options.cacheTtl - Cache TTL: '5m' (default, no extra cost) or '1h' (extended, extra cost for writes)
+ * @param {boolean} [options.batch=false] - Use the asynchronous Message Batches API
  * @returns {Promise<Object>} The response from Claude with structured data
  */
 async function sendPromptToClaude(prompt, options = {}) {
@@ -145,7 +191,9 @@ async function sendPromptToClaude(prompt, options = {}) {
       requestParams.tool_choice = { type: 'tool', name: 'return_json' };
     }
 
-    const response = await client.messages.create(requestParams);
+    const response = options.batch
+      ? await createBatchedMessage(client, requestParams, options)
+      : await client.messages.create(requestParams);
 
     // Log response structure for debugging
     verboseLog(options, chalk.gray(`  Response stop_reason: ${response.stop_reason}`));

@@ -67,6 +67,7 @@ program
   .option('--temperature <number>', 'LLM temperature', parseFloat, 0.2)
   .option('--max-tokens <number>', 'LLM max tokens', parseIntegerOption, 8192)
   .option('--cache-ttl <ttl>', 'Cache TTL for LLM prompts: "5m" (default, no extra cost) or "1h" (extended, extra cost for writes)', '5m')
+  .option('--batch', 'Use the asynchronous Anthropic Message Batches API for lower-cost reviews')
   .option('--similarity-threshold <number>', 'Threshold for finding similar code examples', parseFloat, 0.6)
   .option('--max-examples <number>', 'Max similar code examples to use', parseIntegerOption, 5)
   .option('--concurrency <number>', 'Concurrency for processing multiple files', parseIntegerOption, 3)
@@ -350,6 +351,7 @@ async function runCodeReview(options) {
     temperature: options.temperature,
     maxTokens: options.maxTokens,
     cacheTtl: options.cacheTtl,
+    batch: options.batch,
     similarityThreshold: options.similarityThreshold,
     maxExamples: options.maxExamples,
     concurrency: options.concurrency,
@@ -1093,24 +1095,17 @@ async function emitEmptyReviewOutputIfNeeded(options, aggregateResult = {}) {
 }
 
 async function emitErrorReviewOutputIfNeeded(options, error, aggregateResult = {}) {
-  if (!shouldEmitReviewOutput(options)) {
+  if (!shouldEmitReviewOutput(options) && !aggregateResult.results?.length) {
     return false;
   }
 
-  await outputReviewResults([createReviewErrorResult(error)], options, {
+  const reviewResults = aggregateResult.results?.length ? aggregateResult.results : [{ filePath: 'review', success: false, error }];
+  await outputReviewResults(reviewResults, options, {
     ...aggregateResult,
     success: false,
     error,
   });
   return true;
-}
-
-function createReviewErrorResult(error) {
-  return {
-    filePath: 'review',
-    success: false,
-    error,
-  };
 }
 
 /**
@@ -1140,6 +1135,8 @@ async function outputJson(reviewResults, options, aggregateResult = {}) {
       }, 0),
       skippedFiles: reviewResults.filter((r) => r.skipped).length,
       errorFiles: reviewResults.filter((r) => !r.success).length,
+      incomplete: aggregateResult.success === false,
+      error: aggregateResult.success === false ? aggregateResult.error : undefined,
     },
     details: reviewResults.map((r) => {
       if (!r.success) {
@@ -1152,6 +1149,8 @@ async function outputJson(reviewResults, options, aggregateResult = {}) {
       return {
         filePath: r.filePath,
         success: true,
+        partial: r.partial || undefined,
+        error: r.partial ? r.error : undefined,
         language: r.language,
         review: r.results, // Contains summary and actionable issues (with optional codeSuggestion)
         // Optionally include similar examples if needed
@@ -1208,6 +1207,9 @@ async function outputMarkdown(reviewResults, options, aggregateResult = {}) {
   if (errorFiles > 0) {
     lines.push(`- **Errors:** ${errorFiles}`);
   }
+  if (aggregateResult.success === false) {
+    lines.push(`- **Review Incomplete:** ${aggregateResult.error || 'Some review work failed.'}`);
+  }
 
   appendPRLevelFindingsMarkdown(lines, prLevelFindings);
 
@@ -1218,6 +1220,9 @@ async function outputMarkdown(reviewResults, options, aggregateResult = {}) {
     if (!fileResult.success) {
       lines.push(`**Error:** ${fileResult.error}`, '');
       return;
+    }
+    if (fileResult.partial) {
+      lines.push(`**Partial review:** ${fileResult.error || 'Some review segments failed.'}`, '');
     }
     if (fileResult.skipped) {
       lines.push('*Skipped (based on exclusion patterns or file type).*', '');
@@ -1296,6 +1301,9 @@ function outputText(reviewResults, cliOptions, aggregateResult = {}) {
   if (errorFiles > 0) {
     console.log(`Errors: ${chalk.red(errorFiles)}`);
   }
+  if (aggregateResult.success === false) {
+    console.warn(chalk.yellow(`Review Incomplete: ${aggregateResult.error || 'Some review work failed.'}`));
+  }
   console.log(chalk.bold.blue('================================================'));
 
   outputPRLevelFindingsText(prLevelFindings);
@@ -1306,6 +1314,9 @@ function outputText(reviewResults, cliOptions, aggregateResult = {}) {
       console.log(chalk.red(fileResult.error));
       console.log(chalk.bold.red('================================================'));
       return;
+    }
+    if (fileResult.partial) {
+      console.warn(chalk.yellow(`\nPartial review for ${fileResult.filePath}: ${fileResult.error || 'Some review segments failed.'}`));
     }
     if (fileResult.skipped) {
       verboseLog(cliOptions, chalk.yellow(`\nSkipped: ${fileResult.filePath}`));

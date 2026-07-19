@@ -436,6 +436,36 @@ describe('rag-review', () => {
       expect(result.success).toBe(true);
     });
 
+    it('should retain successful fallback results when another file fails', async () => {
+      shouldProcessFile.mockReturnValue(true);
+      getFileContentFromGit.mockReturnValue('const x = 1;');
+      getChangedLinesInfo.mockReturnValue({
+        hasChanges: true,
+        addedLines: [1],
+        removedLines: [],
+        fullDiff: '+ code',
+      });
+      shouldChunkPR.mockReturnValue({ shouldChunk: false, estimatedTokens: 1000 });
+      runAnalysis
+        .mockResolvedValueOnce({ success: false, error: 'Claude batch request expired' })
+        .mockResolvedValueOnce({
+          success: true,
+          filePath: '/src/a.js',
+          results: { issues: [{ description: 'Known issue' }] },
+        })
+        .mockResolvedValueOnce({ success: false, filePath: '/src/b.js', error: 'Claude batch request expired' });
+
+      const result = await reviewPullRequest(['/src/a.js', '/src/b.js'], { batch: true });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('1 file review(s) failed after holistic review fallback');
+      expect(result.results).toEqual([
+        expect.objectContaining({ success: true, filePath: '/src/a.js' }),
+        expect.objectContaining({ success: false, filePath: '/src/b.js', error: 'Claude batch request expired' }),
+      ]);
+      expect(runAnalysis).toHaveBeenLastCalledWith('/src/b.js', expect.objectContaining({ batch: true, isPRReview: true, diffOnly: true }));
+    });
+
     it('should handle multiple files with different statuses', async () => {
       runAnalysis
         .mockResolvedValueOnce({
