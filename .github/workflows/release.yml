@@ -33,7 +33,7 @@ jobs:
           key: ${{ env.NODE_MODULES_CACHE_PREFIX }}-${{ hashFiles('package-lock.json') }}
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: 'package.json'
 
@@ -70,7 +70,7 @@ jobs:
           key: ${{ env.NODE_MODULES_CACHE_PREFIX }}-${{ hashFiles('package-lock.json') }}
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: 'package.json'
 
@@ -108,7 +108,7 @@ jobs:
           key: ${{ env.NODE_MODULES_CACHE_PREFIX }}-${{ hashFiles('package-lock.json') }}
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: 'package.json'
 
@@ -139,7 +139,7 @@ jobs:
           key: ${{ env.NODE_MODULES_CACHE_PREFIX }}-${{ hashFiles('package-lock.json') }}
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: 'package.json'
 
@@ -189,7 +189,7 @@ jobs:
           key: ${{ env.NODE_MODULES_CACHE_PREFIX }}-${{ hashFiles('package-lock.json') }}
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: 'package.json'
           cache: 'npm'
