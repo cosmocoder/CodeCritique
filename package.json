@@ -85,6 +85,11 @@
     "typescript": "5.9.3",
     "vitest": "4.1.8"
   },
+  "overrides": {
+    "@lancedb/lancedb": {
+      "@huggingface/transformers": "$@huggingface/transformers"
+    }
+  },
   "volta": {
     "node": "24.15.0",
     "npm": "11.12.1"
