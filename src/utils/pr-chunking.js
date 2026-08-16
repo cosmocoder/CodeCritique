@@ -286,7 +286,7 @@ function splitLargeDiffUnit(headerText, unit, maxChars, hasPreviousPart) {
   const parts = [];
   const hunkHeader = unit.split('\n').find((line) => line.startsWith('@@'));
 
-  for (let offset = 0; offset < unit.length; ) {
+  for (let offset = 0; offset < unit.length;) {
     const isContinuation = hasPreviousPart || parts.length > 0;
     const continuationHunkHeader = offset > 0 ? adjustHunkHeaderNewStart(hunkHeader, estimateNewLineAtOffset(unit, offset)) : '';
     const prefix = buildBoundedDiffPrefix(headerText, isContinuation, maxChars, continuationHunkHeader);
