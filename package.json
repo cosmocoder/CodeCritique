@@ -52,7 +52,7 @@
   "author": "cosmocoder",
   "dependencies": {
     "@anthropic-ai/sdk": "0.117.1",
-    "@huggingface/transformers": "3.8.0",
+    "@huggingface/transformers": "4.2.0",
     "@lancedb/lancedb": "0.37.1",
     "@octokit/rest": "22.0.1",
     "apache-arrow": "18.1.0",
