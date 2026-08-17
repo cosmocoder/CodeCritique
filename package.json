@@ -82,7 +82,7 @@
     "knip": "5.70.2",
     "prettier": "3.9.6",
     "prettier-plugin-brace-style": "0.10.3",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "vitest": "4.1.10"
   },
   "overrides": {
