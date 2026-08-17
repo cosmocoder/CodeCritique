@@ -62,7 +62,7 @@
     "dotenv": "17.4.2",
     "fastembed": "2.1.0",
     "glob": "13.0.6",
-    "linguist-languages": "9.3.2",
+    "linguist-languages": "9.4.0",
     "lru-cache": "11.5.1",
     "minimatch": "10.2.5",
     "stopwords-iso": "1.1.0"
