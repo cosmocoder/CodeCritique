@@ -193,8 +193,8 @@ async function sendPromptToClaude(prompt, options = {}) {
           name: 'return_json',
           description: 'Return the final answer strictly as JSON matching the schema.',
           input_schema: jsonSchema,
-          // Omitted rather than sent as false: tool definitions open the cache
-          // prefix, so any byte change here invalidates every cached block.
+          // Omitted rather than sent as false so the tool block stays byte-identical
+          // for callers that do not use it, which keeps their cached prefix valid.
           ...(strict ? { strict: true } : {}),
         },
       ];
@@ -243,4 +243,4 @@ async function sendPromptToClaude(prompt, options = {}) {
   }
 }
 
-export { sendPromptToClaude };
+export { sendPromptToClaude, DEFAULT_MODEL };

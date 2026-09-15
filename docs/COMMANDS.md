@@ -22,7 +22,7 @@ codecritique analyze [options]
 | `--no-color`                      | Disable colored output                                                                                                                        | `false`       |
 | `--verbose`                       | Show verbose output                                                                                                                           | `false`       |
 | `--model <model>`                 | LLM model to use (e.g., claude-sonnet-5)                                                                                                      | Auto-selected |
-| `--temperature <number>`          | LLM temperature. Ignored by Claude Sonnet 5 and other models that reject sampling parameters                                                  | `0.2`         |
+| `--temperature <number>`          | LLM temperature. Currently has no effect: each analysis path sets its own value                                                               | `0.2`         |
 | `--max-tokens <number>`           | LLM max tokens                                                                                                                                | `8192`        |
 | `--cache-ttl <ttl>`               | Cache TTL for LLM prompts: "5m" (default, no extra cost) or "1h" (extended, extra cost for cache writes)                                      | `5m`          |
 | `--batch`                         | Use the asynchronous Anthropic Message Batches API for lower-cost reviews                                                                     | `false`       |

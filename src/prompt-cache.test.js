@@ -14,9 +14,13 @@ describe('PR_REVIEW_JSON_SCHEMA', () => {
   });
 
   it('should name the recommendation fields that normalizeRecommendation reads', () => {
-    expect(PR_REVIEW_JSON_SCHEMA).toContain('"category"');
-    expect(PR_REVIEW_JSON_SCHEMA).toContain('"suggestion"');
-    expect(PR_REVIEW_JSON_SCHEMA).toContain('"impact"');
+    // "suggestion" also appears in the cross-file and file-specific blocks, so assert
+    // against the recommendations block alone or a sibling block satisfies the check.
+    const recommendations = PR_REVIEW_JSON_SCHEMA.slice(PR_REVIEW_JSON_SCHEMA.indexOf('"recommendations"'));
+
+    expect(recommendations).toContain('"category"');
+    expect(recommendations).toContain('"suggestion"');
+    expect(recommendations).toContain('"impact"');
   });
 
   it('should not name filesInvolved, which no consumer reads', () => {

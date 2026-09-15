@@ -764,7 +764,7 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
 async function callLLMForAnalysis(context, options = {}) {
   try {
     let prompt;
-    const model = options.model || 'claude-sonnet-5';
+    const model = options.model || llm.DEFAULT_MODEL;
     const maxTokens = options.maxTokens || 8192; // Default to a safe limit
 
     if (options.isHolisticPRReview) {
