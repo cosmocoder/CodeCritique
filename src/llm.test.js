@@ -86,7 +86,7 @@ describe('sendPromptToClaude', () => {
     });
 
     it.each([
-      ['max_tokens', 'Raise --max-tokens.'],
+      ['max_tokens', 'Increase the configured output limit or continue the response.'],
       ['model_context_window_exceeded', 'Reduce the input size.'],
     ])('should report a truncated response for stop_reason %s', async (stopReason, remedy) => {
       mockMessagesCreate.mockResolvedValue({
