@@ -242,6 +242,12 @@ describe('rag-analyzer', () => {
       expect(result.success).toBe(true);
     });
 
+    it('should forward an explicit model option to the LLM', async () => {
+      await runAnalysis('/test/file.js', { model: 'claude-3-opus' });
+
+      expect(llm.sendPromptToClaude).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ model: 'claude-3-opus' }));
+    });
+
     it('should handle diff-only mode', async () => {
       const result = await runAnalysis('/test/file.js', {
         diffOnly: true,
