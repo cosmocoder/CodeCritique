@@ -83,6 +83,35 @@ describe('sendPromptToClaude', () => {
       expect(mockMessagesCreate.mock.calls[0][0]).not.toHaveProperty('temperature');
     });
 
+    it('should set strict on the return_json tool when requested', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        content: [{ type: 'tool_use', name: 'return_json', input: { ok: true } }],
+        model: 'claude-sonnet-5',
+        usage: {},
+      });
+
+      await sendPromptToClaude('Test prompt', {
+        jsonSchema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: true,
+      });
+
+      expect(mockMessagesCreate.mock.calls[0][0].tools[0]).toHaveProperty('strict', true);
+    });
+
+    it('should omit strict from the return_json tool by default', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        content: [{ type: 'tool_use', name: 'return_json', input: { ok: true } }],
+        model: 'claude-sonnet-5',
+        usage: {},
+      });
+
+      await sendPromptToClaude('Test prompt', {
+        jsonSchema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+      });
+
+      expect(mockMessagesCreate.mock.calls[0][0].tools[0]).not.toHaveProperty('strict');
+    });
+
     it('should keep temperature for models that still accept it', async () => {
       mockMessagesCreate.mockResolvedValue({
         content: [{ type: 'text', text: 'Response' }],

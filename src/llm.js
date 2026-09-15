@@ -142,6 +142,8 @@ async function createBatchedMessage(client, requestParams, options) {
  * @param {string} options.system - System prompt (will be cached for cost optimization)
  * @param {Array<string|Object>} options.cachedSystemBlocks - Additional stable system blocks to cache when possible
  * @param {Object} options.jsonSchema - JSON schema for structured output
+ * @param {boolean} [options.strict=false] - Enforce the schema on the tool input. The schema must set
+ *   `additionalProperties: false` on every object and list every property in `required`.
  * @param {string} options.cacheTtl - Cache TTL: '5m' (default, no extra cost) or '1h' (extended, extra cost for writes)
  * @param {boolean} [options.batch=false] - Use the asynchronous Message Batches API
  * @returns {Promise<Object>} The response from Claude with structured data
@@ -154,6 +156,7 @@ async function sendPromptToClaude(prompt, options = {}) {
     system = '',
     cachedSystemBlocks = [],
     jsonSchema = null,
+    strict = false,
     cacheTtl = '5m',
   } = options;
 
@@ -190,6 +193,9 @@ async function sendPromptToClaude(prompt, options = {}) {
           name: 'return_json',
           description: 'Return the final answer strictly as JSON matching the schema.',
           input_schema: jsonSchema,
+          // Omitted rather than sent as false: tool definitions open the cache
+          // prefix, so any byte change here invalidates every cached block.
+          ...(strict ? { strict: true } : {}),
         },
       ];
       requestParams.tool_choice = { type: 'tool', name: 'return_json' };
