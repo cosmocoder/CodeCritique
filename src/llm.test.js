@@ -85,6 +85,33 @@ describe('sendPromptToClaude', () => {
       );
     });
 
+    it.each([
+      ['max_tokens', 'Raise --max-tokens.'],
+      ['model_context_window_exceeded', 'Reduce the input size.'],
+    ])('should report a truncated response for stop_reason %s', async (stopReason, remedy) => {
+      mockMessagesCreate.mockResolvedValue({
+        stop_reason: stopReason,
+        content: [],
+        model: 'claude-sonnet-5',
+        usage: {},
+      });
+
+      await expect(sendPromptToClaude('Test prompt', { jsonSchema: { type: 'object' } })).rejects.toThrow(
+        `Claude's response was truncated (${stopReason}). ${remedy}`
+      );
+    });
+
+    it('should report truncation rather than returning a severed plain-text answer', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        stop_reason: 'max_tokens',
+        content: [{ type: 'text', text: 'partial answer cut off mid-' }],
+        model: 'claude-sonnet-5',
+        usage: {},
+      });
+
+      await expect(sendPromptToClaude('Test prompt')).rejects.toThrow('was truncated (max_tokens)');
+    });
+
     it('should read the text block even when a thinking block precedes it', async () => {
       mockMessagesCreate.mockResolvedValue({
         stop_reason: 'end_turn',

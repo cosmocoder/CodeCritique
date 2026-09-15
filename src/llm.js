@@ -217,6 +217,13 @@ async function sendPromptToClaude(prompt, options = {}) {
       throw new Error(`Claude declined the request${category ? ` (${category})` : ''}: ${reason}`);
     }
 
+    // Truncation also arrives as HTTP 200. Without this the tool path reports missing
+    // output and the text path returns a severed answer that reads as a complete one.
+    if (response.stop_reason === 'max_tokens' || response.stop_reason === 'model_context_window_exceeded') {
+      const remedy = response.stop_reason === 'max_tokens' ? 'Raise --max-tokens.' : 'Reduce the input size.';
+      throw new Error(`Claude's response was truncated (${response.stop_reason}). ${remedy}`);
+    }
+
     // Process response based on whether we used tool calling
     if (jsonSchema) {
       const toolUse = response.content.find((block) => block.type === 'tool_use' && block.name === 'return_json');
