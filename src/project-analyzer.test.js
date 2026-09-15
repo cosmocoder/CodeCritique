@@ -556,7 +556,10 @@ describe('ProjectAnalyzer', () => {
 
       const result = await analyzer.selectFinalKeyFiles(candidates, mockProjectPath);
 
-      expect(llm.sendPromptToClaude).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ model: 'claude-haiku-4-5' }));
+      expect(llm.sendPromptToClaude).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ model: 'claude-haiku-4-5', strict: true })
+      );
       expect(result.length).toBe(1);
       expect(result[0].relativePath).toBe('package.json');
     });
@@ -673,6 +676,9 @@ describe('ProjectAnalyzer', () => {
       const result = await analyzer.generateProjectSummary(mockKeyFiles, mockProjectPath);
 
       expect(llm.sendPromptToClaude).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ model: 'claude-haiku-4-5' }));
+      // projectSummarySchema sets additionalProperties: false on its top level only, and
+      // the documented strict subset requires it on every object.
+      expect(llm.sendPromptToClaude.mock.calls[0][1]).not.toHaveProperty('strict');
       expect(result.projectName).toBe('test-project');
       expect(result.analysisDate).toBeDefined();
       expect(result.projectPath).toBe(mockProjectPath);

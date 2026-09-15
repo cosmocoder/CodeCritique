@@ -65,11 +65,120 @@ describe('sendPromptToClaude', () => {
 
       expect(mockMessagesCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: 'claude-sonnet-4-6',
+          model: 'claude-sonnet-5',
           max_tokens: 4096,
-          temperature: 0.7,
         })
       );
+    });
+
+    it('should surface the refusal explanation instead of a missing-output error', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        stop_reason: 'refusal',
+        stop_details: { type: 'refusal', category: 'cyber', explanation: 'Declined: offensive tooling.' },
+        content: [],
+        model: 'claude-sonnet-5',
+        usage: {},
+      });
+
+      await expect(sendPromptToClaude('Test prompt', { jsonSchema: { type: 'object' } })).rejects.toThrow(
+        'Claude declined the request (cyber): Declined: offensive tooling.'
+      );
+    });
+
+    it.each([
+      ['max_tokens', 'Increase the configured output limit or continue the response.'],
+      ['model_context_window_exceeded', 'Reduce the input size.'],
+    ])('should report a truncated response for stop_reason %s', async (stopReason, remedy) => {
+      mockMessagesCreate.mockResolvedValue({
+        stop_reason: stopReason,
+        content: [],
+        model: 'claude-sonnet-5',
+        usage: {},
+      });
+
+      await expect(sendPromptToClaude('Test prompt', { jsonSchema: { type: 'object' } })).rejects.toThrow(
+        `Claude's response was truncated (${stopReason}). ${remedy}`
+      );
+    });
+
+    it('should report truncation rather than returning a severed plain-text answer', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        stop_reason: 'max_tokens',
+        content: [{ type: 'text', text: 'partial answer cut off mid-' }],
+        model: 'claude-sonnet-5',
+        usage: {},
+      });
+
+      await expect(sendPromptToClaude('Test prompt')).rejects.toThrow('was truncated (max_tokens)');
+    });
+
+    it('should read the text block even when a thinking block precedes it', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        stop_reason: 'end_turn',
+        content: [
+          { type: 'thinking', thinking: '' },
+          { type: 'text', text: 'The real answer' },
+        ],
+        model: 'claude-sonnet-5',
+        usage: {},
+      });
+
+      const result = await sendPromptToClaude('Test prompt');
+
+      expect(result.content).toBe('The real answer');
+    });
+
+    it('should omit temperature for models that reject sampling parameters', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        content: [{ type: 'text', text: 'Response' }],
+        model: 'claude-sonnet-5',
+        usage: {},
+      });
+
+      await sendPromptToClaude('Test prompt', { temperature: 0.5 });
+
+      expect(mockMessagesCreate.mock.calls[0][0]).not.toHaveProperty('temperature');
+    });
+
+    it('should set strict on the return_json tool when requested', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        content: [{ type: 'tool_use', name: 'return_json', input: { ok: true } }],
+        model: 'claude-sonnet-5',
+        usage: {},
+      });
+
+      await sendPromptToClaude('Test prompt', {
+        jsonSchema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        strict: true,
+      });
+
+      expect(mockMessagesCreate.mock.calls[0][0].tools[0]).toHaveProperty('strict', true);
+    });
+
+    it('should omit strict from the return_json tool by default', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        content: [{ type: 'tool_use', name: 'return_json', input: { ok: true } }],
+        model: 'claude-sonnet-5',
+        usage: {},
+      });
+
+      await sendPromptToClaude('Test prompt', {
+        jsonSchema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+      });
+
+      expect(mockMessagesCreate.mock.calls[0][0].tools[0]).not.toHaveProperty('strict');
+    });
+
+    it('should keep temperature for models that still accept it', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        content: [{ type: 'text', text: 'Response' }],
+        model: 'claude-haiku-4-5',
+        usage: {},
+      });
+
+      await sendPromptToClaude('Test prompt', { model: 'claude-haiku-4-5', temperature: 0.1 });
+
+      expect(mockMessagesCreate).toHaveBeenCalledWith(expect.objectContaining({ temperature: 0.1 }));
     });
 
     it('should use custom options', async () => {
@@ -105,7 +214,7 @@ describe('sendPromptToClaude', () => {
     it('should retry polling and unwrap a successful batch request', async () => {
       const message = {
         content: [{ type: 'text', text: 'Batched response' }],
-        model: 'claude-sonnet-4-6',
+        model: 'claude-sonnet-5',
         usage: { input_tokens: 100, output_tokens: 50 },
       };
       mockBatchesCreate.mockResolvedValue({ id: 'msgbatch_123', processing_status: 'in_progress' });
@@ -127,7 +236,7 @@ describe('sendPromptToClaude', () => {
           {
             custom_id: 'codecritique-review',
             params: expect.objectContaining({
-              model: 'claude-sonnet-4-6',
+              model: 'claude-sonnet-5',
               messages: [{ role: 'user', content: 'Review this code' }],
             }),
           },

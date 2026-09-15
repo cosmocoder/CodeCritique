@@ -764,7 +764,6 @@ function prepareContextForLLM(filePath, content, language, finalCodeExamples, fi
 async function callLLMForAnalysis(context, options = {}) {
   try {
     let prompt;
-    const model = options.model || 'claude-sonnet-4-6';
     const maxTokens = options.maxTokens || 8192; // Default to a safe limit
 
     if (options.isHolisticPRReview) {
@@ -778,7 +777,7 @@ async function callLLMForAnalysis(context, options = {}) {
     const llmResponse = await sendPromptToLLM(prompt, {
       temperature: 0,
       maxTokens: maxTokens,
-      model: model,
+      model: options.model,
       isJsonMode: true, // Standardize on using JSON mode if available
       verbose: options.verbose || false, // Pass verbose flag for cache statistics
       cacheTtl: options.cacheTtl || '5m', // Pass cache TTL option (default: 5m, no extra cost)

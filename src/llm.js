@@ -42,7 +42,11 @@ function getAnthropicClient() {
 }
 
 // Default model
-const DEFAULT_MODEL = 'claude-sonnet-4-6';
+const DEFAULT_MODEL = 'claude-sonnet-5';
+
+// Models after the 4.6 generation reject `temperature` with a 400. Only send it
+// for the older families; unknown models fall back to the API default.
+const SAMPLING_MODEL_PATTERN = /^claude-(?:3|(?:opus|sonnet|haiku)-4-[0-6])/;
 
 // Maximum tokens for response
 const MAX_TOKENS = 4096;
@@ -138,6 +142,8 @@ async function createBatchedMessage(client, requestParams, options) {
  * @param {string} options.system - System prompt (will be cached for cost optimization)
  * @param {Array<string|Object>} options.cachedSystemBlocks - Additional stable system blocks to cache when possible
  * @param {Object} options.jsonSchema - JSON schema for structured output
+ * @param {boolean} [options.strict=false] - Enforce the schema on the tool input. Every object in the
+ *   schema must set `additionalProperties: false`, and `additionalProperties` accepts no other value.
  * @param {string} options.cacheTtl - Cache TTL: '5m' (default, no extra cost) or '1h' (extended, extra cost for writes)
  * @param {boolean} [options.batch=false] - Use the asynchronous Message Batches API
  * @returns {Promise<Object>} The response from Claude with structured data
@@ -150,6 +156,7 @@ async function sendPromptToClaude(prompt, options = {}) {
     system = '',
     cachedSystemBlocks = [],
     jsonSchema = null,
+    strict = false,
     cacheTtl = '5m',
   } = options;
 
@@ -169,7 +176,7 @@ async function sendPromptToClaude(prompt, options = {}) {
     const requestParams = {
       model,
       max_tokens: maxTokens,
-      temperature,
+      ...(SAMPLING_MODEL_PATTERN.test(model) ? { temperature } : {}),
       system: systemContent,
       messages: [
         {
@@ -186,6 +193,9 @@ async function sendPromptToClaude(prompt, options = {}) {
           name: 'return_json',
           description: 'Return the final answer strictly as JSON matching the schema.',
           input_schema: jsonSchema,
+          // Omitted rather than sent as false so the tool block stays byte-identical
+          // for callers that do not use it, which keeps their cached prefix valid.
+          ...(strict ? { strict: true } : {}),
         },
       ];
       requestParams.tool_choice = { type: 'tool', name: 'return_json' };
@@ -198,6 +208,22 @@ async function sendPromptToClaude(prompt, options = {}) {
     // Log response structure for debugging
     verboseLog(options, chalk.gray(`  Response stop_reason: ${response.stop_reason}`));
     verboseLog(options, chalk.gray(`  Response content blocks: ${response.content?.length || 0}`));
+
+    // A refusal arrives as HTTP 200 with no tool_use and no text, so it must be caught
+    // here or it surfaces as a missing-output error that hides the real cause.
+    if (response.stop_reason === 'refusal') {
+      const { category, explanation } = response.stop_details || {};
+      const reason = explanation || 'no explanation provided';
+      throw new Error(`Claude declined the request${category ? ` (${category})` : ''}: ${reason}`);
+    }
+
+    // Truncation also arrives as HTTP 200. Without this the tool path reports missing
+    // output and the text path returns a severed answer that reads as a complete one.
+    if (response.stop_reason === 'max_tokens' || response.stop_reason === 'model_context_window_exceeded') {
+      const remedy =
+        response.stop_reason === 'max_tokens' ? 'Increase the configured output limit or continue the response.' : 'Reduce the input size.';
+      throw new Error(`Claude's response was truncated (${response.stop_reason}). ${remedy}`);
+    }
 
     // Process response based on whether we used tool calling
     if (jsonSchema) {
@@ -221,7 +247,7 @@ async function sendPromptToClaude(prompt, options = {}) {
     }
     else {
       return {
-        content: response.content[0]?.text || '',
+        content: response.content?.find((block) => block.type === 'text')?.text || '',
         model: response.model,
         usage: response.usage,
       };

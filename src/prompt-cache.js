@@ -248,9 +248,9 @@ You must respond with EXACTLY this JSON structure, with no additional text:
     {
       "type": "bug | improvement | convention | architecture",
       "severity": "critical | high | medium",
-      "description": "Detailed description of an issue that spans multiple files...",
+      "message": "Detailed description of an issue that spans multiple files...",
       "suggestion": "Actionable suggestion to resolve the cross-file issue.",
-      "filesInvolved": ["path/to/file1.js", "path/to/file2.ts"]
+      "files": ["path/to/file1.js", "path/to/file2.ts"]
     }
   ],
   "fileSpecificIssues": {
@@ -272,9 +272,10 @@ You must respond with EXACTLY this JSON structure, with no additional text:
   },
   "recommendations": [
     {
-      "type": "refactoring | testing | documentation",
-      "description": "A high-level recommendation for improving the codebase...",
-      "filesInvolved": ["path/to/relevant/file.js"]
+      "category": "refactoring | testing | documentation",
+      "suggestion": "A high-level recommendation for improving the codebase...",
+      "priority": "high | medium | low",
+      "impact": "Expected benefit of applying this recommendation."
     }
   ]
 }`;

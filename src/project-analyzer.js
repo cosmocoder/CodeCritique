@@ -592,6 +592,7 @@ Select files following the criteria in the system instructions.`;
         temperature: 0.1,
         maxTokens: 1000,
         jsonSchema: fileSelectionSchema,
+        strict: true,
       });
 
       verboseLog({}, chalk.gray('   📄 LLM Response preview:'), response.content.substring(0, 200));
