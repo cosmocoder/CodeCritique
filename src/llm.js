@@ -209,6 +209,14 @@ async function sendPromptToClaude(prompt, options = {}) {
     verboseLog(options, chalk.gray(`  Response stop_reason: ${response.stop_reason}`));
     verboseLog(options, chalk.gray(`  Response content blocks: ${response.content?.length || 0}`));
 
+    // A refusal arrives as HTTP 200 with no tool_use and no text, so it must be caught
+    // here or it surfaces as a missing-output error that hides the real cause.
+    if (response.stop_reason === 'refusal') {
+      const { category, explanation } = response.stop_details || {};
+      const reason = explanation || 'no explanation provided';
+      throw new Error(`Claude declined the request${category ? ` (${category})` : ''}: ${reason}`);
+    }
+
     // Process response based on whether we used tool calling
     if (jsonSchema) {
       const toolUse = response.content.find((block) => block.type === 'tool_use' && block.name === 'return_json');
@@ -231,7 +239,7 @@ async function sendPromptToClaude(prompt, options = {}) {
     }
     else {
       return {
-        content: response.content[0]?.text || '',
+        content: response.content?.find((block) => block.type === 'text')?.text || '',
         model: response.model,
         usage: response.usage,
       };

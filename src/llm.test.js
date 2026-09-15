@@ -71,6 +71,36 @@ describe('sendPromptToClaude', () => {
       );
     });
 
+    it('should surface the refusal explanation instead of a missing-output error', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        stop_reason: 'refusal',
+        stop_details: { type: 'refusal', category: 'cyber', explanation: 'Declined: offensive tooling.' },
+        content: [],
+        model: 'claude-sonnet-5',
+        usage: {},
+      });
+
+      await expect(sendPromptToClaude('Test prompt', { jsonSchema: { type: 'object' } })).rejects.toThrow(
+        'Claude declined the request (cyber): Declined: offensive tooling.'
+      );
+    });
+
+    it('should read the text block even when a thinking block precedes it', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        stop_reason: 'end_turn',
+        content: [
+          { type: 'thinking', thinking: '' },
+          { type: 'text', text: 'The real answer' },
+        ],
+        model: 'claude-sonnet-5',
+        usage: {},
+      });
+
+      const result = await sendPromptToClaude('Test prompt');
+
+      expect(result.content).toBe('The real answer');
+    });
+
     it('should omit temperature for models that reject sampling parameters', async () => {
       mockMessagesCreate.mockResolvedValue({
         content: [{ type: 'text', text: 'Response' }],
