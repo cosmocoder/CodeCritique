@@ -42,7 +42,11 @@ function getAnthropicClient() {
 }
 
 // Default model
-const DEFAULT_MODEL = 'claude-sonnet-4-6';
+const DEFAULT_MODEL = 'claude-sonnet-5';
+
+// Models after the 4.6 generation reject `temperature` with a 400. Only send it
+// for the older families; unknown models fall back to the API default.
+const SAMPLING_MODEL_PATTERN = /^claude-(?:3|(?:opus|sonnet|haiku)-4-[0-6])/;
 
 // Maximum tokens for response
 const MAX_TOKENS = 4096;
@@ -169,7 +173,7 @@ async function sendPromptToClaude(prompt, options = {}) {
     const requestParams = {
       model,
       max_tokens: maxTokens,
-      temperature,
+      ...(SAMPLING_MODEL_PATTERN.test(model) ? { temperature } : {}),
       system: systemContent,
       messages: [
         {

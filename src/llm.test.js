@@ -65,11 +65,34 @@ describe('sendPromptToClaude', () => {
 
       expect(mockMessagesCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: 'claude-sonnet-4-6',
+          model: 'claude-sonnet-5',
           max_tokens: 4096,
-          temperature: 0.7,
         })
       );
+    });
+
+    it('should omit temperature for models that reject sampling parameters', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        content: [{ type: 'text', text: 'Response' }],
+        model: 'claude-sonnet-5',
+        usage: {},
+      });
+
+      await sendPromptToClaude('Test prompt', { temperature: 0.5 });
+
+      expect(mockMessagesCreate.mock.calls[0][0]).not.toHaveProperty('temperature');
+    });
+
+    it('should keep temperature for models that still accept it', async () => {
+      mockMessagesCreate.mockResolvedValue({
+        content: [{ type: 'text', text: 'Response' }],
+        model: 'claude-haiku-4-5',
+        usage: {},
+      });
+
+      await sendPromptToClaude('Test prompt', { model: 'claude-haiku-4-5', temperature: 0.1 });
+
+      expect(mockMessagesCreate).toHaveBeenCalledWith(expect.objectContaining({ temperature: 0.1 }));
     });
 
     it('should use custom options', async () => {
@@ -105,7 +128,7 @@ describe('sendPromptToClaude', () => {
     it('should retry polling and unwrap a successful batch request', async () => {
       const message = {
         content: [{ type: 'text', text: 'Batched response' }],
-        model: 'claude-sonnet-4-6',
+        model: 'claude-sonnet-5',
         usage: { input_tokens: 100, output_tokens: 50 },
       };
       mockBatchesCreate.mockResolvedValue({ id: 'msgbatch_123', processing_status: 'in_progress' });
@@ -127,7 +150,7 @@ describe('sendPromptToClaude', () => {
           {
             custom_id: 'codecritique-review',
             params: expect.objectContaining({
-              model: 'claude-sonnet-4-6',
+              model: 'claude-sonnet-5',
               messages: [{ role: 'user', content: 'Review this code' }],
             }),
           },

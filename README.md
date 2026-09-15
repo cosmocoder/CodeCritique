@@ -415,7 +415,7 @@ jobs:
 | `anthropic-api-key` | Anthropic API key for Claude models                                                                      | **Yes**  | -                    |
 | `skip-label`        | Label name to skip AI review                                                                             | No       | `ai-review-disabled` |
 | `verbose`           | Show verbose output                                                                                      | No       | `false`              |
-| `model`             | LLM model to use (e.g., `claude-sonnet-4-6`)                                                             | No       | Auto-selected        |
+| `model`             | LLM model to use (e.g., `claude-sonnet-5`)                                                               | No       | Auto-selected        |
 | `max-tokens`        | Maximum tokens for LLM response                                                                          | No       | Auto-calculated      |
 | `cache-ttl`         | Cache TTL for LLM prompts: "5m" (default, no extra cost) or "1h" (extended, extra cost for cache writes) | No       | `5m`                 |
 | `batch`             | Use Anthropic Message Batches for lower-cost, asynchronous reviews                                       | No       | `false`              |
