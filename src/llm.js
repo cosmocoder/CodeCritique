@@ -243,4 +243,4 @@ async function sendPromptToClaude(prompt, options = {}) {
   }
 }
 
-export { sendPromptToClaude, DEFAULT_MODEL };
+export { sendPromptToClaude };

@@ -676,8 +676,8 @@ describe('ProjectAnalyzer', () => {
       const result = await analyzer.generateProjectSummary(mockKeyFiles, mockProjectPath);
 
       expect(llm.sendPromptToClaude).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ model: 'claude-haiku-4-5' }));
-      // projectSummarySchema has nested objects without additionalProperties: false,
-      // so it must not be sent with strict enabled.
+      // projectSummarySchema sets additionalProperties: false on its top level only, and
+      // the documented strict subset requires it on every object.
       expect(llm.sendPromptToClaude.mock.calls[0][1]).not.toHaveProperty('strict');
       expect(result.projectName).toBe('test-project');
       expect(result.analysisDate).toBeDefined();

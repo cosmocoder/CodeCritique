@@ -14,9 +14,10 @@ describe('PR_REVIEW_JSON_SCHEMA', () => {
   });
 
   it('should name the recommendation fields that normalizeRecommendation reads', () => {
-    // "suggestion" also appears in the cross-file and file-specific blocks, so assert
-    // against the recommendations block alone or a sibling block satisfies the check.
-    const recommendations = PR_REVIEW_JSON_SCHEMA.slice(PR_REVIEW_JSON_SCHEMA.indexOf('"recommendations"'));
+    // "suggestion" appears in three blocks, so bound the slice at both ends: a slice
+    // that ran to the end of the schema would pass on any later block instead.
+    const start = PR_REVIEW_JSON_SCHEMA.indexOf('"recommendations"');
+    const recommendations = PR_REVIEW_JSON_SCHEMA.slice(start, PR_REVIEW_JSON_SCHEMA.indexOf(']', start) + 1);
 
     expect(recommendations).toContain('"category"');
     expect(recommendations).toContain('"suggestion"');

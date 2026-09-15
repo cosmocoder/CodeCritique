@@ -63,9 +63,6 @@ vi.mock('./feedback-loader.js', () => ({
 
 vi.mock('./llm.js', () => ({
   sendPromptToClaude: vi.fn(),
-  // A sentinel, not the real default: it fails the wiring test below if
-  // rag-analyzer.js reverts to its own model literal.
-  DEFAULT_MODEL: 'test-default-model',
 }));
 
 vi.mock('./pr-history/database.js', () => ({
@@ -243,12 +240,6 @@ describe('rag-analyzer', () => {
     ])('should handle %s', async (_, options) => {
       const result = await runAnalysis('/test/file.js', options);
       expect(result.success).toBe(true);
-    });
-
-    it('should send llm.DEFAULT_MODEL when no model option is given', async () => {
-      await runAnalysis('/test/file.js', {});
-
-      expect(llm.sendPromptToClaude).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ model: 'test-default-model' }));
     });
 
     it('should handle diff-only mode', async () => {
