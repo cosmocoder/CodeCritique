@@ -16,7 +16,7 @@ import {
   shouldSkipSimilarIssue,
   extractDismissedPatterns,
   generateFeedbackContext,
-  initializeSemanticSimilarity,
+  DEFAULT_SIMILARITY_THRESHOLD,
   isSemanticSimilarityAvailable,
 } from './feedback-loader.js';
 import * as llm from './llm.js';
@@ -37,9 +37,6 @@ const DEFAULT_TRUNCATE_LINES = 300;
 const GUIDELINE_TRUNCATE_LINES = 400;
 const MAX_PR_COMMENTS_FOR_CONTEXT = 15;
 
-// Track if semantic similarity has been initialized
-let semanticSimilarityInitialized = false;
-
 async function fileExists(filePath) {
   try {
     await fs.promises.access(filePath);
@@ -52,26 +49,6 @@ async function fileExists(filePath) {
 
 async function readTextFile(filePath) {
   return await fs.promises.readFile(filePath, 'utf8');
-}
-
-/**
- * Initialize semantic similarity for feedback filtering
- * Uses the shared embeddings system from feedback-loader.js
- */
-async function ensureSemanticSimilarityInitialized() {
-  if (semanticSimilarityInitialized) {
-    return;
-  }
-
-  try {
-    // Initialize semantic similarity using the shared embeddings system
-    await initializeSemanticSimilarity();
-    semanticSimilarityInitialized = true;
-  }
-  catch (error) {
-    console.warn(chalk.yellow(`⚠️ Could not initialize semantic similarity: ${error.message}`));
-    // Continue without semantic similarity - word-based fallback will be used
-  }
 }
 
 // ============================================================================
@@ -578,7 +555,7 @@ async function runAnalysis(filePath, options = {}) {
     if (options.trackFeedback && feedbackData && Object.keys(feedbackData).length > 0) {
       verboseLog(options, chalk.cyan('--- Filtering Results Based on Feedback ---'));
       filteredResults = await filterAnalysisResults(lowSeverityFiltered, feedbackData, {
-        similarityThreshold: options.feedbackThreshold || 0.7,
+        similarityThreshold: options.feedbackThreshold || DEFAULT_SIMILARITY_THRESHOLD,
         verbose: options.verbose,
       });
     }
@@ -2491,28 +2468,18 @@ function filterLowSeverityIssues(analysisResults, options = {}) {
  * @param {Object} analysisResults - Raw analysis results from LLM
  * @param {Object} feedbackData - Loaded feedback data
  * @param {Object} options - Filtering options
- * @param {number} [options.similarityThreshold=0.7] - Threshold for considering issues similar to dismissed feedback
+ * @param {number} [options.similarityThreshold=DEFAULT_SIMILARITY_THRESHOLD] - Threshold for considering issues similar to dismissed feedback
  * @param {boolean} [options.verbose=false] - Enable verbose similarity and filtering logs
  * @returns {Promise<Object>} Filtered analysis results
  */
 async function filterAnalysisResults(analysisResults, feedbackData, options = {}) {
-  const { similarityThreshold = 0.7, verbose = false } = options;
+  const { similarityThreshold = DEFAULT_SIMILARITY_THRESHOLD, verbose = false } = options;
 
   if (!analysisResults || !analysisResults.issues || !Array.isArray(analysisResults.issues)) {
     return analysisResults;
   }
 
   const originalCount = analysisResults.issues.length;
-
-  // Ensure semantic similarity is initialized for better matching
-  await ensureSemanticSimilarityInitialized();
-
-  // Log whether semantic similarity is available
-  const usingSemanticSimilarity = isSemanticSimilarityAvailable();
-  verboseLog(
-    verbose,
-    chalk.cyan(`🔍 Filtering issues using ${usingSemanticSimilarity ? 'semantic + word-based similarity' : 'word-based similarity only'}`)
-  );
 
   // Filter issues based on feedback (now async due to semantic similarity)
   const filterResults = await Promise.all(

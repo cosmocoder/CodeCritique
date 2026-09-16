@@ -59,6 +59,7 @@ vi.mock('./feedback-loader.js', () => ({
   generateFeedbackContext: vi.fn().mockReturnValue(''),
   initializeSemanticSimilarity: vi.fn().mockResolvedValue(undefined),
   isSemanticSimilarityAvailable: vi.fn().mockReturnValue(false),
+  DEFAULT_SIMILARITY_THRESHOLD: 0.7,
 }));
 
 vi.mock('./llm.js', () => ({

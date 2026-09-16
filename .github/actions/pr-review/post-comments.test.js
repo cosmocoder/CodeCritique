@@ -10,6 +10,7 @@ const { mockShouldSkipSimilarIssue, mockLoadFeedbackData } = vi.hoisted(() => ({
 vi.mock('../../../src/feedback-loader.js', () => ({
   shouldSkipSimilarIssue: mockShouldSkipSimilarIssue,
   loadFeedbackData: mockLoadFeedbackData,
+  DEFAULT_SIMILARITY_THRESHOLD: 0.7,
 }));
 
 describe('post-comments.js', () => {
@@ -475,6 +476,16 @@ describe('post-comments.js', () => {
       await postComments({ github: mockGithub, context: mockContext, core: mockCore });
 
       expect(mockLoadFeedbackData).toHaveBeenCalled();
+    });
+
+    it('should pass the issue location to the filter', async () => {
+      await postComments({ github: mockGithub, context: mockContext, core: mockCore });
+
+      expect(mockShouldSkipSimilarIssue).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.anything(),
+        expect.objectContaining({ filePath: expect.any(String), lineNumber: expect.any(Number) })
+      );
     });
 
     it('should skip issues similar to previously dismissed ones', async () => {

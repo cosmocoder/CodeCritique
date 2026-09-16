@@ -5,7 +5,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { shouldSkipSimilarIssue, loadFeedbackData } from '../../../src/feedback-loader.js';
+import { shouldSkipSimilarIssue, loadFeedbackData, DEFAULT_SIMILARITY_THRESHOLD } from '../../../src/feedback-loader.js';
 
 function formatPRLevelFindings(prLevelFindings = {}) {
   const summary = prLevelFindings.summary || '';
@@ -85,7 +85,7 @@ export default async ({ github, context, core }) => {
 
     console.log(`💬 Processing review results for PR #${context.issue.number}`);
 
-    const analyzeFeedback = async (commentId, commentBody = '') => {
+    const analyzeFeedback = async (commentId, commentBody = '', commentPath = null, commentLine = null) => {
       if (!trackFeedback) {
         return null;
       }
@@ -237,6 +237,8 @@ export default async ({ github, context, core }) => {
           overallSentiment:
             positiveReactions > negativeReactions ? 'positive' : negativeReactions > positiveReactions ? 'negative' : 'neutral',
           contextAdded: hasDismissiveFeedback,
+          filePath: commentPath,
+          lineNumber: commentLine,
         };
       }
       catch (error) {
@@ -381,7 +383,7 @@ export default async ({ github, context, core }) => {
 
       // Analyze feedback for each existing comment
       for (const comment of botReviewComments) {
-        const feedback = await analyzeFeedback(comment.id, comment.body);
+        const feedback = await analyzeFeedback(comment.id, comment.body, comment.path, comment.line);
         if (feedback) {
           // Store original issue description for similarity matching
           // Extract the actual issue description (after emoji, header, and severity line)
@@ -529,18 +531,21 @@ ${uniqueCommentId}`;
             break;
           }
 
-          // Skip similar issues that received negative feedback
+          const lineNum = issue.lineNumbers?.[0] || 1;
+
+          // Skip issues dismissed at this location, and issues similar to a dismissed one
           if (
             await shouldSkipSimilarIssue(issue.description, allFeedback, {
-              similarityThreshold: 0.7,
+              similarityThreshold: DEFAULT_SIMILARITY_THRESHOLD,
               verbose: true,
+              filePath: relativePath,
+              lineNumber: lineNum,
             })
           ) {
-            console.log(`⏭️ Skipping similar issue based on previous feedback: ${issue.description.substring(0, 50)}...`);
+            console.log(`⏭️ Skipping issue based on previous feedback: ${issue.description.substring(0, 50)}...`);
             continue;
           }
 
-          const lineNum = issue.lineNumbers?.[0] || 1;
           const severity = issue.severity || 'info';
           const emoji = severity === 'error' ? '🚨' : severity === 'warning' ? '⚠️' : severity === 'medium' ? '⚠️' : '💡';
 
