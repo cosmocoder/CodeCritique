@@ -527,3 +527,117 @@ describe('loadFeedbackData edge cases', () => {
     expect(result).toHaveProperty('item');
   });
 });
+
+describe('shouldSkipSimilarIssue without a comparable pair', () => {
+  // Nothing to compare means nothing to load the embedding model for.
+  let loader;
+  let initialize;
+
+  beforeEach(async () => {
+    mockConsoleSelective('log', 'warn');
+    vi.resetModules();
+    initialize = vi.fn().mockResolvedValue(undefined);
+
+    // eslint-disable-next-line no-restricted-syntax
+    const freshFactory = await import('./embeddings/factory.js');
+    freshFactory.getDefaultEmbeddingsSystem.mockReturnValue({ initialize, calculateEmbedding: vi.fn() });
+
+    // eslint-disable-next-line no-restricted-syntax
+    loader = await import('./feedback-loader.js');
+  });
+
+  it.each([
+    ['the only dismissal has no text of its own', 'a candidate description', { i1: { overallSentiment: 'negative', originalIssue: '' } }],
+    ['the candidate has no description', '', { i1: { overallSentiment: 'negative', originalIssue: 'a dismissed finding' } }],
+  ])('should not initialize the embeddings system when %s', async (_name, description, feedbackData) => {
+    await expect(loader.shouldSkipSimilarIssue(description, feedbackData)).resolves.toBe(false);
+
+    expect(initialize).not.toHaveBeenCalled();
+  });
+});
+
+describe('shouldSkipSimilarIssue location match', () => {
+  // Word similarity 0.667: above the same-location bar of 0.65, below the 0.9 passed here.
+  // Only the location can decide these cases.
+  const SHARED = 'alpha bravo charlie delta echo foxtrot golf hotel';
+  const DISMISSED = `${SHARED} india juliett`;
+  const REWORDED = `${SHARED} kilo lima`;
+  const UNRELATED = 'mike november oscar papa quebec';
+  const LOCATION = { filePath: '.github/workflows/pr-review.yml', lineNumber: 51 };
+
+  const feedbackData = {
+    issue1: {
+      overallSentiment: 'neutral',
+      originalIssue: DISMISSED,
+      userReplies: [{ body: 'False positive.' }],
+      ...LOCATION,
+    },
+  };
+
+  const check = (description, options) =>
+    shouldSkipSimilarIssue(description, feedbackData, { similarityThreshold: 0.9, useSemanticSimilarity: false, ...options });
+
+  it.each([
+    ['a reworded repeat at the same location', REWORDED, LOCATION, true],
+    ['a reworded repeat on a different line', REWORDED, { ...LOCATION, lineNumber: 52 }, false],
+    ['an unrelated finding at the same location', UNRELATED, LOCATION, false],
+    ['a reworded repeat with no known line', REWORDED, { ...LOCATION, lineNumber: null }, false],
+  ])('should %s -> %s', async (_name, description, options, expected) => {
+    await expect(check(description, options)).resolves.toBe(expected);
+  });
+});
+
+describe('shouldSkipSimilarIssue with semantic similarity available', () => {
+  // Unit vectors whose cosine similarity is exact: [1, 0] against [cos, sin].
+  const vectorFor = (cosine) => [cosine, Math.sqrt(1 - cosine * cosine)];
+  const DISMISSED = 'Missing null check in the handler function';
+  const REPHRASED = 'The handler function does not guard against a null argument';
+  const UNRELATED = 'Prefer const over let for bindings that never change';
+
+  let loader;
+
+  beforeEach(async () => {
+    mockConsoleSelective('log', 'warn');
+    vi.resetModules();
+
+    // eslint-disable-next-line no-restricted-syntax
+    const freshFactory = await import('./embeddings/factory.js');
+    freshFactory.getDefaultEmbeddingsSystem.mockReturnValue({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      calculateEmbedding: vi.fn(async (text) => {
+        if (text === DISMISSED) {
+          return vectorFor(1);
+        }
+        return vectorFor(text === REPHRASED ? 0.98 : 0.8);
+      }),
+    });
+
+    // eslint-disable-next-line no-restricted-syntax
+    loader = await import('./feedback-loader.js');
+    await loader.initializeSemanticSimilarity();
+  });
+
+  it('should skip a dismissed issue that the model rephrased', async () => {
+    const feedbackData = {
+      issue1: {
+        overallSentiment: 'neutral',
+        originalIssue: DISMISSED,
+        userReplies: [{ body: 'False positive.' }],
+      },
+    };
+
+    await expect(loader.shouldSkipSimilarIssue(REPHRASED, feedbackData, { similarityThreshold: 0.7 })).resolves.toBe(true);
+  });
+
+  it('should not skip an unrelated issue once another issue was dismissed', async () => {
+    const feedbackData = {
+      issue1: {
+        overallSentiment: 'neutral',
+        originalIssue: DISMISSED,
+        userReplies: [{ body: 'False positive.' }],
+      },
+    };
+
+    await expect(loader.shouldSkipSimilarIssue(UNRELATED, feedbackData, { similarityThreshold: 0.7 })).resolves.toBe(false);
+  });
+});

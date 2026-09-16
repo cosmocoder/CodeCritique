@@ -111,13 +111,17 @@ export async function initializeSemanticSimilarity() {
   try {
     embeddingsSystem = getDefaultEmbeddingsSystem();
     await embeddingsSystem.initialize();
-    semanticSimilarityInitialized = true;
     semanticSimilarityAvailable = true;
     verboseLog({}, chalk.green('[FeedbackLoader] Semantic similarity initialized using embeddings system'));
   }
   catch (error) {
     console.warn(chalk.yellow(`[FeedbackLoader] Semantic similarity initialization failed: ${error.message}`));
     semanticSimilarityAvailable = false;
+  }
+  finally {
+    // Records the attempt, not the outcome. Callers initialize lazily, so a failure
+    // that left this unset would reload the model once per issue.
+    semanticSimilarityInitialized = true;
   }
 }
 
@@ -168,74 +172,84 @@ async function calculateSemanticSimilarity(text1, text2) {
 // ISSUE SIMILARITY CHECKING
 // ============================================================================
 
+/** Score above which an issue counts as a repeat of a dismissed one. */
+export const DEFAULT_SIMILARITY_THRESHOLD = 0.7;
+
+// A dismissal on the same line is evidence, not proof: a reworded repeat and a
+// different finding on the same topic score too close together to tell apart. The
+// lower bar catches the reworded repeat while a plainly unrelated finding still posts.
+const SAME_LOCATION_SIMILARITY_THRESHOLD = 0.65;
+
+// The word term is what separates a repost from a new finding: semantic scores
+// alone rank unrelated findings above the threshold.
+const SEMANTIC_WEIGHT = 0.7;
+const WORD_WEIGHT = 0.3;
+
 /**
- * Check if an issue should be skipped based on previous feedback
- * Uses semantic similarity when available, falls back to word-based similarity.
+ * Check if an issue should be skipped based on previous feedback.
+ * Compares against dismissed issues with the combined semantic and word-based score,
+ * initializing the embeddings system on first use.
  *
  * @param {string} issueDescription - Description of the current issue
  * @param {Object} feedbackData - Loaded feedback data
  * @param {Object} options - Filtering options
- * @param {number} [options.similarityThreshold=0.7] - Threshold for considering issues similar
+ * @param {number} [options.similarityThreshold=DEFAULT_SIMILARITY_THRESHOLD] - Threshold for considering issues similar
  * @param {boolean} [options.verbose=false] - Enable verbose progress logging
  * @param {boolean} [options.useSemanticSimilarity=true] - Use semantic similarity when available
+ * @param {string|null} [options.filePath=null] - Path of the file the current issue is on
+ * @param {number|null} [options.lineNumber=null] - Line the current issue is on
  * @returns {Promise<boolean>} True if issue should be skipped
  */
 export async function shouldSkipSimilarIssue(issueDescription, feedbackData, options = {}) {
-  const { similarityThreshold = 0.7, verbose = false, useSemanticSimilarity = true } = options;
+  const {
+    similarityThreshold = DEFAULT_SIMILARITY_THRESHOLD,
+    verbose = false,
+    useSemanticSimilarity = true,
+    filePath = null,
+    lineNumber = null,
+  } = options;
 
   if (!feedbackData || Object.keys(feedbackData).length === 0) {
     return false;
   }
 
-  // Check if similar issues were previously dismissed
+  // Dismissals worth comparing against: one without its own text can never match.
   const dismissedIssues = Object.values(feedbackData).filter(
     (feedback) =>
-      feedback?.overallSentiment === 'negative' ||
-      feedback?.userReplies?.some(
-        (reply) =>
-          reply.body.toLowerCase().includes('false positive') ||
-          reply.body.toLowerCase().includes('not relevant') ||
-          reply.body.toLowerCase().includes('ignore') ||
-          reply.body.toLowerCase().includes('resolved')
-      )
+      feedback?.originalIssue &&
+      (feedback?.overallSentiment === 'negative' ||
+        feedback?.userReplies?.some(
+          (reply) =>
+            reply.body.toLowerCase().includes('false positive') ||
+            reply.body.toLowerCase().includes('not relevant') ||
+            reply.body.toLowerCase().includes('ignore') ||
+            reply.body.toLowerCase().includes('resolved')
+        ))
   );
 
-  if (dismissedIssues.length === 0) {
+  if (!issueDescription || dismissedIssues.length === 0) {
     return false;
   }
 
-  // Determine if we should use semantic similarity
-  const canUseSemanticSimilarity = useSemanticSimilarity && isSemanticSimilarityAvailable();
-
-  verboseLog(verbose && canUseSemanticSimilarity, chalk.cyan('🔍 Using semantic similarity for issue comparison'));
+  // Loaded here rather than by the caller: this is the first point where a comparison
+  // is certain, and the embedding model is the expensive part of making one.
+  if (useSemanticSimilarity) {
+    await initializeSemanticSimilarity();
+  }
 
   // Check similarity with dismissed issues
   for (const dismissed of dismissedIssues) {
-    if (!dismissed.originalIssue) {
-      continue;
-    }
+    const threshold = isSameLocation(dismissed, filePath, lineNumber)
+      ? Math.min(similarityThreshold, SAME_LOCATION_SIMILARITY_THRESHOLD)
+      : similarityThreshold;
 
-    let similarity;
-    let similarityMethod;
+    // The hybrid score, not the semantic score alone: a normalized semantic score ranks
+    // unrelated findings above the threshold, so one dismissal would suppress every issue.
+    const { similarity, method: similarityMethod } = await calculateIssueSimilarity(issueDescription, dismissed.originalIssue, {
+      useSemanticSimilarity,
+    });
 
-    if (canUseSemanticSimilarity) {
-      // Try semantic similarity first using existing embeddings system
-      similarity = await calculateSemanticSimilarity(issueDescription, dismissed.originalIssue);
-      similarityMethod = 'semantic';
-
-      // Fall back to word similarity if semantic calculation failed
-      if (similarity === null) {
-        similarity = calculateWordSimilarity(issueDescription, dismissed.originalIssue);
-        similarityMethod = 'word-based';
-      }
-    }
-    else {
-      // Use word-based similarity
-      similarity = calculateWordSimilarity(issueDescription, dismissed.originalIssue);
-      similarityMethod = 'word-based';
-    }
-
-    if (similarity > similarityThreshold) {
+    if (similarity > threshold) {
       verboseLog(
         verbose,
         chalk.yellow(`⏭️ Skipping similar dismissed issue (${(similarity * 100).toFixed(1)}% ${similarityMethod} similarity)`)
@@ -247,6 +261,19 @@ export async function shouldSkipSimilarIssue(issueDescription, feedbackData, opt
   }
 
   return false;
+}
+
+/**
+ * Check whether a dismissed issue was recorded at the given file and line.
+ * A null on either side never matches, so an unknown location never narrows anything.
+ *
+ * @param {Object} dismissed - A dismissed feedback entry
+ * @param {string|null} filePath - Path of the current issue
+ * @param {number|null} lineNumber - Line of the current issue
+ * @returns {boolean} True when both locations are known and equal
+ */
+function isSameLocation(dismissed, filePath, lineNumber) {
+  return Boolean(filePath && lineNumber != null && dismissed.filePath === filePath && dismissed.lineNumber === lineNumber);
 }
 
 /**
@@ -275,9 +302,7 @@ export async function calculateIssueSimilarity(text1, text2, options = {}) {
       // Also calculate word similarity for a hybrid score
       const wordSimilarity = calculateWordSimilarity(text1, text2);
 
-      // Combine both scores with more weight on semantic similarity
-      // This helps catch both semantically similar and lexically similar issues
-      const combinedSimilarity = semanticSimilarity * 0.7 + wordSimilarity * 0.3;
+      const combinedSimilarity = semanticSimilarity * SEMANTIC_WEIGHT + wordSimilarity * WORD_WEIGHT;
 
       return {
         similarity: combinedSimilarity,
