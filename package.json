@@ -51,7 +51,7 @@
   "license": "MIT",
   "author": "cosmocoder",
   "dependencies": {
-    "@anthropic-ai/sdk": "0.125.0",
+    "@anthropic-ai/sdk": "0.126.0",
     "@huggingface/transformers": "3.8.0",
     "@lancedb/lancedb": "0.38.0",
     "@octokit/rest": "22.0.1",
