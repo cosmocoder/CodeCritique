@@ -48,6 +48,8 @@ it('parses integer options and renders incomplete results in every output format
     }
     await rm(directory, { recursive: true, force: true });
   });
+  // Mock history is cleared before the test, so the import-time run is not observable here.
+  await program.parseAsync(process.argv);
   await vi.waitFor(() => expect(reviewFile).toHaveBeenCalled());
   expect(reviewFile.mock.calls[0][1].maxExamples).toBe(12);
   await vi.waitFor(() => expect(console.log).toHaveBeenCalledWith('    Visible partial finding'));

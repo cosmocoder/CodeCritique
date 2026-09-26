@@ -4,4 +4,4 @@ node_modules
 .eslintcache
 coverage
 plans
-
+.vitest
