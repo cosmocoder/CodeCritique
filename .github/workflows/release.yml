@@ -119,7 +119,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: blob-report-${{ matrix.shardIndex }}
-          path: .vitest-reports
+          path: .vitest/blob
           include-hidden-files: true
 
   coverage:
@@ -146,7 +146,7 @@ jobs:
       - name: Download all blob reports
         uses: actions/download-artifact@v8
         with:
-          path: .vitest-reports
+          path: .vitest/blob
           pattern: blob-report-*
           merge-multiple: true
 
