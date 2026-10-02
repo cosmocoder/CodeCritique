@@ -521,7 +521,8 @@ export function myUtility(input) {
 
 ### Environment Variables
 
-- `ANTHROPIC_API_KEY` - Required for LLM analysis
+- `ANTHROPIC_API_KEY` - Required for LLM analysis, unless you use Workload Identity Federation
+- `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_SERVICE_ACCOUNT_ID`, `ANTHROPIC_WORKSPACE_ID` - Workload Identity Federation in GitHub Actions (`src/llm.js`)
 - `GITHUB_TOKEN` - Required for PR history analysis
 - `DEBUG` - Enable debug output
 - `VERBOSE` - Enable verbose output
