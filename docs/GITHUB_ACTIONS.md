@@ -19,15 +19,21 @@ This action generates semantic embeddings for your codebase using FastEmbed, ena
 
 ### Complete Input Parameters
 
-| Parameter                   | Description                                             | Required | Default          |
-| --------------------------- | ------------------------------------------------------- | -------- | ---------------- |
-| `anthropic-api-key`         | Anthropic API key for Claude models                     | **Yes**  | -                |
-| `files`                     | Specific files or patterns to process (space-separated) | No       | `''` (all files) |
-| `concurrency`               | Number of concurrent embedding requests                 | No       | Auto-detected    |
-| `exclude`                   | Patterns to exclude (space-separated glob patterns)     | No       | `''`             |
-| `exclude-file`              | File containing patterns to exclude (one per line)      | No       | `''`             |
-| `verbose`                   | Show verbose output                                     | No       | `false`          |
-| `embeddings-retention-days` | Number of days to retain embedding artifacts            | No       | `30`             |
+| Parameter                      | Description                                                                      | Required | Default          |
+| ------------------------------ | -------------------------------------------------------------------------------- | -------- | ---------------- |
+| `anthropic-api-key`            | Anthropic API key. Omit it to use Workload Identity Federation                   | No*      | -                |
+| `anthropic-federation-rule-id` | Federation rule ID (`fdrl_...`)                                                  | No*      | -                |
+| `anthropic-organization-id`    | Anthropic organization ID                                                        | No*      | -                |
+| `anthropic-service-account-id` | Service account ID (`svac_...`)                                                  | No*      | -                |
+| `anthropic-workspace-id`       | Workspace ID (`wrkspc_...`). Needed when the rule covers more than one workspace | No       | -                |
+| `files`                        | Specific files or patterns to process (space-separated)                          | No       | `''` (all files) |
+| `concurrency`                  | Number of concurrent embedding requests                                          | No       | Auto-detected    |
+| `exclude`                      | Patterns to exclude (space-separated glob patterns)                              | No       | `''`             |
+| `exclude-file`                 | File containing patterns to exclude (one per line)                               | No       | `''`             |
+| `verbose`                      | Show verbose output                                                              | No       | `false`          |
+| `embeddings-retention-days`    | Number of days to retain embedding artifacts                                     | No       | `30`             |
+
+\* Pass either `anthropic-api-key` or the 3 federation inputs marked \*. See [Authenticate with Workload Identity Federation](#authenticate-with-workload-identity-federation).
 
 ### Advanced Configuration Examples
 
@@ -161,19 +167,80 @@ The action includes intelligent feedback tracking that monitors user reactions a
 
 ### Complete Input Parameters
 
-| Parameter           | Description                                                                                              | Required | Default              |
-| ------------------- | -------------------------------------------------------------------------------------------------------- | -------- | -------------------- |
-| `anthropic-api-key` | Anthropic API key for Claude models                                                                      | **Yes**  | -                    |
-| `skip-label`        | Label name to skip AI review                                                                             | No       | `ai-review-disabled` |
-| `verbose`           | Show verbose output                                                                                      | No       | `false`              |
-| `model`             | LLM model to use                                                                                         | No       | Auto-selected        |
-| `max-tokens`        | Maximum tokens for LLM response                                                                          | No       | Auto-calculated      |
-| `cache-ttl`         | Cache TTL for LLM prompts: "5m" (default, no extra cost) or "1h" (extended, extra cost for cache writes) | No       | `5m`                 |
-| `batch`             | Use Anthropic Message Batches for lower-cost, asynchronous reviews                                       | No       | `false`              |
-| `concurrency`       | Concurrency for processing multiple files                                                                | No       | `3`                  |
-| `custom-docs`       | Custom documents (format: `"title:path,title:path"`)                                                     | No       | `''`                 |
+| Parameter                      | Description                                                                                              | Required | Default              |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------- | -------- | -------------------- |
+| `anthropic-api-key`            | Anthropic API key. Omit it to use Workload Identity Federation                                           | No*      | -                    |
+| `anthropic-federation-rule-id` | Federation rule ID (`fdrl_...`)                                                                          | No*      | -                    |
+| `anthropic-organization-id`    | Anthropic organization ID                                                                                | No*      | -                    |
+| `anthropic-service-account-id` | Service account ID (`svac_...`)                                                                          | No*      | -                    |
+| `anthropic-workspace-id`       | Workspace ID (`wrkspc_...`). Needed when the rule covers more than one workspace                         | No       | -                    |
+| `skip-label`                   | Label name to skip AI review                                                                             | No       | `ai-review-disabled` |
+| `verbose`                      | Show verbose output                                                                                      | No       | `false`              |
+| `model`                        | LLM model to use                                                                                         | No       | Auto-selected        |
+| `max-tokens`                   | Maximum tokens for LLM response                                                                          | No       | Auto-calculated      |
+| `cache-ttl`                    | Cache TTL for LLM prompts: "5m" (default, no extra cost) or "1h" (extended, extra cost for cache writes) | No       | `5m`                 |
+| `batch`                        | Use Anthropic Message Batches for lower-cost, asynchronous reviews                                       | No       | `false`              |
+| `concurrency`                  | Concurrency for processing multiple files                                                                | No       | `3`                  |
+| `custom-docs`                  | Custom documents (format: `"title:path,title:path"`)                                                     | No       | `''`                 |
+
+\* Pass either `anthropic-api-key` or the 3 federation inputs marked \*. See [Authenticate with Workload Identity Federation](#authenticate-with-workload-identity-federation).
 
 Batch mode trades latency for Anthropic's Message Batches API discount. Processing may take up to 24 hours, and batch requests are not eligible for Zero Data Retention. GitHub-hosted jobs can run for at most six hours; the action polls in-process and cannot resume a batch after the job ends. If holistic analysis falls back to per-file reviews, each concurrency wave can incur a separate batch wait and further increase runtime.
+
+### Authenticate with Workload Identity Federation
+
+Both actions can run without a stored API key. They use Workload Identity Federation (WIF), which exchanges the job's GitHub OIDC token for a short-lived Anthropic token.
+
+1. In the Claude Console, open **Settings → Workload identity**, select **Connect workload**, and choose **GitHub Actions**.
+2. Create a federation rule for the pull request runs of your repository:
+
+   ```json
+   "match": {
+     "subject_prefix": "repo:your-org/your-repo:pull_request",
+     "audience": "https://api.anthropic.com",
+     "claims": { "repository_owner": "your-org", "event_name": "pull_request" }
+   }
+   ```
+
+3. Save the rule ID, the organization ID and the service account ID as repository variables. They aren't secrets.
+4. Grant `id-token: write` to the review job, and pass the IDs instead of `anthropic-api-key`:
+
+   ```yaml
+   jobs:
+     pr-review:
+       runs-on: ubuntu-latest
+       permissions:
+         contents: write
+         pull-requests: write
+         actions: read
+         id-token: write # needed for Workload Identity Federation
+
+       steps:
+         - name: Checkout Repository
+           uses: actions/checkout@v4
+
+         - name: AI Code Review
+           uses: cosmocoder/CodeCritique/.github/actions/pr-review@main
+           with:
+             anthropic-federation-rule-id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+             anthropic-organization-id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+             anthropic-service-account-id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+   ```
+
+Two details keep the rule safe and matching:
+
+- Don't add an `environment` to the review job. A job with an environment gets a different OIDC subject, and the rule stops matching.
+- Keep the `event_name` claim. It stops `pull_request_target` runs from matching the rule.
+
+The Generate Embeddings action usually runs on pushes to `main`, so it needs its own rule. Grant `id-token: write` to that job too, and pass this rule's ID:
+
+```json
+"match": {
+  "subject_prefix": "repo:your-org/your-repo:ref:refs/heads/main",
+  "audience": "https://api.anthropic.com",
+  "claims": { "repository_owner": "your-org" }
+}
+```
 
 ### Output Values
 
