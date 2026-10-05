@@ -5,11 +5,16 @@ const mockMessagesCreate = vi.hoisted(() => vi.fn());
 const mockBatchesCreate = vi.hoisted(() => vi.fn());
 const mockBatchesRetrieve = vi.hoisted(() => vi.fn());
 const mockBatchesResults = vi.hoisted(() => vi.fn());
+const mockAnthropicConstructor = vi.hoisted(() => vi.fn());
 
 vi.mock('node:timers/promises', () => ({ setTimeout: vi.fn() }));
 
 vi.mock('@anthropic-ai/sdk', () => ({
   Anthropic: class MockAnthropic {
+    constructor(options) {
+      mockAnthropicConstructor(options);
+    }
+
     messages = {
       create: mockMessagesCreate,
       batches: {
@@ -366,7 +371,7 @@ describe('sendPromptToClaude', () => {
   });
 
   describe('error handling', () => {
-    it('should throw error when API key is missing', async () => {
+    it('should throw error when no credentials are configured', async () => {
       // Reset modules to clear cached anthropic client
       vi.resetModules();
       delete process.env.ANTHROPIC_API_KEY;
@@ -375,7 +380,7 @@ describe('sendPromptToClaude', () => {
       // eslint-disable-next-line no-restricted-syntax
       const { sendPromptToClaude: freshSendPrompt } = await import('./llm.js');
 
-      await expect(freshSendPrompt('Test')).rejects.toThrow('ANTHROPIC_API_KEY is required');
+      await expect(freshSendPrompt('Test')).rejects.toThrow('No Anthropic credentials found');
     });
 
     it('should propagate API errors', async () => {
@@ -511,5 +516,127 @@ describe('sendPromptToClaude', () => {
         })
       );
     });
+  });
+});
+
+describe('Workload Identity Federation', () => {
+  const federationEnv = {
+    ANTHROPIC_FEDERATION_RULE_ID: 'fdrl_test',
+    ANTHROPIC_ORGANIZATION_ID: 'org-test',
+    ANTHROPIC_SERVICE_ACCOUNT_ID: 'svac_test',
+    ACTIONS_ID_TOKEN_REQUEST_URL: 'https://token.actions.example.test/request?api-version=2.0',
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'actions-request-token',
+  };
+
+  async function sendWithFreshModule() {
+    vi.resetModules();
+    // eslint-disable-next-line no-restricted-syntax
+    const { sendPromptToClaude: freshSendPrompt } = await import('./llm.js');
+    return freshSendPrompt('Test');
+  }
+
+  beforeEach(() => {
+    mockConsoleSelective('log', 'error');
+    mockAnthropicConstructor.mockClear();
+    mockMessagesCreate.mockResolvedValue({
+      content: [{ type: 'text', text: 'Response' }],
+      model: 'claude-sonnet-5',
+      usage: {},
+    });
+    Object.assign(process.env, federationEnv);
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  afterEach(() => {
+    for (const key of [...Object.keys(federationEnv), 'ANTHROPIC_API_KEY', 'ANTHROPIC_WORKSPACE_ID', 'ANTHROPIC_BASE_URL']) {
+      delete process.env[key];
+    }
+    vi.unstubAllGlobals();
+  });
+
+  function stubFetch({ oidcStatus = 200 } = {}) {
+    let jwtCount = 0;
+    const fetchMock = vi.fn(async (url) => {
+      if (String(url).startsWith('https://token.actions.example.test/')) {
+        jwtCount += 1;
+        return oidcStatus === 200 ? Response.json({ value: `github-jwt-${jwtCount}` }) : new Response(null, { status: oidcStatus });
+      }
+      return Response.json({ access_token: `sk-ant-oat01-${jwtCount}`, expires_in: 600, token_type: 'Bearer' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  async function federatedCredentials() {
+    await sendWithFreshModule();
+    return mockAnthropicConstructor.mock.lastCall[0].credentials;
+  }
+
+  it('exchanges a new GitHub Actions OIDC token on every token exchange', async () => {
+    const fetchMock = stubFetch();
+
+    await sendWithFreshModule();
+    const options = mockAnthropicConstructor.mock.lastCall[0];
+    expect(options.authToken).toBeNull();
+    const { credentials } = options;
+
+    await expect(credentials()).resolves.toMatchObject({ token: 'sk-ant-oat01-1' });
+    await expect(credentials()).resolves.toMatchObject({ token: 'sk-ant-oat01-2' });
+
+    const [oidcUrl, oidcInit] = fetchMock.mock.calls[0];
+    expect(oidcUrl.searchParams.get('audience')).toBe('https://api.anthropic.com');
+    expect(oidcUrl.searchParams.get('api-version')).toBe('2.0');
+    expect(oidcInit.headers.Authorization).toBe('Bearer actions-request-token');
+
+    const exchanges = fetchMock.mock.calls.filter(([url]) => String(url) === 'https://api.anthropic.com/v1/oauth/token');
+    expect(exchanges.map(([, init]) => JSON.parse(init.body))).toEqual([
+      expect.objectContaining({
+        assertion: 'github-jwt-1',
+        federation_rule_id: 'fdrl_test',
+        organization_id: 'org-test',
+        service_account_id: 'svac_test',
+      }),
+      expect.objectContaining({ assertion: 'github-jwt-2' }),
+    ]);
+  });
+
+  it('uses the API key when both an API key and federation are configured', async () => {
+    process.env.ANTHROPIC_API_KEY = 'test-api-key';
+
+    await sendWithFreshModule();
+
+    expect(mockAnthropicConstructor).toHaveBeenLastCalledWith({ apiKey: 'test-api-key' });
+  });
+
+  it('sends the workspace ID to the token endpoint at ANTHROPIC_BASE_URL', async () => {
+    process.env.ANTHROPIC_WORKSPACE_ID = 'wrkspc_test';
+    process.env.ANTHROPIC_BASE_URL = 'https://proxy.example.test';
+    const fetchMock = stubFetch();
+
+    await (
+      await federatedCredentials()
+    )();
+
+    const [exchangeUrl, exchangeInit] = fetchMock.mock.calls[1];
+    expect(String(exchangeUrl)).toBe('https://proxy.example.test/v1/oauth/token');
+    expect(JSON.parse(exchangeInit.body)).toMatchObject({ workspace_id: 'wrkspc_test' });
+  });
+
+  it('reports a failed GitHub Actions OIDC token request', async () => {
+    stubFetch({ oidcStatus: 403 });
+
+    await expect((await federatedCredentials())()).rejects.toThrow('GitHub Actions OIDC token request failed with status 403');
+  });
+
+  it('does not use federation outside GitHub Actions', async () => {
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+
+    await expect(sendWithFreshModule()).rejects.toThrow('No Anthropic credentials found');
+  });
+
+  it.each(['ANTHROPIC_ORGANIZATION_ID', 'ANTHROPIC_SERVICE_ACCOUNT_ID'])('rejects federation without %s', async (missing) => {
+    delete process.env[missing];
+
+    await expect(sendWithFreshModule()).rejects.toThrow('requires ANTHROPIC_ORGANIZATION_ID and ANTHROPIC_SERVICE_ACCOUNT_ID');
   });
 });
