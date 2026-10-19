@@ -14,6 +14,7 @@
 
 import { setTimeout as delay } from 'node:timers/promises';
 import { Anthropic } from '@anthropic-ai/sdk';
+import { oidcFederationProvider } from '@anthropic-ai/sdk/lib/credentials/oidc-federation';
 import chalk from 'chalk';
 import dotenv from 'dotenv';
 import { verboseLog } from './utils/logging.js';
@@ -25,8 +26,44 @@ if (process.env.CODECRITIQUE_SKIP_DOTENV !== '1') {
 
 let anthropic = null;
 
+const FEDERATION_AUDIENCE = 'https://api.anthropic.com';
+
+// A GitHub OIDC token can be exchanged only once, so every exchange requests a new one.
+async function fetchGitHubActionsIdToken() {
+  const url = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+  url.searchParams.set('audience', FEDERATION_AUDIENCE);
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` },
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub Actions OIDC token request failed with status ${response.status}`);
+  }
+  return (await response.json()).value;
+}
+
+function createFederatedClient() {
+  const { ANTHROPIC_FEDERATION_RULE_ID, ANTHROPIC_ORGANIZATION_ID, ANTHROPIC_SERVICE_ACCOUNT_ID, ANTHROPIC_WORKSPACE_ID } = process.env;
+  if (!ANTHROPIC_ORGANIZATION_ID || !ANTHROPIC_SERVICE_ACCOUNT_ID) {
+    throw new Error('Workload Identity Federation requires ANTHROPIC_ORGANIZATION_ID and ANTHROPIC_SERVICE_ACCOUNT_ID.');
+  }
+  // Null keeps a stray ANTHROPIC_AUTH_TOKEN in the environment from replacing the federated credentials.
+  return new Anthropic({
+    authToken: null,
+    credentials: oidcFederationProvider({
+      identityTokenProvider: fetchGitHubActionsIdToken,
+      federationRuleId: ANTHROPIC_FEDERATION_RULE_ID,
+      organizationId: ANTHROPIC_ORGANIZATION_ID,
+      serviceAccountId: ANTHROPIC_SERVICE_ACCOUNT_ID,
+      workspaceId: ANTHROPIC_WORKSPACE_ID || undefined,
+      baseURL: process.env.ANTHROPIC_BASE_URL || FEDERATION_AUDIENCE,
+      fetch,
+    }),
+  });
+}
+
 /**
- * Get the Anthropic client
+ * Get the Anthropic client. Uses ANTHROPIC_API_KEY when set, else Workload
+ * Identity Federation in GitHub Actions.
  * @returns {Anthropic} The Anthropic client
  */
 function getAnthropicClient() {
@@ -34,10 +71,17 @@ function getAnthropicClient() {
     return anthropic;
   }
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error('ANTHROPIC_API_KEY is required for analysis. Set it in env or .env before running analyze.');
+  if (apiKey) {
+    anthropic = new Anthropic({ apiKey });
   }
-  anthropic = new Anthropic({ apiKey });
+  else if (process.env.ANTHROPIC_FEDERATION_RULE_ID && process.env.ACTIONS_ID_TOKEN_REQUEST_URL) {
+    anthropic = createFederatedClient();
+  }
+  else {
+    throw new Error(
+      'No Anthropic credentials found. Set ANTHROPIC_API_KEY in env or .env, or configure Workload Identity Federation in GitHub Actions.'
+    );
+  }
   return anthropic;
 }
 
