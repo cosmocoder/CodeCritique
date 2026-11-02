@@ -60,7 +60,7 @@
     "cli-spinner": "0.2.10",
     "commander": "14.0.1",
     "dotenv": "17.4.2",
-    "fastembed": "2.1.0",
+    "fastembed": "3.0.0",
     "glob": "13.0.6",
     "linguist-languages": "9.5.0",
     "lru-cache": "11.5.3",
