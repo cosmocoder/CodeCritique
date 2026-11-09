@@ -76,7 +76,7 @@
     "@types/node": "24.12.4",
     "@vitest/coverage-v8": "5.1.0",
     "@vitest/eslint-plugin": "1.6.28",
-    "eslint": "9.39.1",
+    "eslint": "10.14.0",
     "eslint-plugin-import": "2.32.0",
     "globals": "17.14.0",
     "knip": "6.44.1",
