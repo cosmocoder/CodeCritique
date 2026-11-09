@@ -8,8 +8,24 @@ branding:
 inputs:
   # AI Configuration
   anthropic-api-key:
-    description: 'Anthropic API key for Claude models'
-    required: true
+    description: 'Anthropic API key for Claude models. Omit it to use Workload Identity Federation instead.'
+    required: false
+
+  anthropic-federation-rule-id:
+    description: 'Workload Identity Federation rule ID (fdrl_...). The calling job needs the id-token: write permission.'
+    required: false
+
+  anthropic-organization-id:
+    description: 'Anthropic organization ID, required for Workload Identity Federation'
+    required: false
+
+  anthropic-service-account-id:
+    description: 'Anthropic service account ID (svac_...), required for Workload Identity Federation'
+    required: false
+
+  anthropic-workspace-id:
+    description: 'Anthropic workspace ID (wrkspc_...), required when the federation rule covers more than one workspace'
+    required: false
 
   skip-label:
     description: 'Label name to skip AI review (e.g., ai-review-disabled)'
@@ -118,6 +134,29 @@ runs:
         fi
         echo "✅ No skip label found, proceeding with review"
 
+    - name: Check Anthropic credentials
+      shell: bash
+      env:
+        API_KEY: ${{ inputs.anthropic-api-key }}
+        RULE_ID: ${{ inputs.anthropic-federation-rule-id }}
+        ORG_ID: ${{ inputs.anthropic-organization-id }}
+        SA_ID: ${{ inputs.anthropic-service-account-id }}
+      run: |
+        if [ -n "$API_KEY" ] && [ -n "$RULE_ID" ]; then
+          echo "❌ Pass either anthropic-api-key or the federation inputs, not both"
+          exit 1
+        fi
+        if [ -z "$API_KEY" ]; then
+          if [ -z "$RULE_ID" ] || [ -z "$ORG_ID" ] || [ -z "$SA_ID" ]; then
+            echo "❌ Pass anthropic-api-key, or all of anthropic-federation-rule-id, anthropic-organization-id and anthropic-service-account-id"
+            exit 1
+          fi
+          if [ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            echo "❌ Workload Identity Federation needs the id-token: write permission on the calling job"
+            exit 1
+          fi
+        fi
+
     # Create a symlink to the action repository to access sibling composite actions.
     # This workaround is needed because GitHub Actions doesn't support relative paths
     # to sibling actions when the action is used from external repositories.
@@ -199,6 +238,10 @@ runs:
       env:
         GITHUB_TOKEN: ${{ github.token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        ANTHROPIC_FEDERATION_RULE_ID: ${{ inputs.anthropic-federation-rule-id }}
+        ANTHROPIC_ORGANIZATION_ID: ${{ inputs.anthropic-organization-id }}
+        ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ inputs.anthropic-service-account-id }}
+        ANTHROPIC_WORKSPACE_ID: ${{ inputs.anthropic-workspace-id }}
         GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
         BASE_REF: ${{ github.base_ref }}
         CI: true
