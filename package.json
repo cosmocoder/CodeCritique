@@ -80,7 +80,7 @@
     "eslint-plugin-import": "2.32.0",
     "globals": "17.14.0",
     "knip": "6.45.1",
-    "prettier": "3.9.10",
+    "prettier": "3.10.1",
     "prettier-plugin-brace-style": "0.10.4",
     "typescript": "5.9.3",
     "vitest": "5.1.0"
