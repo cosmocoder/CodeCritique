@@ -6,9 +6,9 @@ This guide helps you resolve common issues when using CodeCritique. If you encou
 
 ### API Key Issues
 
-**Error**: `ANTHROPIC_API_KEY is required for analysis. Set it in env or .env before running analyze.`
+**Error**: `No Anthropic credentials found. Set ANTHROPIC_API_KEY in env or .env, or configure Workload Identity Federation in GitHub Actions.`
 
-**Solution**: Set environment variable or create .env file
+**Solution**: Set the environment variable or create a .env file. In GitHub Actions, you can use [Workload Identity Federation](GITHUB_ACTIONS.md#authenticate-with-workload-identity-federation) instead.
 
 ```bash
 export ANTHROPIC_API_KEY=your_api_key
