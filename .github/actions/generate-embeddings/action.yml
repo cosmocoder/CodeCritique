@@ -162,7 +162,8 @@ runs:
         # Package FastEmbed cache if it exists
         if [ -d ".ai-review-fastembed-cache" ]; then
           echo "  Creating fastembed-cache.tar.gz..."
-          tar -czf .ai-review-artifacts/fastembed-cache.tar.gz .ai-review-fastembed-cache
+          # Drops the pre-3.0 fastembed model directory that older artifacts still carry forward.
+          tar --exclude='.ai-review-fastembed-cache/fast-bge-small-en-v1.5' -czf .ai-review-artifacts/fastembed-cache.tar.gz .ai-review-fastembed-cache
           echo "  FastEmbed cache archive size: $(du -h .ai-review-artifacts/fastembed-cache.tar.gz | cut -f1)"
         fi
 

@@ -43,6 +43,9 @@ runs:
     - name: Install AI Tool Dependencies
       shell: bash
       working-directory: ${{ steps.tool.outputs.tool-root }}
+      env:
+        # The tool runs ONNX on CPU only; the CUDA download on Linux x64 can fail the whole install.
+        ONNXRUNTIME_NODE_INSTALL_CUDA: skip
       run: |
         echo "📦 Installing CodeCritique tool dependencies..."
         npm ci --no-audit --silent
