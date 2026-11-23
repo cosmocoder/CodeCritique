@@ -61,7 +61,7 @@
     "commander": "14.0.1",
     "dotenv": "17.4.2",
     "fastembed": "3.0.0",
-    "glob": "13.0.6",
+    "glob": "14.0.6",
     "linguist-languages": "9.5.0",
     "lru-cache": "11.5.3",
     "minimatch": "10.2.6",
