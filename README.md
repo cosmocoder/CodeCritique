@@ -348,13 +348,15 @@ jobs:
 
 | Parameter                   | Description                                             | Required | Default          |
 | --------------------------- | ------------------------------------------------------- | -------- | ---------------- |
-| `anthropic-api-key`         | Anthropic API key for Claude models                     | **Yes**  | -                |
+| `anthropic-api-key`         | Anthropic API key for Claude models                     | No*      | -                |
 | `files`                     | Specific files or patterns to process (space-separated) | No       | `''` (all files) |
 | `concurrency`               | Number of concurrent embedding requests                 | No       | Auto-detected    |
 | `exclude`                   | Patterns to exclude (space-separated glob patterns)     | No       | `''`             |
 | `exclude-file`              | File containing patterns to exclude (one per line)      | No       | `''`             |
 | `verbose`                   | Show verbose output                                     | No       | `false`          |
 | `embeddings-retention-days` | Number of days to retain embedding artifacts            | No       | `30`             |
+
+\* Required unless you use [Workload Identity Federation](docs/GITHUB_ACTIONS.md#authenticate-with-workload-identity-federation).
 
 > **See [GitHub Actions Advanced Configuration](docs/GITHUB_ACTIONS.md)** for processing specific files, high performance setup, and more examples.
 
@@ -404,7 +406,7 @@ jobs:
 
 #### Required Setup
 
-1. **Anthropic API Key**: Store your Anthropic API key as a repository secret named `ANTHROPIC_API_KEY`
+1. **Anthropic credentials**: Store your Anthropic API key as a repository secret named `ANTHROPIC_API_KEY`, or set up [Workload Identity Federation](docs/GITHUB_ACTIONS.md#authenticate-with-workload-identity-federation) instead
 2. **Permissions**: The workflow must have `contents: write`, `actions: read`, and `pull-requests: write` permissions
 3. **Git Setup**: None required — the action fetches the PR base/parent branch and deepens the checkout only as much as the diff needs (no `fetch-depth: 0`)
 
@@ -412,7 +414,7 @@ jobs:
 
 | Parameter           | Description                                                                                              | Required | Default              |
 | ------------------- | -------------------------------------------------------------------------------------------------------- | -------- | -------------------- |
-| `anthropic-api-key` | Anthropic API key for Claude models                                                                      | **Yes**  | -                    |
+| `anthropic-api-key` | Anthropic API key for Claude models                                                                      | No*      | -                    |
 | `skip-label`        | Label name to skip AI review                                                                             | No       | `ai-review-disabled` |
 | `verbose`           | Show verbose output                                                                                      | No       | `false`              |
 | `model`             | LLM model to use (e.g., `claude-sonnet-5`)                                                               | No       | Auto-selected        |
@@ -421,6 +423,8 @@ jobs:
 | `batch`             | Use Anthropic Message Batches for lower-cost, asynchronous reviews                                       | No       | `false`              |
 | `concurrency`       | Concurrency for processing multiple files                                                                | No       | `3`                  |
 | `custom-docs`       | Custom documents (format: `"title:path,title:path"`)                                                     | No       | `''`                 |
+
+\* Required unless you use [Workload Identity Federation](docs/GITHUB_ACTIONS.md#authenticate-with-workload-identity-federation).
 
 Batch mode trades latency for Anthropic's Message Batches API discount. Processing may take up to 24 hours, and batch requests are not eligible for Zero Data Retention. GitHub-hosted jobs can run for at most six hours; the action polls in-process and cannot resume a batch after the job ends. If holistic analysis falls back to per-file reviews, each concurrency wave can incur a separate batch wait and further increase runtime.
 
